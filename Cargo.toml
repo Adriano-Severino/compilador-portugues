@@ -1,0 +1,13 @@
+[package]
+name = "meu_compilador"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+
+logos = "0.12"      # Para análise léxica
+lalrpop = "0.19"    # Para análise sintática
+inkwell = { version = "0.4.0", features = ["llvm15-0"] } # Ou a versão que você está usando
