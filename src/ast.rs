@@ -1,4 +1,9 @@
 #[derive(Debug)]
+pub struct Programa {
+    pub comandos: Vec<Comando>,
+}
+
+#[derive(Debug)]
 pub enum Comando {
     Se(Expressao, Box<Comando>),
     Imprima(String),

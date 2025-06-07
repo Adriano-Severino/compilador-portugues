@@ -2,16 +2,24 @@ use super::lexer::Token;
 
 grammar;
 
+pub Programa: crate::ast::Programa = {
+    <comandos:Comando*> => crate::ast::Programa { comandos },
+};
+
 pub Comando: crate::ast::Comando = {
+    <cmd:ComandoSimples> ";" => cmd,
+};
+
+ComandoSimples: crate::ast::Comando = {
     "imprima" "(" <s:r#""[^"]*""#> ")" => crate::ast::Comando::Imprima(s),
-    "se" <cond:Expressao> "então" <cmd:Comando> => crate::ast::Comando::Se(cond, Box::new(cmd)),
+    "se" <cond:Expressao> "então" <cmd:ComandoSimples> => crate::ast::Comando::Se(cond, Box::new(cmd)),
 };
 
 pub Expressao: crate::ast::Expressao = {
-    #[precedence(level="0")] // Nível mais alto
+    #[precedence(level="0")]
     ExpressaoPrimaria,
 
-    #[precedence(level="1")] // Nível do operador '>'
+    #[precedence(level="1")]
     #[assoc(side="left")]
     <left:Expressao> ">" <right:Expressao> => crate::ast::Expressao::Comparacao(
         crate::ast::OperadorComparacao::MaiorQue,
@@ -35,6 +43,7 @@ extern {
         "imprima" => Token::TImprima,
         "(" => Token::TParenEsq,
         ")" => Token::TParenDir,
+        ";" => Token::TPontoVirgula,  // Novo token
         ">" => Token::TMaiorQue,
         r#""[^"]*""# => Token::TString(<String>),
         r"[a-zA-Z_][a-zA-Z0-9_]*" => Token::TIdentificador(<String>),

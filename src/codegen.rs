@@ -17,6 +17,14 @@ impl<'ctx> GeradorCodigo<'ctx> {
         Self { context, module, builder }
     }
 
+    // Novo método para compilar programa completo
+    pub fn compilar_programa(&self, programa: &super::ast::Programa) -> Result<(), String> {
+        for comando in &programa.comandos {
+            self.compilar_comando(comando)?;
+        }
+        Ok(())
+    }
+
     pub fn compilar_comando(&self, comando: &super::ast::Comando) -> Result<(), String> {
         match comando {
             super::ast::Comando::Se(_cond, _cmd) => self.gerar_se(_cond, _cmd),
