@@ -6,8 +6,8 @@ pub enum Comando {
 
 #[derive(Debug)]
 pub enum Expressao {
-    Identificador(String),
     Inteiro(i64),
+    Identificador(String),
     Comparacao(OperadorComparacao, Box<Expressao>, Box<Expressao>),
 }
 

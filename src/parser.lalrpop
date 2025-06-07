@@ -2,26 +2,27 @@ use super::lexer::Token;
 
 grammar;
 
-pub Comando: ast::Comando = {
-    "imprima" "(" <s: r#""[^"]*""#> ")" => ast::Comando::Imprima(s),
-    "se" <cond: Expressao> "então" <cmd: Comando> => ast::Comando::Se(cond, Box::new(cmd)),
+pub Comando: crate::ast::Comando = {
+    "imprima" "(" <s:r#""[^"]*""#> ")" => crate::ast::Comando::Imprima(s),
+    "se" <cond:Expressao> "então" <cmd:Comando> => crate::ast::Comando::Se(cond, Box::new(cmd)),
 };
 
-// Nova estrutura de precedência
-pub Expressao: ast::Expressao = {
-    #[precedence(level="2")] // Mais alta precedência
+pub Expressao: crate::ast::Expressao = {
+    #[precedence(level="0")] // Nível mais alto
     ExpressaoPrimaria,
-    #[precedence(level="1")] #[assoc(side="left")]
-    <l:Expressao> ">" <r:Expressao> => ast::Expressao::Comparacao(
-        ast::OperadorComparacao::MaiorQue,
-        Box::new(l),
-        Box::new(r)
+
+    #[precedence(level="1")] // Nível do operador '>'
+    #[assoc(side="left")]
+    <left:Expressao> ">" <right:Expressao> => crate::ast::Expressao::Comparacao(
+        crate::ast::OperadorComparacao::MaiorQue,
+        Box::new(left),
+        Box::new(right)
     ),
 };
 
-ExpressaoPrimaria: ast::Expressao = {
-    <n: r"[0-9]+"> => ast::Expressao::Inteiro(n),
-    <id: r"[a-zA-Z_][a-zA-Z0-9_]*"> => ast::Expressao::Identificador(id),
+ExpressaoPrimaria: crate::ast::Expressao = {
+    <n:r"[0-9]+"> => crate::ast::Expressao::Inteiro(n),
+    <id:r"[a-zA-Z_][a-zA-Z0-9_]*"> => crate::ast::Expressao::Identificador(id),
 };
 
 extern {

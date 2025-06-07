@@ -26,10 +26,9 @@ pub enum Token {
     #[regex(r"[0-9]+", |lex| lex.slice().parse().ok())]
     TInteiro(i64),
 
-    #[regex(r">", |_| Ok(()))]
+    #[token(">")]
     TMaiorQue,
 
-    #[error]
     #[regex(r"[\s\t\n]+", logos::skip)]
-    Erro,
+    Whitespace,
 }
