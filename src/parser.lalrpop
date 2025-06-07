@@ -3,16 +3,31 @@ use super::lexer::Token;
 grammar;
 
 pub Programa: crate::ast::Programa = {
-    <comandos:Comando*> => crate::ast::Programa { comandos },
+    <comandos:Declaracao*> => crate::ast::Programa { comandos },
 };
 
-pub Comando: crate::ast::Comando = {
-    <cmd:ComandoSimples> ";" => cmd,
+// Declaração pode ser comando com ; ou bloco sem ;
+Declaracao: crate::ast::Comando = {
+    <cmd:ComandoComPontoVirgula> ";" => cmd,
+    <bloco:Bloco> => bloco,
+    <se:ComandoSe> => se,
 };
 
-ComandoSimples: crate::ast::Comando = {
+// Comandos que sempre precisam de ;
+ComandoComPontoVirgula: crate::ast::Comando = {
     "imprima" "(" <s:r#""[^"]*""#> ")" => crate::ast::Comando::Imprima(s),
-    "se" <cond:Expressao> "então" <cmd:ComandoSimples> => crate::ast::Comando::Se(cond, Box::new(cmd)),
+};
+
+// Comando se pode ser seguido por comando simples OU bloco
+ComandoSe: crate::ast::Comando = {
+    "se" <cond:Expressao> "então" <cmd:ComandoComPontoVirgula> ";" => 
+        crate::ast::Comando::Se(cond, Box::new(cmd)),
+    "se" <cond:Expressao> "então" <bloco:Bloco> => 
+        crate::ast::Comando::Se(cond, Box::new(bloco)),
+};
+
+Bloco: crate::ast::Comando = {
+    "{" <comandos:Declaracao*> "}" => crate::ast::Comando::Bloco(comandos),
 };
 
 pub Expressao: crate::ast::Expressao = {
@@ -43,7 +58,9 @@ extern {
         "imprima" => Token::TImprima,
         "(" => Token::TParenEsq,
         ")" => Token::TParenDir,
-        ";" => Token::TPontoVirgula,  // Novo token
+        "{" => Token::TChaveEsq,
+        "}" => Token::TChaveDir,
+        ";" => Token::TPontoVirgula,
         ">" => Token::TMaiorQue,
         r#""[^"]*""# => Token::TString(<String>),
         r"[a-zA-Z_][a-zA-Z0-9_]*" => Token::TIdentificador(<String>),

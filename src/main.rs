@@ -24,9 +24,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
     // Análise Sintática - agora parseando programa completo
-    let parser = parser::ProgramaParser::new();  // Mudança aqui
+    // Análise Sintática
+    let parser = parser::ProgramaParser::new();  // Esta linha
     let ast = parser.parse(tokens.iter().cloned())
         .map_err(|e| format!("Erro sintático: {:?}", e))?;
+
 
     // Geração de Código
     let context = Context::create();

@@ -7,6 +7,7 @@ pub struct Programa {
 pub enum Comando {
     Se(Expressao, Box<Comando>),
     Imprima(String),
+    Bloco(Vec<Comando>),  // Novo tipo de comando para blocos
 }
 
 #[derive(Debug)]

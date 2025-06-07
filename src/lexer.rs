@@ -17,7 +17,13 @@ pub enum Token {
     #[token(")")]
     TParenDir,
 
-    #[token(";")]  // Novo token
+    #[token("{")]
+    TChaveEsq,
+
+    #[token("}")]
+    TChaveDir,
+
+    #[token(";")]
     TPontoVirgula,
 
     #[regex(r#""[^"]*""#, |lex| lex.slice().trim_matches('"').to_string())]
