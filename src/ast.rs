@@ -1,23 +1,76 @@
-#[derive(Debug)]
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub struct Programa {
     pub comandos: Vec<Comando>,
 }
 
-#[derive(Debug)]
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub enum Comando {
-    Se(Expressao, Box<Comando>),
-    Imprima(String),
-    Bloco(Vec<Comando>),  // Novo tipo de comando para blocos
+    Se(Expressao, Box<Comando>, Option<Box<Comando>>), // if, then, else
+    Enquanto(Expressao, Box<Comando>),
+    Para(String, Expressao, Expressao, Box<Comando>),
+    Imprima(Expressao),
+    Bloco(Vec<Comando>),
+    DeclaracaoVariavel(Tipo, String, Option<Expressao>),
+    Atribuicao(String, Expressao),
+    Retorne(Option<Expressao>),
+    Expressao(Expressao), // Para expressões standalone
 }
 
-#[derive(Debug)]
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum Tipo {
+    Inteiro,
+    Texto,
+    Booleano,
+    Vazio,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub enum Expressao {
     Inteiro(i64),
+    Texto(String),
+    Booleano(bool),
     Identificador(String),
+    Chamada(String, Vec<Expressao>),
     Comparacao(OperadorComparacao, Box<Expressao>, Box<Expressao>),
+    Aritmetica(OperadorAritmetico, Box<Expressao>, Box<Expressao>),
+    Logica(OperadorLogico, Box<Expressao>, Box<Expressao>),
+    Unario(OperadorUnario, Box<Expressao>),
 }
 
-#[derive(Debug)]
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub enum OperadorComparacao {
+    Igual,
+    Diferente,
     MaiorQue,
+    MaiorIgual,
+    Menor,
+    MenorIgual,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum OperadorAritmetico {
+    Soma,
+    Subtracao,
+    Multiplicacao,
+    Divisao,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum OperadorLogico {
+    E,
+    Ou,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum OperadorUnario {
+    Nao,
+    Menos,
 }

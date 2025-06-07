@@ -2,6 +2,7 @@ mod lexer;
 mod ast;
 mod codegen;
 lalrpop_mod!(parser);
+
 use std::fs;
 use logos::Logos;
 use inkwell::context::Context;
@@ -23,12 +24,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter_map(|(tok_res, span)| tok_res.ok().map(|tok| (span.start, tok, span.end)))
         .collect();
 
-    // Análise Sintática - agora parseando programa completo
     // Análise Sintática
-    let parser = parser::ProgramaParser::new();  // Esta linha
+    let parser = parser::ProgramaParser::new();
     let ast = parser.parse(tokens.iter().cloned())
         .map_err(|e| format!("Erro sintático: {:?}", e))?;
-
 
     // Geração de Código
     let context = Context::create();
@@ -40,8 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let basic_block = context.append_basic_block(function, "entry");
     gerador.builder.position_at_end(basic_block);
 
-    // Compilar programa completo
-    gerador.compilar_programa(&ast)?;  // Mudança aqui
+    gerador.compilar_programa(&ast)?;
     let _ = gerador.builder.build_return(Some(&i32_type.const_int(0, false)));
 
     gerador.module.verify()?;

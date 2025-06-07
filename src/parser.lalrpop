@@ -6,46 +6,135 @@ pub Programa: crate::ast::Programa = {
     <comandos:Declaracao*> => crate::ast::Programa { comandos },
 };
 
-// Declaração pode ser comando com ; ou bloco sem ;
 Declaracao: crate::ast::Comando = {
     <cmd:ComandoComPontoVirgula> ";" => cmd,
     <bloco:Bloco> => bloco,
     <se:ComandoSe> => se,
+    <enquanto:ComandoEnquanto> => enquanto,
 };
 
-// Comandos que sempre precisam de ;
 ComandoComPontoVirgula: crate::ast::Comando = {
-    "imprima" "(" <s:r#""[^"]*""#> ")" => crate::ast::Comando::Imprima(s),
+    "imprima" "(" <expr:Expressao> ")" => crate::ast::Comando::Imprima(expr),
+    <tipo:Tipo> <nome:r"[a-zA-Z_][a-zA-Z0-9_]*"> => 
+        crate::ast::Comando::DeclaracaoVariavel(tipo, nome, None),
+    <tipo:Tipo> <nome:r"[a-zA-Z_][a-zA-Z0-9_]*"> "=" <valor:Expressao> => 
+        crate::ast::Comando::DeclaracaoVariavel(tipo, nome, Some(valor)),
+    <nome:r"[a-zA-Z_][a-zA-Z0-9_]*"> "=" <valor:Expressao> => 
+        crate::ast::Comando::Atribuicao(nome, valor),
+    "retorne" <expr:Expressao?> => crate::ast::Comando::Retorne(expr),
+    <expr:Expressao> => crate::ast::Comando::Expressao(expr),
 };
 
-// Comando se pode ser seguido por comando simples OU bloco
 ComandoSe: crate::ast::Comando = {
     "se" <cond:Expressao> "então" <cmd:ComandoComPontoVirgula> ";" => 
-        crate::ast::Comando::Se(cond, Box::new(cmd)),
+        crate::ast::Comando::Se(cond, Box::new(cmd), None),
     "se" <cond:Expressao> "então" <bloco:Bloco> => 
-        crate::ast::Comando::Se(cond, Box::new(bloco)),
+        crate::ast::Comando::Se(cond, Box::new(bloco), None),
+    "se" <cond:Expressao> "então" <bloco1:Bloco> "senão" <bloco2:Bloco> => 
+        crate::ast::Comando::Se(cond, Box::new(bloco1), Some(Box::new(bloco2))),
+    "se" <cond:Expressao> "então" <cmd1:ComandoComPontoVirgula> ";" "senão" <cmd2:ComandoComPontoVirgula> ";" => 
+        crate::ast::Comando::Se(cond, Box::new(cmd1), Some(Box::new(cmd2))),
+};
+
+ComandoEnquanto: crate::ast::Comando = {
+    "enquanto" <cond:Expressao> <bloco:Bloco> => 
+        crate::ast::Comando::Enquanto(cond, Box::new(bloco)),
 };
 
 Bloco: crate::ast::Comando = {
     "{" <comandos:Declaracao*> "}" => crate::ast::Comando::Bloco(comandos),
 };
 
+Tipo: crate::ast::Tipo = {
+    "inteiro" => crate::ast::Tipo::Inteiro,
+    "texto" => crate::ast::Tipo::Texto,
+    "booleano" => crate::ast::Tipo::Booleano,
+};
+
 pub Expressao: crate::ast::Expressao = {
     #[precedence(level="0")]
-    ExpressaoPrimaria,
+    ExpressaoOu,
+};
 
+ExpressaoOu: crate::ast::Expressao = {
     #[precedence(level="1")]
+    ExpressaoE,
+    
+    #[precedence(level="2")]
     #[assoc(side="left")]
-    <left:Expressao> ">" <right:Expressao> => crate::ast::Expressao::Comparacao(
-        crate::ast::OperadorComparacao::MaiorQue,
-        Box::new(left),
-        Box::new(right)
-    ),
+    <esq:ExpressaoOu> "||" <dir:ExpressaoE> => 
+        crate::ast::Expressao::Logica(crate::ast::OperadorLogico::Ou, Box::new(esq), Box::new(dir)),
+};
+
+ExpressaoE: crate::ast::Expressao = {
+    #[precedence(level="1")]
+    ExpressaoComparacao,
+    
+    #[precedence(level="2")]
+    #[assoc(side="left")]
+    <esq:ExpressaoE> "&&" <dir:ExpressaoComparacao> => 
+        crate::ast::Expressao::Logica(crate::ast::OperadorLogico::E, Box::new(esq), Box::new(dir)),
+};
+
+ExpressaoComparacao: crate::ast::Expressao = {
+    #[precedence(level="1")]
+    ExpressaoAritmetica,
+    
+    #[precedence(level="2")]
+    #[assoc(side="left")]
+    <esq:ExpressaoComparacao> "==" <dir:ExpressaoAritmetica> => 
+        crate::ast::Expressao::Comparacao(crate::ast::OperadorComparacao::Igual, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoComparacao> "!=" <dir:ExpressaoAritmetica> => 
+        crate::ast::Expressao::Comparacao(crate::ast::OperadorComparacao::Diferente, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoComparacao> ">" <dir:ExpressaoAritmetica> => 
+        crate::ast::Expressao::Comparacao(crate::ast::OperadorComparacao::MaiorQue, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoComparacao> ">=" <dir:ExpressaoAritmetica> => 
+        crate::ast::Expressao::Comparacao(crate::ast::OperadorComparacao::MaiorIgual, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoComparacao> "<" <dir:ExpressaoAritmetica> => 
+        crate::ast::Expressao::Comparacao(crate::ast::OperadorComparacao::Menor, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoComparacao> "<=" <dir:ExpressaoAritmetica> => 
+        crate::ast::Expressao::Comparacao(crate::ast::OperadorComparacao::MenorIgual, Box::new(esq), Box::new(dir)),
+};
+
+ExpressaoAritmetica: crate::ast::Expressao = {
+    #[precedence(level="1")]
+    ExpressaoMultiplicacao,
+    
+    #[precedence(level="2")]
+    #[assoc(side="left")]
+    <esq:ExpressaoAritmetica> "+" <dir:ExpressaoMultiplicacao> => 
+        crate::ast::Expressao::Aritmetica(crate::ast::OperadorAritmetico::Soma, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoAritmetica> "-" <dir:ExpressaoMultiplicacao> => 
+        crate::ast::Expressao::Aritmetica(crate::ast::OperadorAritmetico::Subtracao, Box::new(esq), Box::new(dir)),
+};
+
+ExpressaoMultiplicacao: crate::ast::Expressao = {
+    #[precedence(level="1")]
+    ExpressaoUnaria,
+    
+    #[precedence(level="2")]
+    #[assoc(side="left")]
+    <esq:ExpressaoMultiplicacao> "*" <dir:ExpressaoUnaria> => 
+        crate::ast::Expressao::Aritmetica(crate::ast::OperadorAritmetico::Multiplicacao, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoMultiplicacao> "/" <dir:ExpressaoUnaria> => 
+        crate::ast::Expressao::Aritmetica(crate::ast::OperadorAritmetico::Divisao, Box::new(esq), Box::new(dir)),
+};
+
+ExpressaoUnaria: crate::ast::Expressao = {
+    ExpressaoPrimaria,
+    "!" <expr:ExpressaoUnaria> => 
+        crate::ast::Expressao::Unario(crate::ast::OperadorUnario::Nao, Box::new(expr)),
+    "-" <expr:ExpressaoUnaria> => 
+        crate::ast::Expressao::Unario(crate::ast::OperadorUnario::Menos, Box::new(expr)),
 };
 
 ExpressaoPrimaria: crate::ast::Expressao = {
     <n:r"[0-9]+"> => crate::ast::Expressao::Inteiro(n),
+    <s:r#""[^"]*""#> => crate::ast::Expressao::Texto(s),
+    "verdadeiro" => crate::ast::Expressao::Booleano(true),
+    "falso" => crate::ast::Expressao::Booleano(false),
     <id:r"[a-zA-Z_][a-zA-Z0-9_]*"> => crate::ast::Expressao::Identificador(id),
+    "(" <expr:Expressao> ")" => expr,
 };
 
 extern {
@@ -55,13 +144,40 @@ extern {
     enum Token {
         "se" => Token::TSe,
         "então" => Token::TEntao,
+        "senão" => Token::TSenao,
+        "enquanto" => Token::TEnquanto,
+        "para" => Token::TPara,
+        "funcao" => Token::TFuncao,
+        "retorne" => Token::TRetorne,
         "imprima" => Token::TImprima,
+        "inteiro" => Token::TTipoInteiro,
+        "texto" => Token::TTipoTexto,
+        "booleano" => Token::TTipoBooleano,
+        "verdadeiro" => Token::TVerdadeiro,
+        "falso" => Token::TFalso,
+        "=" => Token::TAtribuicao,
+        "==" => Token::TIgual,
+        "!=" => Token::TDiferente,
+        ">" => Token::TMaiorQue,
+        ">=" => Token::TMaiorIgual,
+        "<" => Token::TMenor,
+        "<=" => Token::TMenorIgual,
+        "+" => Token::TMais,
+        "-" => Token::TMenos,
+        "*" => Token::TMultiplicacao,
+        "/" => Token::TDivisao,
+        "&&" => Token::TE,
+        "||" => Token::TOu,
+        "!" => Token::TNao,
         "(" => Token::TParenEsq,
         ")" => Token::TParenDir,
         "{" => Token::TChaveEsq,
         "}" => Token::TChaveDir,
+        "[" => Token::TColcheteEsq,
+        "]" => Token::TColcheteDir,
         ";" => Token::TPontoVirgula,
-        ">" => Token::TMaiorQue,
+        "," => Token::TVirgula,
+        "->" => Token::TSeta,
         r#""[^"]*""# => Token::TString(<String>),
         r"[a-zA-Z_][a-zA-Z0-9_]*" => Token::TIdentificador(<String>),
         r"[0-9]+" => Token::TInteiro(<i64>),
