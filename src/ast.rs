@@ -6,6 +6,12 @@ pub enum Comando {
 
 #[derive(Debug)]
 pub enum Expressao {
-    Inteiro(i64),
     Identificador(String),
+    Inteiro(i64),
+    Comparacao(OperadorComparacao, Box<Expressao>, Box<Expressao>),
+}
+
+#[derive(Debug)]
+pub enum OperadorComparacao {
+    MaiorQue,
 }

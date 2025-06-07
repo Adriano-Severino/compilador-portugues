@@ -1,6 +1,6 @@
 use logos::Logos;
 
-#[derive(Logos, Debug, PartialEq)]
+#[derive(Logos, Debug, PartialEq, Clone)]
 pub enum Token {
     #[token("se")]
     TSe,
@@ -11,14 +11,23 @@ pub enum Token {
     #[token("imprima")]
     TImprima,
 
-    #[regex(r#""([^"\\]|\\t|\\u|\\n|\\")*""#)]
+    #[token("(")]
+    TParenEsq,
+
+    #[token(")")]
+    TParenDir,
+
+    #[regex(r#""[^"]*""#, |lex| lex.slice().trim_matches('"').to_string())]
     TString(String),
 
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
     TIdentificador(String),
 
-    #[regex(r"[0-9]+", |lex| lex.slice().parse())]
+    #[regex(r"[0-9]+", |lex| lex.slice().parse().ok())]
     TInteiro(i64),
+
+    #[regex(r">", |_| Ok(()))]
+    TMaiorQue,
 
     #[error]
     #[regex(r"[\s\t\n]+", logos::skip)]
