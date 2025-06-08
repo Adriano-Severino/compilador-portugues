@@ -4,7 +4,7 @@ Este é o repositório do projeto "meu_compilador", que desenvolve um compilador
 
 ## 📖 Sobre a Linguagem
 
-Esta linguagem foi desenvolvida com foco acadêmico e educacional, visando democratizar o ensino de programação no Brasil através de uma sintaxe em português. No entanto, ela também é projetada para ser versátil o suficiente para desenvolvimento de aplicações desktop nativas com alta performance, graças à geração de código LLVM.
+Esta linguagem "por do sol" foi desenvolvida com foco acadêmico e educacional, visando democratizar o ensino de programação no Brasil através de uma sintaxe em português. No entanto, ela também é projetada para ser versátil o suficiente para desenvolvimento de aplicações desktop nativas com alta performance, graças à geração de código LLVM.
 
 ### 🎯 Objetivo Principal
 
