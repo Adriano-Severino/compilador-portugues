@@ -118,6 +118,8 @@ ExpressaoMultiplicacao: crate::ast::Expressao = {
         crate::ast::Expressao::Aritmetica(crate::ast::OperadorAritmetico::Multiplicacao, Box::new(esq), Box::new(dir)),
     <esq:ExpressaoMultiplicacao> "/" <dir:ExpressaoUnaria> => 
         crate::ast::Expressao::Aritmetica(crate::ast::OperadorAritmetico::Divisao, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoMultiplicacao> "%" <dir:ExpressaoUnaria> => 
+        crate::ast::Expressao::Aritmetica(crate::ast::OperadorAritmetico::Modulo, Box::new(esq), Box::new(dir)),
 };
 
 ExpressaoUnaria: crate::ast::Expressao = {
@@ -166,6 +168,7 @@ extern {
         "-" => Token::TMenos,
         "*" => Token::TMultiplicacao,
         "/" => Token::TDivisao,
+        "%" => Token::TModulo,  // Adicionado operador módulo
         "&&" => Token::TE,
         "||" => Token::TOu,
         "!" => Token::TNao,

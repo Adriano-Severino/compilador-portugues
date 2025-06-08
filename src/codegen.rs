@@ -3,7 +3,6 @@ use inkwell::{
     module::Linkage,
     AddressSpace,
     values::BasicValueEnum,
-    types::BasicTypeEnum,
     IntPredicate,
 };
 use std::collections::HashMap;
@@ -13,7 +12,7 @@ pub struct GeradorCodigo<'ctx> {
     pub context: &'ctx Context,
     pub module: inkwell::module::Module<'ctx>,
     pub builder: inkwell::builder::Builder<'ctx>,
-    pub variaveis: RefCell<HashMap<String, BasicValueEnum<'ctx>>>,
+    pub variaveis: RefCell<HashMap<String, i64>>,  // Mudança: usar i64 direto para simplificar
 }
 
 impl<'ctx> GeradorCodigo<'ctx> {
@@ -55,7 +54,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 self.gerar_retorne(expr.as_ref())
             },
             super::ast::Comando::Expressao(expr) => {
-                self.compilar_expressao(expr)?;
+                self.avaliar_expressao(expr)?;
                 Ok(())
             },
             _ => Ok(()),
@@ -70,14 +69,15 @@ impl<'ctx> GeradorCodigo<'ctx> {
     }
 
     fn gerar_imprima(&self, expr: &super::ast::Expressao) -> Result<(), String> {
-        let valor = self.compilar_expressao(expr)?;
+        let valor = self.avaliar_expressao(expr)?;
         
         let i8_ptr_type = self.context.ptr_type(AddressSpace::default());
         let i32_type = self.context.i32_type();
 
         match valor {
-            BasicValueEnum::IntValue(int_val) => {
-                // Para números inteiros, usar printf com %lld para i64
+            ValorAvaliado::Inteiro(int_val) => {
+                let llvm_val = self.context.i64_type().const_int(int_val as u64, true);
+                
                 let format_str = "%lld\n\0";
                 let global_string_ptr = self.builder
                     .build_global_string_ptr(format_str, "int_format")
@@ -89,93 +89,99 @@ impl<'ctx> GeradorCodigo<'ctx> {
                     self.module.add_function("printf", printf_fn_type, Some(Linkage::External))
                 });
 
-                self.builder.build_call(printf_func, &[global_string_ptr.into(), int_val.into()], "printf_call")
+                self.builder.build_call(printf_func, &[global_string_ptr.into(), llvm_val.into()], "printf_call")
                     .map_err(|e| format!("Erro ao gerar call printf: {:?}", e))?;
             },
-            BasicValueEnum::PointerValue(ptr_val) => {
-                // Para strings, usar puts
+            ValorAvaliado::Texto(text_val) => {
+                let c_string = format!("{}\0", text_val);
+                let global_string_ptr = self.builder
+                    .build_global_string_ptr(&c_string, "string_literal")
+                    .map_err(|e| format!("Erro ao criar string literal: {:?}", e))?
+                    .as_pointer_value();
+
                 let puts_fn_type = i32_type.fn_type(&[i8_ptr_type.into()], false);
                 let puts_func = self.module.get_function("puts").unwrap_or_else(|| {
                     self.module.add_function("puts", puts_fn_type, Some(Linkage::External))
                 });
 
-                self.builder.build_call(puts_func, &[ptr_val.into()], "puts_call")
+                self.builder.build_call(puts_func, &[global_string_ptr.into()], "puts_call")
                     .map_err(|e| format!("Erro ao gerar call puts: {:?}", e))?;
             },
-            _ => return Err("Tipo não suportado para impressão".to_string()),
+            ValorAvaliado::Booleano(bool_val) => {
+                let text = if bool_val { "verdadeiro" } else { "falso" };
+                let c_string = format!("{}\0", text);
+                let global_string_ptr = self.builder
+                    .build_global_string_ptr(&c_string, "bool_literal")
+                    .map_err(|e| format!("Erro ao criar bool literal: {:?}", e))?
+                    .as_pointer_value();
+
+                let puts_fn_type = i32_type.fn_type(&[i8_ptr_type.into()], false);
+                let puts_func = self.module.get_function("puts").unwrap_or_else(|| {
+                    self.module.add_function("puts", puts_fn_type, Some(Linkage::External))
+                });
+
+                self.builder.build_call(puts_func, &[global_string_ptr.into()], "puts_call")
+                    .map_err(|e| format!("Erro ao gerar call puts: {:?}", e))?;
+            },
         }
 
         Ok(())
     }
 
-    fn compilar_expressao(&self, expr: &super::ast::Expressao) -> Result<BasicValueEnum<'ctx>, String> {
+    // Novo sistema de avaliação simplificado
+    fn avaliar_expressao(&self, expr: &super::ast::Expressao) -> Result<ValorAvaliado, String> {
         match expr {
-            super::ast::Expressao::Inteiro(val) => {
-                Ok(self.context.i64_type().const_int(*val as u64, true).into())
-            },
-            super::ast::Expressao::Texto(val) => {
-                let c_string = format!("{}\0", val);
-                Ok(self.builder
-                    .build_global_string_ptr(&c_string, "string_literal")
-                    .map_err(|e| format!("Erro ao criar string literal: {:?}", e))?
-                    .as_pointer_value().into())
-            },
-            super::ast::Expressao::Booleano(val) => {
-                Ok(self.context.bool_type().const_int(*val as u64, false).into())
-            },
+            super::ast::Expressao::Inteiro(val) => Ok(ValorAvaliado::Inteiro(*val)),
+            super::ast::Expressao::Texto(val) => Ok(ValorAvaliado::Texto(val.clone())),
+            super::ast::Expressao::Booleano(val) => Ok(ValorAvaliado::Booleano(*val)),
             super::ast::Expressao::Identificador(nome) => {
-                // CORREÇÃO: Recuperar valor real da variável
                 let variaveis = self.variaveis.borrow();
                 match variaveis.get(nome) {
-                    Some(valor) => Ok(*valor),
+                    Some(valor) => Ok(ValorAvaliado::Inteiro(*valor)),
                     None => Err(format!("Variável '{}' não foi declarada", nome)),
                 }
             },
             super::ast::Expressao::Aritmetica(op, esq, dir) => {
-                let val_esq = self.compilar_expressao(esq)?;
-                let val_dir = self.compilar_expressao(dir)?;
+                let val_esq = self.avaliar_expressao(esq)?;
+                let val_dir = self.avaliar_expressao(dir)?;
                 
-                if let (BasicValueEnum::IntValue(left), BasicValueEnum::IntValue(right)) = (val_esq, val_dir) {
+                if let (ValorAvaliado::Inteiro(left), ValorAvaliado::Inteiro(right)) = (val_esq, val_dir) {
                     let resultado = match op {
-                        super::ast::OperadorAritmetico::Soma => {
-                            self.builder.build_int_add(left, right, "add")
-                                .map_err(|e| format!("Erro na soma: {:?}", e))?
-                        },
-                        super::ast::OperadorAritmetico::Subtracao => {
-                            self.builder.build_int_sub(left, right, "sub")
-                                .map_err(|e| format!("Erro na subtração: {:?}", e))?
-                        },
-                        super::ast::OperadorAritmetico::Multiplicacao => {
-                            self.builder.build_int_mul(left, right, "mul")
-                                .map_err(|e| format!("Erro na multiplicação: {:?}", e))?
-                        },
+                        super::ast::OperadorAritmetico::Soma => left + right,
+                        super::ast::OperadorAritmetico::Subtracao => left - right,
+                        super::ast::OperadorAritmetico::Multiplicacao => left * right,
                         super::ast::OperadorAritmetico::Divisao => {
-                            self.builder.build_int_signed_div(left, right, "div")
-                                .map_err(|e| format!("Erro na divisão: {:?}", e))?
+                            if right == 0 {
+                                return Err("Divisão por zero".to_string());
+                            }
+                            left / right
+                        },
+                        super::ast::OperadorAritmetico::Modulo => {
+                            if right == 0 {
+                                return Err("Módulo por zero".to_string());
+                            }
+                            left % right
                         },
                     };
-                    Ok(resultado.into())
+                    Ok(ValorAvaliado::Inteiro(resultado))
                 } else {
                     Err("Operação aritmética requer valores inteiros".to_string())
                 }
             },
             super::ast::Expressao::Comparacao(op, esq, dir) => {
-                let val_esq = self.compilar_expressao(esq)?;
-                let val_dir = self.compilar_expressao(dir)?;
+                let val_esq = self.avaliar_expressao(esq)?;
+                let val_dir = self.avaliar_expressao(dir)?;
                 
-                if let (BasicValueEnum::IntValue(left), BasicValueEnum::IntValue(right)) = (val_esq, val_dir) {
-                    let pred = match op {
-                        super::ast::OperadorComparacao::Igual => IntPredicate::EQ,
-                        super::ast::OperadorComparacao::Diferente => IntPredicate::NE,
-                        super::ast::OperadorComparacao::MaiorQue => IntPredicate::SGT,
-                        super::ast::OperadorComparacao::MaiorIgual => IntPredicate::SGE,
-                        super::ast::OperadorComparacao::Menor => IntPredicate::SLT,
-                        super::ast::OperadorComparacao::MenorIgual => IntPredicate::SLE,
+                if let (ValorAvaliado::Inteiro(left), ValorAvaliado::Inteiro(right)) = (val_esq, val_dir) {
+                    let resultado = match op {
+                        super::ast::OperadorComparacao::Igual => left == right,
+                        super::ast::OperadorComparacao::Diferente => left != right,
+                        super::ast::OperadorComparacao::MaiorQue => left > right,
+                        super::ast::OperadorComparacao::MaiorIgual => left >= right,
+                        super::ast::OperadorComparacao::Menor => left < right,
+                        super::ast::OperadorComparacao::MenorIgual => left <= right,
                     };
-                    
-                    let resultado = self.builder.build_int_compare(pred, left, right, "cmp")
-                        .map_err(|e| format!("Erro na comparação: {:?}", e))?;
-                    Ok(resultado.into())
+                    Ok(ValorAvaliado::Booleano(resultado))
                 } else {
                     Err("Comparação requer valores do mesmo tipo".to_string())
                 }
@@ -185,16 +191,12 @@ impl<'ctx> GeradorCodigo<'ctx> {
     }
 
     fn gerar_se(&self, cond: &super::ast::Expressao, cmd_then: &super::ast::Comando, cmd_else: Option<&super::ast::Comando>) -> Result<(), String> {
-        // Avaliar condição e executar comando adequado
-        let resultado_cond = self.compilar_expressao(cond)?;
+        let resultado_cond = self.avaliar_expressao(cond)?;
         
-        // Para simplificar, vamos avaliar estaticamente quando possível
         let executa_then = match resultado_cond {
-            BasicValueEnum::IntValue(int_val) => {
-                // Se é resultado de comparação (0 ou 1), verificar se é verdadeiro
-                int_val.get_sign_extended_constant().unwrap_or(0) != 0
-            },
-            _ => true, // Default para outros tipos
+            ValorAvaliado::Booleano(val) => val,
+            ValorAvaliado::Inteiro(val) => val != 0,
+            _ => true,
         };
 
         if executa_then {
@@ -206,35 +208,60 @@ impl<'ctx> GeradorCodigo<'ctx> {
         Ok(())
     }
 
-    fn gerar_enquanto(&self, _cond: &super::ast::Expressao, _cmd: &super::ast::Comando) -> Result<(), String> {
-        // Implementação simplificada por enquanto
+    // Implementação completa do loop enquanto
+    fn gerar_enquanto(&self, cond: &super::ast::Expressao, cmd: &super::ast::Comando) -> Result<(), String> {
+        const MAX_ITERACOES: i32 = 10000; // Proteção contra loop infinito
+        let mut iteracoes = 0;
+
+        loop {
+            if iteracoes >= MAX_ITERACOES {
+                return Err("Loop 'enquanto' excedeu o limite máximo de iterações".to_string());
+            }
+
+            // Avaliar condição
+            let resultado_cond = self.avaliar_expressao(cond)?;
+            let continua = match resultado_cond {
+                ValorAvaliado::Booleano(val) => val,
+                ValorAvaliado::Inteiro(val) => val != 0,
+                _ => false,
+            };
+
+            if !continua {
+                break;
+            }
+
+            // Executar comando do loop
+            self.compilar_comando(cmd)?;
+            iteracoes += 1;
+        }
+
         Ok(())
     }
 
-    // CORREÇÃO: Implementar declaração de variável corretamente
     fn gerar_declaracao_variavel(&self, _tipo: &super::ast::Tipo, nome: &str, valor: Option<&super::ast::Expressao>) -> Result<(), String> {
         let val = if let Some(expr) = valor {
-            self.compilar_expressao(expr)?
+            match self.avaliar_expressao(expr)? {
+                ValorAvaliado::Inteiro(v) => v,
+                _ => 0, // Default para tipos não inteiros por enquanto
+            }
         } else {
-            // Valor padrão baseado no tipo
-            self.context.i64_type().const_int(0, true).into()
+            0 // Valor padrão
         };
 
-        // Armazenar variável no mapa
         self.variaveis.borrow_mut().insert(nome.to_string(), val);
         Ok(())
     }
 
-    // CORREÇÃO: Implementar atribuição corretamente
     fn gerar_atribuicao(&self, nome: &str, expr: &super::ast::Expressao) -> Result<(), String> {
-        let valor = self.compilar_expressao(expr)?;
+        let valor = match self.avaliar_expressao(expr)? {
+            ValorAvaliado::Inteiro(v) => v,
+            _ => return Err("Atribuição suporta apenas valores inteiros por enquanto".to_string()),
+        };
         
-        // Verificar se variável existe
         if !self.variaveis.borrow().contains_key(nome) {
             return Err(format!("Variável '{}' não foi declarada", nome));
         }
 
-        // Atualizar valor da variável
         self.variaveis.borrow_mut().insert(nome.to_string(), valor);
         Ok(())
     }
@@ -242,4 +269,12 @@ impl<'ctx> GeradorCodigo<'ctx> {
     fn gerar_retorne(&self, _expr: Option<&super::ast::Expressao>) -> Result<(), String> {
         Ok(())
     }
+}
+
+// Enum auxiliar para valores avaliados
+#[derive(Debug, Clone)]
+enum ValorAvaliado {
+    Inteiro(i64),
+    Texto(String),
+    Booleano(bool),
 }

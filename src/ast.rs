@@ -7,7 +7,7 @@ pub struct Programa {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum Comando {
-    Se(Expressao, Box<Comando>, Option<Box<Comando>>), // if, then, else
+    Se(Expressao, Box<Comando>, Option<Box<Comando>>),
     Enquanto(Expressao, Box<Comando>),
     Para(String, Expressao, Expressao, Box<Comando>),
     Imprima(Expressao),
@@ -15,7 +15,7 @@ pub enum Comando {
     DeclaracaoVariavel(Tipo, String, Option<Expressao>),
     Atribuicao(String, Expressao),
     Retorne(Option<Expressao>),
-    Expressao(Expressao), // Para expressões standalone
+    Expressao(Expressao),
 }
 
 #[allow(dead_code)]
@@ -59,6 +59,7 @@ pub enum OperadorAritmetico {
     Subtracao,
     Multiplicacao,
     Divisao,
+    Modulo,  // Adicionado operador módulo
 }
 
 #[allow(dead_code)]

@@ -55,6 +55,8 @@ pub enum Token {
     TMultiplicacao,
     #[token("/")]
     TDivisao,
+    #[token("%")]  // Adicionado operador módulo
+    TModulo,
     #[token("&&")]
     TE,
     #[token("||")]
