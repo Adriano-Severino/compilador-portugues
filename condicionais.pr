@@ -1,0 +1,12 @@
+inteiro x = 15;
+inteiro y = 20;
+
+se x < y então {
+    imprima("x é menor que y");
+} senão {
+    imprima("x não é menor que y");
+}
+
+se x == 15 então {
+    imprima("x é igual a 15");
+}

@@ -1,0 +1,4 @@
+inteiro numero = 42;
+texto mensagem = "Olá";
+imprima(mensagem);
+imprima(numero);

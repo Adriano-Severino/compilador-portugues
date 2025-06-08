@@ -1,0 +1,9 @@
+inteiro a = 10;
+inteiro b = 5;
+
+imprima("=== Teste Aritmética ===");
+imprima(a);
+imprima(b);
+imprima(a + b);
+imprima(a - b);
+imprima(a * b);
