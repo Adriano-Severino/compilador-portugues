@@ -1,6 +1,6 @@
 # Meu Compilador - Por do sol
 
-Este é o repositório do projeto "meu_compilador", que desenvolve um compilador para uma linguagem de programação moderna escrita em português brasileiro.
+Este é o repositório do projeto "compilador-portugues", que desenvolve um compilador para uma linguagem de programação moderna escrita em português brasileiro.
 
 ## 📖 Sobre a Linguagem
 
@@ -52,11 +52,9 @@ Antes de começar, certifique-se de que você tem os seguintes softwares instala
 ## ⚙️ Instalação e Configuração
 
 1.  **Clone o repositório:**
-    *(Substitua `[URL_DO_SEU_REPOSITORIO_GIT_AQUI]` pela URL correta do seu repositório, por exemplo: `https://github.com/SEU_USUARIO/meu_compilador`)*
     ```bash
-    git clone [URL_DO_SEU_REPOSITORIO_GIT_AQUI]
-    cd meu_compilador 
-    # (Ajuste 'meu_compilador' se o diretório clonado tiver outro nome, como 'compilador-portugues')
+    git clone https://github.com/Adriano-Severino/compilador-portugues
+    cd compilador-portugues 
     ```
 
 2.  **Configure o ambiente LLVM:**
@@ -66,7 +64,7 @@ Antes de começar, certifique-se de que você tem os seguintes softwares instala
     ```bash
     cargo build --release
     ```
-    O executável do compilador estará em `target/release/meu_compilador` (o nome pode variar dependendo do nome do seu crate no `Cargo.toml`).
+    O executável do compilador estará em `target/release/compilador-portugues` (o nome pode variar dependendo do nome do seu crate no `Cargo.toml`).
 
 ## 📝 Como Usar
 
@@ -74,8 +72,8 @@ Os programas na sua linguagem devem ser escritos em arquivos com a extensão `.p
 
 ### Estrutura Básica de um Programa
 
-*(Nota: Para os blocos de código da sua linguagem, usei `rust` como identificador para o realce de sintaxe. Se sua linguagem tiver um identificador específico (ex: `portugol`, `minha_linguagem`), você pode substituí-lo.)*
-```rust
+```Por do sol
+// Comentário de linha
 // Este é um comentário de linha
 /* Este é um comentário
    de múltiplas linhas */
@@ -85,7 +83,7 @@ texto nome = "Maria";
 booleano ativo = verdadeiro;
 
 imprima("Olá, mundo!");
-
+```
 ## Compilando e Executando (Método Recomendado)
 O projeto inclui um script build_production.sh para facilitar o processo completo de compilação.
 
@@ -109,8 +107,7 @@ Se você quiser entender o que o script build_production.sh faz:
 
 1. Gerar LLVM IR:
     ```bash
-    ./target/release/meu_compilador meu_programa.pr 
-    # (Assumindo que 'meu_compilador' é o nome do executável do seu compilador)
+    ./target/release/compilador-portugues meu_programa.pr
     ```
 2. Otimizar (opcional, mas recomendado):
     ```bash
@@ -253,7 +250,7 @@ Programa Completo - Sistema de Notas
 Código (sistema_notas.pr):
 ```bash
 // Sistema simples de avaliação de estudantes
-texto estudante = "Maria Santos";
+texto estudante = "Joana";
 inteiro nota1 = 85;
 inteiro nota2 = 92;
 inteiro nota3 = 78;
@@ -333,7 +330,7 @@ enquanto condicao {
 ```
 🏗️ Estrutura do Projeto
 
-meu_compilador/
+compilador-portugues/
 ├── src/
 │   ├── main.rs           # Ponto de entrada do compilador
 │   ├── lexer.rs          # Analisador léxico (geração de tokens)
@@ -352,7 +349,7 @@ Contribuições são muito bem-vindas! Para contribuir:
 1. Faça um fork do repositório
 2. Clone sua fork:
     ```bash
-   git clone https://github.com/SEU_USUARIO/meu_compilador.git (substitua SEU_USUARIO pelo seu nome de usuário no GitHub e meu_compilador pelo nome correto do repositório).
+   git clone https://github.com/Adriano-Severino/compilador-portugues
     ```
 3. Crie uma branch para sua feature:
     ```bash
@@ -376,7 +373,7 @@ Contribuições são muito bem-vindas! Para contribuir:
  Siga o estilo de código existente.
 
 ## 🐛 Reportando Problemas
- Encontrou um bug ou tem alguma sugestão? Abra uma Issue (substitua SEU_USUARIO e meu_compilador pela URL correta do seu repositório)
+ Encontrou um bug ou tem alguma sugestão? Abra uma Issue https://github.com/Adriano-Severino/compilador-portugues
  com:
 
 1. Descrição detalhada do problema ou sugestão.
