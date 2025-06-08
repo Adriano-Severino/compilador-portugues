@@ -1,4 +1,4 @@
-# Meu Compilador - [Nome da Sua Linguagem Aqui]
+# Meu Compilador - Por do sol
 
 Este é o repositório do projeto "meu_compilador", que desenvolve um compilador para uma linguagem de programação moderna escrita em português brasileiro.
 
