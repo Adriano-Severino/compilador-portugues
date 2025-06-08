@@ -330,6 +330,7 @@ enquanto condicao {
 ```
 🏗️ Estrutura do Projeto
 
+```text
 compilador-portugues/
 ├── src/
 │   ├── main.rs           # Ponto de entrada do compilador
@@ -342,6 +343,7 @@ compilador-portugues/
 ├── Cargo.toml            # Manifesto do projeto Rust
 ├── build.rs              # (Opcional) Script de build do Cargo
 └── README.md             # Este arquivo
+```
 
 🤝 Contribuindo
 Contribuições são muito bem-vindas! Para contribuir:
