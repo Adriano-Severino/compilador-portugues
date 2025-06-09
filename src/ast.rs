@@ -1,6 +1,14 @@
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Programa {
+    pub namespaces: Vec<DeclaracaoNamespace>,
+    pub declaracoes: Vec<Declaracao>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct DeclaracaoNamespace {
+    pub nome: String,
     pub declaracoes: Vec<Declaracao>,
 }
 
@@ -10,6 +18,7 @@ pub enum Declaracao {
     Comando(Comando),
     DeclaracaoClasse(DeclaracaoClasse),
     DeclaracaoFuncao(DeclaracaoFuncao),
+    DeclaracaoMetodo(DeclaracaoMetodo),
     DeclaracaoModulo(DeclaracaoModulo),
     Importacao(Importacao),
     Exportacao(Exportacao),
@@ -24,6 +33,7 @@ pub enum Comando {
     Imprima(Expressao),
     Bloco(Vec<Comando>),
     DeclaracaoVariavel(Tipo, String, Option<Expressao>),
+    DeclaracaoVar(String, Expressao),
     Atribuicao(String, Expressao),
     Retorne(Option<Expressao>),
     Expressao(Expressao),
@@ -45,6 +55,7 @@ pub enum Tipo {
     Funcao(Vec<Tipo>, Box<Tipo>),
     Generico(String),
     Opcional(Box<Tipo>),
+    Inferido,
 }
 
 #[allow(dead_code)]
@@ -52,6 +63,7 @@ pub enum Tipo {
 pub enum Expressao {
     Inteiro(i64),
     Texto(String),
+    StringInterpolada(Vec<PartStringInterpolada>),
     Booleano(bool),
     Identificador(String),
     Chamada(String, Vec<Expressao>),
@@ -67,7 +79,27 @@ pub enum Expressao {
     Nulo,
 }
 
-// Estruturas para OOP
+// NOVO: Para string interpolation $"texto {variavel}"
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum PartStringInterpolada {
+    Texto(String),
+    Expressao(Expressao),
+}
+
+// NOVO: Estrutura para métodos independentes
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct DeclaracaoMetodo {
+    pub nome: String,
+    pub parametros: Vec<Parametro>,
+    pub tipo_retorno: Option<Tipo>,
+    pub modificador: ModificadorAcesso,
+    pub eh_estatico: bool,
+    pub corpo: Vec<Comando>,
+}
+
+// Estruturas para OOP com propriedades
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DeclaracaoClasse {
@@ -75,9 +107,29 @@ pub struct DeclaracaoClasse {
     pub classe_pai: Option<String>,
     pub modificador: ModificadorAcesso,
     pub campos: Vec<CampoClasse>,
+    pub propriedades: Vec<PropriedadeClasse>,
     pub metodos: Vec<MetodoClasse>,
     pub construtores: Vec<Construtor>,
     pub eh_abstrata: bool,
+}
+
+// NOVO: Propriedades com get/set traduzidos
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct PropriedadeClasse {
+    pub nome: String,
+    pub tipo: Tipo,
+    pub modificador: ModificadorAcesso,
+    pub buscar: Option<AcessorPropriedade>, // get
+    pub definir: Option<AcessorPropriedade>, // set
+    pub valor_inicial: Option<Expressao>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct AcessorPropriedade {
+    pub modificador: Option<ModificadorAcesso>,
+    pub corpo: Option<Vec<Comando>>, // None para auto-implementado
 }
 
 #[allow(dead_code)]
@@ -197,7 +249,7 @@ pub enum OperadorUnario {
     Menos,
 }
 
-// Enums para análise de ownership
+// Resto das estruturas existentes...
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum StatusOwnership {
@@ -207,7 +259,6 @@ pub enum StatusOwnership {
     Movido,
 }
 
-// Estruturas auxiliares para análise semântica
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct InfoVariavel {
@@ -235,13 +286,12 @@ pub struct InfoClasse {
     pub classe_pai: Option<String>,
 }
 
-// Estruturas para controle de fluxo avançado
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum TipoLoop {
     Enquanto,
     Para,
-    Fazer, // Para futuro suporte a do-while
+    Fazer,
 }
 
 #[allow(dead_code)]
@@ -253,7 +303,6 @@ pub struct InfoLoop {
     pub tem_continue: bool,
 }
 
-// Estruturas para tratamento de erros (futuro)
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum TipoErro {
@@ -274,7 +323,6 @@ pub struct ErroCompilacao {
     pub arquivo: String,
 }
 
-// Estruturas para análise estática avançada
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct MetricasComplexidade {

@@ -78,7 +78,8 @@ fn compilar_arquivo(caminho_arquivo: &str) -> Result<(), Box<dyn std::error::Err
 
     // 2. Análise Sintática
     println!("2. Análise Sintática...");
-    let parser = parser::ProgramaParser::new();
+    // CORRIGIDO: Usar parser::ArquivoParser
+    let parser = parser::ArquivoParser::new();
     let mut ast = parser.parse(tokens.iter().cloned())
         .map_err(|e| format!("Erro sintático: {:?}", e))?;
 
@@ -126,7 +127,7 @@ fn compilar_arquivo(caminho_arquivo: &str) -> Result<(), Box<dyn std::error::Err
             return Err("Falha na análise de ownership".into());
         }
     }
-
+    
     // 7. Geração de Código LLVM
     println!("7. Geração de código...");
     let context = Context::create();
@@ -170,7 +171,7 @@ fn verificar_arquivo(caminho_arquivo: &str) -> Result<(), Box<dyn std::error::Er
         .filter_map(|(tok_res, span)| tok_res.ok().map(|tok| (span.start, tok, span.end)))
         .collect();
 
-    let parser = parser::ProgramaParser::new();
+    let parser = parser::ArquivoParser::new();
     let mut ast = parser.parse(tokens.iter().cloned())
         .map_err(|e| format!("Erro sintático: {:?}", e))?;
 

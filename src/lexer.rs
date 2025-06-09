@@ -15,11 +15,17 @@ pub enum Token {
     TPara,
     #[token("funcao")]
     TFuncao,
+    #[token("metodo")]
+    TMetodo,
     #[token("retorne")]
     TRetorne,
     #[token("imprima")]
     TImprima,
-    
+    #[token("var")]
+    TVar,
+   #[token("espaco")]
+    TEspaco,
+
     // Tipos
     #[token("inteiro")]
     TTipoInteiro,
@@ -89,7 +95,7 @@ pub enum Token {
     TSeta,
     #[token(".")]
     TPonto,
-    #[token("..")]
+    #[token(":")]
     TDoisPontos,
     
     // Tokens para OOP
@@ -99,8 +105,6 @@ pub enum Token {
     THerda,
     #[token("construtor")]
     TConstrutor,
-    #[token("metodo")]
-    TMetodo,
     #[token("publico")]
     TPublico,
     #[token("privado")]
@@ -118,6 +122,12 @@ pub enum Token {
     #[token("super")]
     TSuper,
 
+    // NOVO: Tokens para propriedades
+    #[token("buscar")]       // get
+    TBuscar,
+    #[token("definir")]      // set
+    TDefinir,
+
     // Tokens para módulos
     #[token("modulo")]
     TModuloToken,
@@ -131,6 +141,15 @@ pub enum Token {
     TComo,
     #[token("usar")]
     TUsar,
+    
+    // NOVO: String interpolation
+    #[regex(r#"\$"[^"]*""#, |lex| {
+        let content = lex.slice();
+        // Remove $" no início e " no final
+        let inner = &content[2..content.len()-1];
+        inner.to_string()
+    })]
+    TStringInterpolada(String),
     
     // Literais
     #[regex(r#""[^"]*""#, |lex| lex.slice().trim_matches('"').to_string())]
