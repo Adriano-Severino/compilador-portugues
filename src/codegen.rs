@@ -2,8 +2,6 @@ use inkwell::{
     context::Context,
     module::Linkage,
     AddressSpace,
-    // REMOVIDO: values::BasicValueEnum,
-    // REMOVIDO: IntPredicate,
 };
 use std::collections::HashMap;
 use std::cell::RefCell;
@@ -12,7 +10,9 @@ pub struct GeradorCodigo<'ctx> {
     pub context: &'ctx Context,
     pub module: inkwell::module::Module<'ctx>,
     pub builder: inkwell::builder::Builder<'ctx>,
-    pub variaveis: RefCell<HashMap<String, i64>>,
+    pub variaveis: RefCell<HashMap<String, ValorAvaliado>>,
+    pub escopos: RefCell<Vec<HashMap<String, ValorAvaliado>>>, // NOVO: Sistema de escopos
+    pub funcoes: RefCell<HashMap<String, super::ast::DeclaracaoFuncao>>, // NOVO: Registro de funções
 }
 
 impl<'ctx> GeradorCodigo<'ctx> {
@@ -24,26 +24,91 @@ impl<'ctx> GeradorCodigo<'ctx> {
             module, 
             builder,
             variaveis: RefCell::new(HashMap::new()),
+            escopos: RefCell::new(vec![HashMap::new()]), // Escopo global
+            funcoes: RefCell::new(HashMap::new()),
+        }
+    }
+
+    // NOVO: Métodos para gerenciar escopos
+    fn entrar_escopo(&self) {
+        self.escopos.borrow_mut().push(HashMap::new());
+    }
+
+    fn sair_escopo(&self) {
+        self.escopos.borrow_mut().pop();
+    }
+
+    fn buscar_variavel(&self, nome: &str) -> Option<ValorAvaliado> {
+        // Buscar primeiro no sistema de escopos (do mais interno ao externo)
+        let escopos = self.escopos.borrow();
+        for escopo in escopos.iter().rev() {
+            if let Some(valor) = escopo.get(nome) {
+                return Some(valor.clone());
+            }
+        }
+        
+        // Depois buscar no sistema antigo para compatibilidade
+        let variaveis = self.variaveis.borrow();
+        variaveis.get(nome).cloned()
+    }
+
+    fn definir_variavel(&self, nome: String, valor: ValorAvaliado) {
+        let mut escopos = self.escopos.borrow_mut();
+        if let Some(escopo_atual) = escopos.last_mut() {
+            escopo_atual.insert(nome, valor);
         }
     }
 
     pub fn compilar_programa(&self, programa: &super::ast::Programa) -> Result<(), String> {
+        // Primeira passada: registrar todas as funções
+        for declaracao in &programa.declaracoes {
+            if let super::ast::Declaracao::DeclaracaoFuncao(funcao) = declaracao {
+                self.funcoes.borrow_mut().insert(funcao.nome.clone(), funcao.clone());
+            }
+        }
+
+        // Segunda passada: processar declarações
         for declaracao in &programa.declaracoes {
             match declaracao {
                 super::ast::Declaracao::Comando(comando) => {
                     self.compilar_comando(comando)?;
                 },
                 super::ast::Declaracao::DeclaracaoFuncao(funcao) => {
-                    // Por enquanto, processa apenas os comandos das funções
-                    for comando in &funcao.corpo {
-                        self.compilar_comando(comando)?;
-                    }
+                    self.compilar_funcao(funcao)?; // MODIFICADO: usar método específico
                 },
                 _ => {
                     // Outros tipos de declaração não implementados ainda
                 }
             }
         }
+        Ok(())
+    }
+
+    // NOVO: Método específico para compilar funções
+    fn compilar_funcao(&self, funcao: &super::ast::DeclaracaoFuncao) -> Result<(), String> {
+        // Entrar em novo escopo para a função
+        self.entrar_escopo();
+
+        // Registrar parâmetros da função no escopo atual
+        for parametro in &funcao.parametros {
+            // Para parâmetros, inicializamos com valores padrão baseados no tipo
+            let valor_padrao = match parametro.tipo {
+                super::ast::Tipo::Inteiro => ValorAvaliado::Inteiro(0),
+                super::ast::Tipo::Texto => ValorAvaliado::Texto(String::new()),
+                super::ast::Tipo::Booleano => ValorAvaliado::Booleano(false),
+                _ => ValorAvaliado::Inteiro(0), // Valor padrão para outros tipos
+            };
+            
+            self.definir_variavel(parametro.nome.clone(), valor_padrao);
+        }
+
+        // Processar corpo da função
+        for comando in &funcao.corpo {
+            self.compilar_comando(comando)?;
+        }
+
+        // Sair do escopo da função
+        self.sair_escopo();
         Ok(())
     }
 
@@ -75,9 +140,15 @@ impl<'ctx> GeradorCodigo<'ctx> {
     }
 
     fn gerar_bloco(&self, comandos: &[super::ast::Comando]) -> Result<(), String> {
+        // Criar novo escopo para o bloco
+        self.entrar_escopo();
+        
         for comando in comandos {
             self.compilar_comando(comando)?;
         }
+        
+        // Sair do escopo do bloco
+        self.sair_escopo();
         Ok(())
     }
 
@@ -147,11 +218,20 @@ impl<'ctx> GeradorCodigo<'ctx> {
             super::ast::Expressao::Texto(val) => Ok(ValorAvaliado::Texto(val.clone())),
             super::ast::Expressao::Booleano(val) => Ok(ValorAvaliado::Booleano(*val)),
             super::ast::Expressao::Identificador(nome) => {
-                let variaveis = self.variaveis.borrow();
-                match variaveis.get(nome) {
-                    Some(valor) => Ok(ValorAvaliado::Inteiro(*valor)),
+                // MODIFICADO: usar buscar_variavel que funciona com escopos
+                match self.buscar_variavel(nome) {
+                    Some(valor) => Ok(valor),
                     None => Err(format!("Variável '{}' não foi declarada", nome)),
                 }
+            },
+            super::ast::Expressao::Chamada(nome_funcao, argumentos) => {
+                // NOVO: Suporte básico para chamadas de função
+                self.avaliar_chamada_funcao(nome_funcao, argumentos)
+            },
+            super::ast::Expressao::NovoObjeto(classe, argumentos) => {
+                // NOVO: Suporte básico para criação de objetos
+                println!("Criando objeto da classe: {} com {} argumentos", classe, argumentos.len());
+                Ok(ValorAvaliado::Texto(format!("Objeto de {}", classe)))
             },
             super::ast::Expressao::Aritmetica(op, esq, dir) => {
                 let val_esq = self.avaliar_expressao(esq)?;
@@ -202,6 +282,42 @@ impl<'ctx> GeradorCodigo<'ctx> {
         }
     }
 
+    // NOVO: Método para avaliar chamadas de função
+    fn avaliar_chamada_funcao(&self, nome_funcao: &str, argumentos: &[super::ast::Expressao]) -> Result<ValorAvaliado, String> {
+        // Por enquanto, simular execução de funções conhecidas
+        match nome_funcao {
+            "abs" => {
+                if argumentos.len() != 1 {
+                    return Err("Função 'abs' espera exatamente 1 argumento".to_string());
+                }
+                let valor = self.avaliar_expressao(&argumentos[0])?;
+                if let ValorAvaliado::Inteiro(num) = valor {
+                    Ok(ValorAvaliado::Inteiro(num.abs()))
+                } else {
+                    Err("Função 'abs' espera um número inteiro".to_string())
+                }
+            },
+            _ => {
+                // Para outras funções, simular execução
+                println!("Chamando função '{}' com {} argumentos", nome_funcao, argumentos.len());
+                
+                // Verificar se a função existe
+                if self.funcoes.borrow().contains_key(nome_funcao) {
+                    // Simular retorno baseado no nome da função
+                    if nome_funcao.contains("obter") || nome_funcao.contains("gerar") {
+                        Ok(ValorAvaliado::Texto(format!("Resultado de {}", nome_funcao)))
+                    } else if nome_funcao.contains("eh_") {
+                        Ok(ValorAvaliado::Booleano(true))
+                    } else {
+                        Ok(ValorAvaliado::Inteiro(0))
+                    }
+                } else {
+                    Err(format!("Função '{}' não foi declarada", nome_funcao))
+                }
+            }
+        }
+    }
+
     fn gerar_se(&self, cond: &super::ast::Expressao, cmd_then: &super::ast::Comando, cmd_else: Option<&super::ast::Comando>) -> Result<(), String> {
         let resultado_cond = self.avaliar_expressao(cond)?;
         
@@ -247,35 +363,39 @@ impl<'ctx> GeradorCodigo<'ctx> {
         Ok(())
     }
 
-    fn gerar_declaracao_variavel(&self, _tipo: &super::ast::Tipo, nome: &str, valor: Option<&super::ast::Expressao>) -> Result<(), String> {
+    fn gerar_declaracao_variavel(&self, tipo: &super::ast::Tipo, nome: &str, valor: Option<&super::ast::Expressao>) -> Result<(), String> {
         let val = if let Some(expr) = valor {
-            match self.avaliar_expressao(expr)? {
-                ValorAvaliado::Inteiro(v) => v,
-                _ => 0,
-            }
+            self.avaliar_expressao(expr)?
         } else {
-            0
+            // Valor padrão baseado no tipo
+            match tipo {
+                super::ast::Tipo::Inteiro => ValorAvaliado::Inteiro(0),
+                super::ast::Tipo::Texto => ValorAvaliado::Texto(String::new()),
+                super::ast::Tipo::Booleano => ValorAvaliado::Booleano(false),
+                _ => ValorAvaliado::Inteiro(0),
+            }
         };
 
-        self.variaveis.borrow_mut().insert(nome.to_string(), val);
+        // MODIFICADO: usar definir_variavel que funciona com escopos
+        self.definir_variavel(nome.to_string(), val);
         Ok(())
     }
 
     fn gerar_atribuicao(&self, nome: &str, expr: &super::ast::Expressao) -> Result<(), String> {
-        let valor = match self.avaliar_expressao(expr)? {
-            ValorAvaliado::Inteiro(v) => v,
-            _ => return Err("Atribuição suporta apenas valores inteiros por enquanto".to_string()),
-        };
+        let valor = self.avaliar_expressao(expr)?;
         
-        if !self.variaveis.borrow().contains_key(nome) {
+        // Verificar se a variável existe em algum escopo
+        if self.buscar_variavel(nome).is_none() {
             return Err(format!("Variável '{}' não foi declarada", nome));
         }
 
-        self.variaveis.borrow_mut().insert(nome.to_string(), valor);
+        // MODIFICADO: usar definir_variavel
+        self.definir_variavel(nome.to_string(), valor);
         Ok(())
     }
 
     fn gerar_retorne(&self, _expr: Option<&super::ast::Expressao>) -> Result<(), String> {
+        // Por enquanto, apenas simular o retorno
         Ok(())
     }
 }

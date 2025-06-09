@@ -13,10 +13,14 @@ Declaracao: Declaracao = {
     <funcao:FuncaoComUmParam> => Declaracao::DeclaracaoFuncao(funcao),
     <funcao:FuncaoComDoisParams> => Declaracao::DeclaracaoFuncao(funcao),
     <funcao:FuncaoComTresParams> => Declaracao::DeclaracaoFuncao(funcao),
+    <funcao:FuncaoComQuatroParams> => Declaracao::DeclaracaoFuncao(funcao),
+    <funcao:FuncaoComCincoParams> => Declaracao::DeclaracaoFuncao(funcao),
     <funcao:FuncaoComSeta> => Declaracao::DeclaracaoFuncao(funcao),
     <funcao:FuncaoComSetaUmParam> => Declaracao::DeclaracaoFuncao(funcao),
     <funcao:FuncaoComSetaDoisParams> => Declaracao::DeclaracaoFuncao(funcao),
     <funcao:FuncaoComSetaTresParams> => Declaracao::DeclaracaoFuncao(funcao),
+    <funcao:FuncaoComSetaQuatroParams> => Declaracao::DeclaracaoFuncao(funcao),
+    <funcao:FuncaoComSetaCincoParams> => Declaracao::DeclaracaoFuncao(funcao),
 };
 
 Comando: Comando = {
@@ -53,8 +57,9 @@ Bloco: Comando = {
     "{" <comandos:Comando*> "}" => Comando::Bloco(comandos),
 };
 
-// Sintaxe 1: Sem parâmetros, sem tipo de retorno
+// === FUNÇÕES SEM PARÂMETROS ===
 FuncaoSemParams: DeclaracaoFuncao = {
+    // Sintaxe 1: funcao nome() { ... }
     "funcao" <nome:Identificador> "(" ")" <corpo:Bloco> => {
         DeclaracaoFuncao {
             nome,
@@ -67,7 +72,7 @@ FuncaoSemParams: DeclaracaoFuncao = {
             },
         }
     },
-    // Sintaxe 5: Tipo no início, sem parâmetros
+    // Sintaxe 5: funcao tipo nome() { ... }
     "funcao" <retorno:Tipo> <nome:Identificador> "(" ")" <corpo:Bloco> => {
         DeclaracaoFuncao {
             nome,
@@ -82,8 +87,9 @@ FuncaoSemParams: DeclaracaoFuncao = {
     },
 };
 
-// Sintaxe 2: Com um parâmetro, sem tipo de retorno
+// === FUNÇÕES COM 1 PARÂMETRO ===
 FuncaoComUmParam: DeclaracaoFuncao = {
+    // Sintaxe 2: funcao nome(param) { ... }
     "funcao" <nome:Identificador> "(" <param:Parametro> ")" <corpo:Bloco> => {
         DeclaracaoFuncao {
             nome,
@@ -96,7 +102,7 @@ FuncaoComUmParam: DeclaracaoFuncao = {
             },
         }
     },
-    // Sintaxe 5: Tipo no início, com um parâmetro
+    // Sintaxe 5: funcao tipo nome(param) { ... }
     "funcao" <retorno:Tipo> <nome:Identificador> "(" <param:Parametro> ")" <corpo:Bloco> => {
         DeclaracaoFuncao {
             nome,
@@ -111,7 +117,7 @@ FuncaoComUmParam: DeclaracaoFuncao = {
     },
 };
 
-// Sintaxe 2: Com dois parâmetros, sem tipo de retorno
+// === FUNÇÕES COM 2 PARÂMETROS ===
 FuncaoComDoisParams: DeclaracaoFuncao = {
     "funcao" <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> ")" <corpo:Bloco> => {
         DeclaracaoFuncao {
@@ -125,7 +131,6 @@ FuncaoComDoisParams: DeclaracaoFuncao = {
             },
         }
     },
-    // Sintaxe 5: Tipo no início, com dois parâmetros
     "funcao" <retorno:Tipo> <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> ")" <corpo:Bloco> => {
         DeclaracaoFuncao {
             nome,
@@ -140,7 +145,7 @@ FuncaoComDoisParams: DeclaracaoFuncao = {
     },
 };
 
-// Sintaxe com três parâmetros
+// === FUNÇÕES COM 3 PARÂMETROS ===
 FuncaoComTresParams: DeclaracaoFuncao = {
     "funcao" <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> "," <param3:Parametro> ")" <corpo:Bloco> => {
         DeclaracaoFuncao {
@@ -168,7 +173,65 @@ FuncaoComTresParams: DeclaracaoFuncao = {
     },
 };
 
-// Sintaxe 3: Sem parâmetros, tipo no final com =>
+// === FUNÇÕES COM 4 PARÂMETROS ===
+FuncaoComQuatroParams: DeclaracaoFuncao = {
+    "funcao" <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> "," <param3:Parametro> "," <param4:Parametro> ")" <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: vec![param1, param2, param3, param4],
+            tipo_retorno: None,
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
+    "funcao" <retorno:Tipo> <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> "," <param3:Parametro> "," <param4:Parametro> ")" <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: vec![param1, param2, param3, param4],
+            tipo_retorno: Some(retorno),
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
+};
+
+// === FUNÇÕES COM 5 PARÂMETROS ===
+FuncaoComCincoParams: DeclaracaoFuncao = {
+    "funcao" <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> "," <param3:Parametro> "," <param4:Parametro> "," <param5:Parametro> ")" <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: vec![param1, param2, param3, param4, param5],
+            tipo_retorno: None,
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
+    "funcao" <retorno:Tipo> <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> "," <param3:Parametro> "," <param4:Parametro> "," <param5:Parametro> ")" <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: vec![param1, param2, param3, param4, param5],
+            tipo_retorno: Some(retorno),
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
+};
+
+// === FUNÇÕES COM SINTAXE => (SETA) ===
+
+// Sintaxe 3: funcao nome() => tipo { ... }
 FuncaoComSeta: DeclaracaoFuncao = {
     "funcao" <nome:Identificador> "(" ")" "=>" <retorno:Tipo> <corpo:Bloco> => {
         DeclaracaoFuncao {
@@ -184,7 +247,7 @@ FuncaoComSeta: DeclaracaoFuncao = {
     },
 };
 
-// Sintaxe 4: Com um parâmetro, tipo no final com =>
+// Sintaxe 4: funcao nome(param) => tipo { ... }
 FuncaoComSetaUmParam: DeclaracaoFuncao = {
     "funcao" <nome:Identificador> "(" <param:Parametro> ")" "=>" <retorno:Tipo> <corpo:Bloco> => {
         DeclaracaoFuncao {
@@ -200,7 +263,6 @@ FuncaoComSetaUmParam: DeclaracaoFuncao = {
     },
 };
 
-// Sintaxe 4: Com dois parâmetros, tipo no final com =>
 FuncaoComSetaDoisParams: DeclaracaoFuncao = {
     "funcao" <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> ")" "=>" <retorno:Tipo> <corpo:Bloco> => {
         DeclaracaoFuncao {
@@ -216,7 +278,6 @@ FuncaoComSetaDoisParams: DeclaracaoFuncao = {
     },
 };
 
-// Sintaxe com três parâmetros e =>
 FuncaoComSetaTresParams: DeclaracaoFuncao = {
     "funcao" <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> "," <param3:Parametro> ")" "=>" <retorno:Tipo> <corpo:Bloco> => {
         DeclaracaoFuncao {
@@ -232,6 +293,37 @@ FuncaoComSetaTresParams: DeclaracaoFuncao = {
     },
 };
 
+FuncaoComSetaQuatroParams: DeclaracaoFuncao = {
+    "funcao" <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> "," <param3:Parametro> "," <param4:Parametro> ")" "=>" <retorno:Tipo> <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: vec![param1, param2, param3, param4],
+            tipo_retorno: Some(retorno),
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
+};
+
+FuncaoComSetaCincoParams: DeclaracaoFuncao = {
+    "funcao" <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> "," <param3:Parametro> "," <param4:Parametro> "," <param5:Parametro> ")" "=>" <retorno:Tipo> <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: vec![param1, param2, param3, param4, param5],
+            tipo_retorno: Some(retorno),
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
+};
+
+// === PARÂMETROS E TIPOS ===
 Parametro: Parametro = {
     <tipo:Tipo> <nome:Identificador> => {
         Parametro {
@@ -250,6 +342,7 @@ Tipo: Tipo = {
     <nome:Identificador> => Tipo::Classe(nome),
 };
 
+// === EXPRESSÕES ===
 pub Expressao: Expressao = {
     ExpressaoComparacao,
 };
@@ -262,8 +355,12 @@ ExpressaoComparacao: Expressao = {
         Expressao::Comparacao(OperadorComparacao::Diferente, Box::new(esq), Box::new(dir)),
     <esq:ExpressaoAritmetica> ">" <dir:ExpressaoAritmetica> => 
         Expressao::Comparacao(OperadorComparacao::MaiorQue, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoAritmetica> ">=" <dir:ExpressaoAritmetica> => 
+        Expressao::Comparacao(OperadorComparacao::MaiorIgual, Box::new(esq), Box::new(dir)),
     <esq:ExpressaoAritmetica> "<" <dir:ExpressaoAritmetica> => 
         Expressao::Comparacao(OperadorComparacao::Menor, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoAritmetica> "<=" <dir:ExpressaoAritmetica> => 
+        Expressao::Comparacao(OperadorComparacao::MenorIgual, Box::new(esq), Box::new(dir)),
 };
 
 ExpressaoAritmetica: Expressao = {
@@ -291,6 +388,22 @@ ExpressaoPrimaria: Expressao = {
     "falso" => Expressao::Booleano(false),
     <id:Identificador> => Expressao::Identificador(id),
     "(" <expr:Expressao> ")" => expr,
+    
+    // === SUPORTE PARA "novo" ===
+    "novo" <classe:Identificador> "(" ")" => 
+        Expressao::NovoObjeto(classe, vec![]),
+    "novo" <classe:Identificador> "(" <arg:Expressao> ")" => 
+        Expressao::NovoObjeto(classe, vec![arg]),
+    "novo" <classe:Identificador> "(" <arg1:Expressao> "," <arg2:Expressao> ")" => 
+        Expressao::NovoObjeto(classe, vec![arg1, arg2]),
+    "novo" <classe:Identificador> "(" <arg1:Expressao> "," <arg2:Expressao> "," <arg3:Expressao> ")" => 
+        Expressao::NovoObjeto(classe, vec![arg1, arg2, arg3]),
+    "novo" <classe:Identificador> "(" <arg1:Expressao> "," <arg2:Expressao> "," <arg3:Expressao> "," <arg4:Expressao> ")" => 
+        Expressao::NovoObjeto(classe, vec![arg1, arg2, arg3, arg4]),
+    "novo" <classe:Identificador> "(" <arg1:Expressao> "," <arg2:Expressao> "," <arg3:Expressao> "," <arg4:Expressao> "," <arg5:Expressao> ")" => 
+        Expressao::NovoObjeto(classe, vec![arg1, arg2, arg3, arg4, arg5]),
+    
+    // === CHAMADAS DE FUNÇÃO ===
     <funcao:Identificador> "(" ")" => 
         Expressao::Chamada(funcao, vec![]),
     <funcao:Identificador> "(" <arg:Expressao> ")" => 
@@ -299,12 +412,18 @@ ExpressaoPrimaria: Expressao = {
         Expressao::Chamada(funcao, vec![arg1, arg2]),
     <funcao:Identificador> "(" <arg1:Expressao> "," <arg2:Expressao> "," <arg3:Expressao> ")" => 
         Expressao::Chamada(funcao, vec![arg1, arg2, arg3]),
+    <funcao:Identificador> "(" <arg1:Expressao> "," <arg2:Expressao> "," <arg3:Expressao> "," <arg4:Expressao> ")" => 
+        Expressao::Chamada(funcao, vec![arg1, arg2, arg3, arg4]),
+    <funcao:Identificador> "(" <arg1:Expressao> "," <arg2:Expressao> "," <arg3:Expressao> "," <arg4:Expressao> "," <arg5:Expressao> ")" => 
+        Expressao::Chamada(funcao, vec![arg1, arg2, arg3, arg4, arg5]),
 };
 
+// === HELPERS ===
 Identificador: String = <id:TIdentificador> => id;
 NumeroLiteral: i64 = <n:TInteiro> => n;
 StringLiteral: String = <s:TString> => s;
 
+// === TOKENS EXTERNOS ===
 extern {
     type Location = usize;
     type Error = String;
@@ -323,11 +442,14 @@ extern {
         "vazio" => Token::TTipoVazio,
         "verdadeiro" => Token::TVerdadeiro,
         "falso" => Token::TFalso,
+        "novo" => Token::TNovo,           // ADICIONADO
         "=" => Token::TAtribuicao,
         "==" => Token::TIgual,
         "!=" => Token::TDiferente,
         ">" => Token::TMaiorQue,
+        ">=" => Token::TMaiorIgual,      // ADICIONADO
         "<" => Token::TMenor,
+        "<=" => Token::TMenorIgual,      // ADICIONADO
         "+" => Token::TMais,
         "-" => Token::TMenos,
         "*" => Token::TMultiplicacao,
