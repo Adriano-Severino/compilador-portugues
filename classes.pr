@@ -1,18 +1,57 @@
-publico classe Pessoa {
-    privado texto nome;
-    privado inteiro idade;
-    
-    publico construtor(texto nome_param, inteiro idade_param) {
-        este.nome = nome_param;
-        este.idade = idade_param;
+// exemplo_teste.pr
+espaco Meu_Programa.Domain
+{
+    publico classe Pessoa2
+    {
+        publico texto Nome { buscar; definir; }
+        publico inteiro Idade { buscar; definir; }
+        publico texto Sobrenome { buscar; definir; }
+        publico texto Endereco { buscar; definir; }
+        publico texto Telefone { buscar; definir; }
+
+        // ✅ Construtor com parâmetros padrão (como C#)
+        publico Pessoa2(texto nome, texto endereco, texto telefone, inteiro idade = 24, texto sobrenome = "Silva") {
+            Nome = nome;
+            Endereco = endereco;
+            Telefone = telefone;
+            Idade = idade;
+            Sobrenome = sobrenome;
+        }
+
+        publico vazio apresentar() {
+            imprima($"Nome: {Nome}, Endereço: {Endereco}, Telefone: {Telefone}, Idade: {Idade}, Sobrenome: {Sobrenome}");
+        }
     }
-    
-    publico metodo apresentar() => texto {
-        retorne "Olá, eu sou " + este.nome;
+
+    publico funcao teste_pessoa() 
+    {
+        // ✅ Passa apenas 3 parâmetros, usa padrões para idade (24) e sobrenome ("Silva")
+        Pessoa2 p1 = novo Pessoa2("Joana", "Rua de exemplo", "123456789");
+        
+        // ✅ Passa 4 parâmetros, usa padrão apenas para sobrenome ("Silva")
+        Pessoa2 p2 = novo Pessoa2("Maria", "Rua B", "987654321", 30);
+        
+        // ✅ Passa todos os 5 parâmetros
+        Pessoa2 p3 = novo Pessoa2("Mariano", "Rua C", "123456789", 35, "Silva");
+        
+        p1.apresentar();
+        p2.apresentar();
+        p3.apresentar();
     }
 }
 
-funcao principal() {
-    Pessoa p = novo Pessoa("João", 25);
-    imprima(p.apresentar());
+inteiro a = 10;
+inteiro b = 5;
+
+imprima("=== Teste Aritmética ===");
+imprima(a);
+imprima(b);
+imprima(a + b);
+imprima(a - b);
+imprima(a * b);
+
+se (a > b) {
+    imprima("a é maior que b");
+} senão {
+    imprima("a não é maior que b");
 }

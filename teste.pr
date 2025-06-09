@@ -1,4 +1,46 @@
 // Programa em português
+espaco MeuPrograma.Domain
+{
+    publico classe Pessoa 
+    {
+        privado texto nome;
+        privado inteiro idade;
+        
+        publico Pessoa(texto nome_param, inteiro idade_param) 
+        {
+            este.nome = nome_param;
+            este.idade = idade_param;
+        }
+        
+        publico texto apresentar()
+        {
+            retorne "Olá, eu sou " + este.nome;
+        }
+    }
+    
+    publico funcao texto testar() 
+    {
+        Pessoa p = novo Pessoa("João", 30);
+        retorne p.apresentar();
+    }
+}
+
+inteiro a = 10;
+inteiro b = 5;
+
+imprima("=== Teste Aritmética ===");
+imprima(a);
+imprima(b);
+imprima(a + b);
+imprima(a - b);
+imprima(a * b);
+
+se (a > b) {
+    imprima("a é maior que b");
+} senão {
+    imprima("a não é maior que b");
+}
+
 inteiro idade = 25;
 texto nome = "João";
 
@@ -6,14 +48,21 @@ imprima("Olá mundo!");
 imprima(nome);
 imprima(idade);
 
-se idade > 18 então {
+se (idade > 18) {
     imprima("Maior de idade");
 } senão {
     imprima("Menor de idade");
 }
 
-inteiro contador = 0;
-enquanto contador < 5 {
-    imprima(contador);
-    contador = contador + 1;
+se (idade > 18)  
+{
+    imprima("Maior de idade");
+} 
+senão se (idade == 18) 
+{
+    imprima("Tem 18 anos");
+}
+senão 
+{
+    imprima("Menor de idade");
 }

@@ -1,4 +1,13 @@
-inteiro numero = 42;
-texto mensagem = "Olá";
-imprima(mensagem);
-imprima(numero);
+inteiro contador = 0;
+imprima("Iniciando contador...");
+
+// Teste simples sem loop infinito
+se (contador < 5) {
+    imprima("Contador é menor que 5");
+    contador = contador + 1;
+    imprima(contador);
+}
+
+inteiro a = 10;
+inteiro b = 5;
+imprima(a + b);

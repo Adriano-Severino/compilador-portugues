@@ -1,0 +1,37 @@
+espaco Meu_Programa.Domain
+{
+    publico classe Pessoa2
+    {
+        publico texto Nome { buscar; definir; }
+        publico inteiro Idade { buscar; definir; }
+        publico texto Sobrenome { buscar; privado definir; }
+
+        publico Pessoa2(texto nome, inteiro idade = 25, texto sobrenome = "Padrão") {
+            Nome = nome;
+            Idade = idade;
+            Sobrenome = sobrenome;
+        }
+
+        publico Pessoa2() {
+        }
+
+        publico vazio apresentar() {
+         imprima($"Nome: {Nome} Sobrenome: {Sobrenome}, Idade: {Idade}");
+}
+    }
+}
+
+// Teste das funcionalidades
+var nome = "João";
+var idade = 30;
+
+Pessoa2 p1 = novo Pessoa2("Maria");
+Pessoa2 p2 = novo Pessoa2("José", 35);
+Pessoa2 p3 = novo Pessoa2();
+
+p3.Nome = "Ana";
+p3.Idade = 28;
+
+p1.apresentar();
+p2.apresentar();
+p3.apresentar();

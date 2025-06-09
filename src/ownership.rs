@@ -17,6 +17,17 @@ pub struct InfoOwnership {
     pub pode_ser_movido: bool,
 }
 
+#[derive(Debug, Clone)]
+pub enum ValorAvaliado {
+    Inteiro(i64),
+    Texto(String),
+    Booleano(bool),
+    Objeto {
+        classe: String,
+        propriedades: HashMap<String, ValorAvaliado>,
+    },
+}
+
 pub struct AnalisadorOwnership {
     variaveis: HashMap<String, InfoOwnership>,
     escopo_atual: usize,
@@ -86,11 +97,31 @@ impl AnalisadorOwnership {
                 );
             }
 
+            Comando::DeclaracaoVar(nome, expr) => {
+                self.analisar_expressao(expr);
+                self.variaveis.insert(
+                    nome.clone(),
+                    InfoOwnership {
+                        status: StatusOwnership::Dono,
+                        escopo_criacao: self.escopo_atual,
+                        ultimo_uso: None,
+                        pode_ser_movido: true,
+                    },
+                );
+            }
+
             Comando::Atribuicao(nome, expr) => {
                 self.analisar_movimento_em_expressao(expr);
                 if let Some(info) = self.variaveis.get_mut(nome) {
                     info.ultimo_uso = Some(self.instrucao_atual);
-                    info.status = StatusOwnership::Dono; // Reassinalao restaura ownership
+                    info.status = StatusOwnership::Dono; // Reassinação restaura ownership
+                }
+            }
+
+            Comando::AtribuirPropriedade(objeto, _propriedade, expr) => {
+                self.analisar_expressao(expr);
+                if let Some(info) = self.variaveis.get_mut(objeto) {
+                    info.ultimo_uso = Some(self.instrucao_atual);
                 }
             }
 
@@ -107,24 +138,27 @@ impl AnalisadorOwnership {
                 self.analisar_comando(corpo);
             }
 
-            Comando::Para(var, inicio, fim, corpo) => {
-                if let Some(expr) = &inicio {
-                    self.analisar_expressao(expr);
-                }
-                if let Some(expr) = &fim {
-                    self.analisar_expressao(expr);
-                }
+            // ✅ CORREÇÃO: Para loop corrigido
+            Comando::Para(inicializacao, condicao, incremento, corpo) => {
                 self.entrar_escopo();
-                self.variaveis.insert(
-                    var.clone(),
-                    InfoOwnership {
-                        status: StatusOwnership::Dono,
-                        escopo_criacao: self.escopo_atual,
-                        ultimo_uso: None,
-                        pode_ser_movido: false, // Variável de loop não pode ser movida
-                    },
-                );
+
+                // ✅ Verificar se inicialização existe antes de analisar
+                if let Some(init) = inicializacao {
+                    self.analisar_comando(init); // ✅ Agora passa &Comando corretamente
+                }
+
+                // ✅ Verificar se condição existe antes de analisar
+                if let Some(cond) = condicao {
+                    self.analisar_expressao(cond); // ✅ Agora passa &Expressao corretamente
+                }
+
                 self.analisar_comando(corpo);
+
+                // ✅ Verificar se incremento existe antes de analisar
+                if let Some(inc) = incremento {
+                    self.analisar_comando(inc); // ✅ Agora passa &Comando corretamente
+                }
+
                 self.sair_escopo();
             }
 
@@ -146,7 +180,35 @@ impl AnalisadorOwnership {
                 self.analisar_expressao(expr);
             }
 
-            _ => {}
+            Comando::CriarObjeto(_var_nome, _classe, argumentos) => {
+                for arg in argumentos {
+                    self.analisar_expressao(arg);
+                }
+            }
+
+            Comando::ChamarMetodo(objeto_nome, _metodo, argumentos) => {
+                if let Some(info) = self.variaveis.get_mut(objeto_nome) {
+                    info.ultimo_uso = Some(self.instrucao_atual);
+                }
+                for arg in argumentos {
+                    self.analisar_expressao(arg);
+                }
+            }
+
+            Comando::AcessarCampo(objeto_nome, _campo) => {
+                if let Some(info) = self.variaveis.get_mut(objeto_nome) {
+                    info.ultimo_uso = Some(self.instrucao_atual);
+                }
+            }
+
+            Comando::AtribuirCampo(objeto_expr, _campo, valor_expr) => {
+                self.analisar_expressao(objeto_expr);
+                self.analisar_expressao(valor_expr);
+            }
+
+            Comando::Imprima(expr) => {
+                self.analisar_expressao(expr);
+            }
         }
     }
 
@@ -201,8 +263,23 @@ impl AnalisadorOwnership {
                 self.analisar_expressao(dir);
             }
 
+            // ✅ CORREÇÃO: Adicionar case faltante para operadores unários
             Expressao::Unario(_, expr) => {
                 self.analisar_expressao(expr);
+            }
+
+            Expressao::NovoObjeto(_classe, argumentos) => {
+                for arg in argumentos {
+                    self.analisar_expressao(arg);
+                }
+            }
+
+            Expressao::StringInterpolada(partes) => {
+                for parte in partes {
+                    if let PartStringInterpolada::Expressao(expr) = parte {
+                        self.analisar_expressao(expr);
+                    }
+                }
             }
 
             _ => {}
