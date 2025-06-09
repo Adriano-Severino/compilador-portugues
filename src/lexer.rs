@@ -2,7 +2,7 @@ use logos::Logos;
 
 #[derive(Logos, Debug, PartialEq, Clone)]
 pub enum Token {
-    // Palavras-chave
+    // Palavras-chave básicas
     #[token("se")]
     TSe,
     #[token("então")]
@@ -27,6 +27,10 @@ pub enum Token {
     TTipoTexto,
     #[token("booleano")]
     TTipoBooleano,
+    #[token("vazio")]
+    TTipoVazio,
+    #[token("Lista")]
+    TTipoLista,
     #[token("verdadeiro")]
     TVerdadeiro,
     #[token("falso")]
@@ -55,7 +59,7 @@ pub enum Token {
     TMultiplicacao,
     #[token("/")]
     TDivisao,
-    #[token("%")]  // Adicionado operador módulo
+    #[token("%")]
     TModulo,
     #[token("&&")]
     TE,
@@ -81,8 +85,52 @@ pub enum Token {
     TPontoVirgula,
     #[token(",")]
     TVirgula,
-    #[token("->")]
+    #[token("=>")]
     TSeta,
+    #[token(".")]
+    TPonto,
+    #[token("..")]
+    TDoisPontos,
+    
+    // Tokens para OOP
+    #[token("classe")]
+    TClasse,
+    #[token("herda")]
+    THerda,
+    #[token("construtor")]
+    TConstrutor,
+    #[token("metodo")]
+    TMetodo,
+    #[token("publico")]
+    TPublico,
+    #[token("privado")]
+    TPrivado,
+    #[token("protegido")]
+    TProtegido,
+    #[token("virtual")]
+    TVirtual,
+    #[token("override")]
+    TOverride,
+    #[token("novo")]
+    TNovo,
+    #[token("este")]
+    TEste,
+    #[token("super")]
+    TSuper,
+
+    // Tokens para módulos
+    #[token("modulo")]
+    TModuloToken,
+    #[token("importar")]
+    TImportar,
+    #[token("exportar")]
+    TExportar,
+    #[token("de")]
+    TDe,
+    #[token("como")]
+    TComo,
+    #[token("usar")]
+    TUsar,
     
     // Literais
     #[regex(r#""[^"]*""#, |lex| lex.slice().trim_matches('"').to_string())]

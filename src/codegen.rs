@@ -2,8 +2,8 @@ use inkwell::{
     context::Context,
     module::Linkage,
     AddressSpace,
-    values::BasicValueEnum,
-    IntPredicate,
+    // REMOVIDO: values::BasicValueEnum,
+    // REMOVIDO: IntPredicate,
 };
 use std::collections::HashMap;
 use std::cell::RefCell;
@@ -12,7 +12,7 @@ pub struct GeradorCodigo<'ctx> {
     pub context: &'ctx Context,
     pub module: inkwell::module::Module<'ctx>,
     pub builder: inkwell::builder::Builder<'ctx>,
-    pub variaveis: RefCell<HashMap<String, i64>>,  // Mudança: usar i64 direto para simplificar
+    pub variaveis: RefCell<HashMap<String, i64>>,
 }
 
 impl<'ctx> GeradorCodigo<'ctx> {
@@ -28,8 +28,21 @@ impl<'ctx> GeradorCodigo<'ctx> {
     }
 
     pub fn compilar_programa(&self, programa: &super::ast::Programa) -> Result<(), String> {
-        for comando in &programa.comandos {
-            self.compilar_comando(comando)?;
+        for declaracao in &programa.declaracoes {
+            match declaracao {
+                super::ast::Declaracao::Comando(comando) => {
+                    self.compilar_comando(comando)?;
+                },
+                super::ast::Declaracao::DeclaracaoFuncao(funcao) => {
+                    // Por enquanto, processa apenas os comandos das funções
+                    for comando in &funcao.corpo {
+                        self.compilar_comando(comando)?;
+                    }
+                },
+                _ => {
+                    // Outros tipos de declaração não implementados ainda
+                }
+            }
         }
         Ok(())
     }
@@ -128,7 +141,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
         Ok(())
     }
 
-    // Novo sistema de avaliação simplificado
     fn avaliar_expressao(&self, expr: &super::ast::Expressao) -> Result<ValorAvaliado, String> {
         match expr {
             super::ast::Expressao::Inteiro(val) => Ok(ValorAvaliado::Inteiro(*val)),
@@ -208,9 +220,8 @@ impl<'ctx> GeradorCodigo<'ctx> {
         Ok(())
     }
 
-    // Implementação completa do loop enquanto
     fn gerar_enquanto(&self, cond: &super::ast::Expressao, cmd: &super::ast::Comando) -> Result<(), String> {
-        const MAX_ITERACOES: i32 = 10000; // Proteção contra loop infinito
+        const MAX_ITERACOES: i32 = 10000;
         let mut iteracoes = 0;
 
         loop {
@@ -218,7 +229,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 return Err("Loop 'enquanto' excedeu o limite máximo de iterações".to_string());
             }
 
-            // Avaliar condição
             let resultado_cond = self.avaliar_expressao(cond)?;
             let continua = match resultado_cond {
                 ValorAvaliado::Booleano(val) => val,
@@ -230,7 +240,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 break;
             }
 
-            // Executar comando do loop
             self.compilar_comando(cmd)?;
             iteracoes += 1;
         }
@@ -242,10 +251,10 @@ impl<'ctx> GeradorCodigo<'ctx> {
         let val = if let Some(expr) = valor {
             match self.avaliar_expressao(expr)? {
                 ValorAvaliado::Inteiro(v) => v,
-                _ => 0, // Default para tipos não inteiros por enquanto
+                _ => 0,
             }
         } else {
-            0 // Valor padrão
+            0
         };
 
         self.variaveis.borrow_mut().insert(nome.to_string(), val);
@@ -271,7 +280,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
     }
 }
 
-// Enum auxiliar para valores avaliados
 #[derive(Debug, Clone)]
 enum ValorAvaliado {
     Inteiro(i64),

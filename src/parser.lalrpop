@@ -1,143 +1,309 @@
 use super::lexer::Token;
+use crate::ast::*;
 
 grammar;
 
-pub Programa: crate::ast::Programa = {
-    <comandos:Declaracao*> => crate::ast::Programa { comandos },
+pub Programa: Programa = {
+    <declaracoes:Declaracao*> => Programa { declaracoes },
 };
 
-Declaracao: crate::ast::Comando = {
-    <cmd:ComandoComPontoVirgula> ";" => cmd,
+Declaracao: Declaracao = {
+    <cmd:Comando> => Declaracao::Comando(cmd),
+    <funcao:FuncaoSemParams> => Declaracao::DeclaracaoFuncao(funcao),
+    <funcao:FuncaoComUmParam> => Declaracao::DeclaracaoFuncao(funcao),
+    <funcao:FuncaoComDoisParams> => Declaracao::DeclaracaoFuncao(funcao),
+    <funcao:FuncaoComTresParams> => Declaracao::DeclaracaoFuncao(funcao),
+    <funcao:FuncaoComSeta> => Declaracao::DeclaracaoFuncao(funcao),
+    <funcao:FuncaoComSetaUmParam> => Declaracao::DeclaracaoFuncao(funcao),
+    <funcao:FuncaoComSetaDoisParams> => Declaracao::DeclaracaoFuncao(funcao),
+    <funcao:FuncaoComSetaTresParams> => Declaracao::DeclaracaoFuncao(funcao),
+};
+
+Comando: Comando = {
+    <cmd:ComandoSimples> ";" => cmd,
     <bloco:Bloco> => bloco,
-    <se:ComandoSe> => se,
+    <se:ComandoSeSimples> => se,
     <enquanto:ComandoEnquanto> => enquanto,
 };
 
-ComandoComPontoVirgula: crate::ast::Comando = {
-    "imprima" "(" <expr:Expressao> ")" => crate::ast::Comando::Imprima(expr),
-    <tipo:Tipo> <nome:r"[a-zA-Z_][a-zA-Z0-9_]*"> => 
-        crate::ast::Comando::DeclaracaoVariavel(tipo, nome, None),
-    <tipo:Tipo> <nome:r"[a-zA-Z_][a-zA-Z0-9_]*"> "=" <valor:Expressao> => 
-        crate::ast::Comando::DeclaracaoVariavel(tipo, nome, Some(valor)),
-    <nome:r"[a-zA-Z_][a-zA-Z0-9_]*"> "=" <valor:Expressao> => 
-        crate::ast::Comando::Atribuicao(nome, valor),
-    "retorne" <expr:Expressao?> => crate::ast::Comando::Retorne(expr),
-    <expr:Expressao> => crate::ast::Comando::Expressao(expr),
+ComandoSimples: Comando = {
+    "imprima" "(" <expr:Expressao> ")" => Comando::Imprima(expr),
+    <tipo:Tipo> <nome:Identificador> => 
+        Comando::DeclaracaoVariavel(tipo, nome, None),
+    <tipo:Tipo> <nome:Identificador> "=" <valor:Expressao> => 
+        Comando::DeclaracaoVariavel(tipo, nome, Some(valor)),
+    <nome:Identificador> "=" <valor:Expressao> => 
+        Comando::Atribuicao(nome, valor),
+    "retorne" <expr:Expressao> => Comando::Retorne(Some(expr)),
+    "retorne" => Comando::Retorne(None),
+    <expr:Expressao> => Comando::Expressao(expr),
 };
 
-ComandoSe: crate::ast::Comando = {
-    "se" <cond:Expressao> "então" <cmd:ComandoComPontoVirgula> ";" => 
-        crate::ast::Comando::Se(cond, Box::new(cmd), None),
+ComandoSeSimples: Comando = {
     "se" <cond:Expressao> "então" <bloco:Bloco> => 
-        crate::ast::Comando::Se(cond, Box::new(bloco), None),
-    "se" <cond:Expressao> "então" <bloco1:Bloco> "senão" <bloco2:Bloco> => 
-        crate::ast::Comando::Se(cond, Box::new(bloco1), Some(Box::new(bloco2))),
-    "se" <cond:Expressao> "então" <cmd1:ComandoComPontoVirgula> ";" "senão" <cmd2:ComandoComPontoVirgula> ";" => 
-        crate::ast::Comando::Se(cond, Box::new(cmd1), Some(Box::new(cmd2))),
+        Comando::Se(cond, Box::new(bloco), None),
 };
 
-ComandoEnquanto: crate::ast::Comando = {
+ComandoEnquanto: Comando = {
     "enquanto" <cond:Expressao> <bloco:Bloco> => 
-        crate::ast::Comando::Enquanto(cond, Box::new(bloco)),
+        Comando::Enquanto(cond, Box::new(bloco)),
 };
 
-Bloco: crate::ast::Comando = {
-    "{" <comandos:Declaracao*> "}" => crate::ast::Comando::Bloco(comandos),
+Bloco: Comando = {
+    "{" <comandos:Comando*> "}" => Comando::Bloco(comandos),
 };
 
-Tipo: crate::ast::Tipo = {
-    "inteiro" => crate::ast::Tipo::Inteiro,
-    "texto" => crate::ast::Tipo::Texto,
-    "booleano" => crate::ast::Tipo::Booleano,
+// Sintaxe 1: Sem parâmetros, sem tipo de retorno
+FuncaoSemParams: DeclaracaoFuncao = {
+    "funcao" <nome:Identificador> "(" ")" <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: Vec::new(),
+            tipo_retorno: None,
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
+    // Sintaxe 5: Tipo no início, sem parâmetros
+    "funcao" <retorno:Tipo> <nome:Identificador> "(" ")" <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: Vec::new(),
+            tipo_retorno: Some(retorno),
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
 };
 
-pub Expressao: crate::ast::Expressao = {
-    #[precedence(level="0")]
-    ExpressaoOu,
+// Sintaxe 2: Com um parâmetro, sem tipo de retorno
+FuncaoComUmParam: DeclaracaoFuncao = {
+    "funcao" <nome:Identificador> "(" <param:Parametro> ")" <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: vec![param],
+            tipo_retorno: None,
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
+    // Sintaxe 5: Tipo no início, com um parâmetro
+    "funcao" <retorno:Tipo> <nome:Identificador> "(" <param:Parametro> ")" <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: vec![param],
+            tipo_retorno: Some(retorno),
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
 };
 
-ExpressaoOu: crate::ast::Expressao = {
-    #[precedence(level="1")]
-    ExpressaoE,
-    
-    #[precedence(level="2")]
-    #[assoc(side="left")]
-    <esq:ExpressaoOu> "||" <dir:ExpressaoE> => 
-        crate::ast::Expressao::Logica(crate::ast::OperadorLogico::Ou, Box::new(esq), Box::new(dir)),
+// Sintaxe 2: Com dois parâmetros, sem tipo de retorno
+FuncaoComDoisParams: DeclaracaoFuncao = {
+    "funcao" <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> ")" <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: vec![param1, param2],
+            tipo_retorno: None,
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
+    // Sintaxe 5: Tipo no início, com dois parâmetros
+    "funcao" <retorno:Tipo> <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> ")" <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: vec![param1, param2],
+            tipo_retorno: Some(retorno),
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
 };
 
-ExpressaoE: crate::ast::Expressao = {
-    #[precedence(level="1")]
+// Sintaxe com três parâmetros
+FuncaoComTresParams: DeclaracaoFuncao = {
+    "funcao" <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> "," <param3:Parametro> ")" <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: vec![param1, param2, param3],
+            tipo_retorno: None,
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
+    "funcao" <retorno:Tipo> <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> "," <param3:Parametro> ")" <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: vec![param1, param2, param3],
+            tipo_retorno: Some(retorno),
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
+};
+
+// Sintaxe 3: Sem parâmetros, tipo no final com =>
+FuncaoComSeta: DeclaracaoFuncao = {
+    "funcao" <nome:Identificador> "(" ")" "=>" <retorno:Tipo> <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: Vec::new(),
+            tipo_retorno: Some(retorno),
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
+};
+
+// Sintaxe 4: Com um parâmetro, tipo no final com =>
+FuncaoComSetaUmParam: DeclaracaoFuncao = {
+    "funcao" <nome:Identificador> "(" <param:Parametro> ")" "=>" <retorno:Tipo> <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: vec![param],
+            tipo_retorno: Some(retorno),
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
+};
+
+// Sintaxe 4: Com dois parâmetros, tipo no final com =>
+FuncaoComSetaDoisParams: DeclaracaoFuncao = {
+    "funcao" <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> ")" "=>" <retorno:Tipo> <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: vec![param1, param2],
+            tipo_retorno: Some(retorno),
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
+};
+
+// Sintaxe com três parâmetros e =>
+FuncaoComSetaTresParams: DeclaracaoFuncao = {
+    "funcao" <nome:Identificador> "(" <param1:Parametro> "," <param2:Parametro> "," <param3:Parametro> ")" "=>" <retorno:Tipo> <corpo:Bloco> => {
+        DeclaracaoFuncao {
+            nome,
+            parametros: vec![param1, param2, param3],
+            tipo_retorno: Some(retorno),
+            modificador: ModificadorAcesso::Publico,
+            corpo: match corpo {
+                Comando::Bloco(comandos) => comandos,
+                cmd => vec![cmd],
+            },
+        }
+    },
+};
+
+Parametro: Parametro = {
+    <tipo:Tipo> <nome:Identificador> => {
+        Parametro {
+            nome,
+            tipo,
+            valor_padrao: None,
+        }
+    },
+};
+
+Tipo: Tipo = {
+    "inteiro" => Tipo::Inteiro,
+    "texto" => Tipo::Texto,
+    "booleano" => Tipo::Booleano,
+    "vazio" => Tipo::Vazio,
+    <nome:Identificador> => Tipo::Classe(nome),
+};
+
+pub Expressao: Expressao = {
     ExpressaoComparacao,
-    
-    #[precedence(level="2")]
-    #[assoc(side="left")]
-    <esq:ExpressaoE> "&&" <dir:ExpressaoComparacao> => 
-        crate::ast::Expressao::Logica(crate::ast::OperadorLogico::E, Box::new(esq), Box::new(dir)),
 };
 
-ExpressaoComparacao: crate::ast::Expressao = {
-    #[precedence(level="1")]
+ExpressaoComparacao: Expressao = {
     ExpressaoAritmetica,
-    
-    #[precedence(level="2")]
-    #[assoc(side="left")]
-    <esq:ExpressaoComparacao> "==" <dir:ExpressaoAritmetica> => 
-        crate::ast::Expressao::Comparacao(crate::ast::OperadorComparacao::Igual, Box::new(esq), Box::new(dir)),
-    <esq:ExpressaoComparacao> "!=" <dir:ExpressaoAritmetica> => 
-        crate::ast::Expressao::Comparacao(crate::ast::OperadorComparacao::Diferente, Box::new(esq), Box::new(dir)),
-    <esq:ExpressaoComparacao> ">" <dir:ExpressaoAritmetica> => 
-        crate::ast::Expressao::Comparacao(crate::ast::OperadorComparacao::MaiorQue, Box::new(esq), Box::new(dir)),
-    <esq:ExpressaoComparacao> ">=" <dir:ExpressaoAritmetica> => 
-        crate::ast::Expressao::Comparacao(crate::ast::OperadorComparacao::MaiorIgual, Box::new(esq), Box::new(dir)),
-    <esq:ExpressaoComparacao> "<" <dir:ExpressaoAritmetica> => 
-        crate::ast::Expressao::Comparacao(crate::ast::OperadorComparacao::Menor, Box::new(esq), Box::new(dir)),
-    <esq:ExpressaoComparacao> "<=" <dir:ExpressaoAritmetica> => 
-        crate::ast::Expressao::Comparacao(crate::ast::OperadorComparacao::MenorIgual, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoAritmetica> "==" <dir:ExpressaoAritmetica> => 
+        Expressao::Comparacao(OperadorComparacao::Igual, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoAritmetica> "!=" <dir:ExpressaoAritmetica> => 
+        Expressao::Comparacao(OperadorComparacao::Diferente, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoAritmetica> ">" <dir:ExpressaoAritmetica> => 
+        Expressao::Comparacao(OperadorComparacao::MaiorQue, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoAritmetica> "<" <dir:ExpressaoAritmetica> => 
+        Expressao::Comparacao(OperadorComparacao::Menor, Box::new(esq), Box::new(dir)),
 };
 
-ExpressaoAritmetica: crate::ast::Expressao = {
-    #[precedence(level="1")]
+ExpressaoAritmetica: Expressao = {
     ExpressaoMultiplicacao,
-    
-    #[precedence(level="2")]
-    #[assoc(side="left")]
-    <esq:ExpressaoAritmetica> "+" <dir:ExpressaoMultiplicacao> => 
-        crate::ast::Expressao::Aritmetica(crate::ast::OperadorAritmetico::Soma, Box::new(esq), Box::new(dir)),
-    <esq:ExpressaoAritmetica> "-" <dir:ExpressaoMultiplicacao> => 
-        crate::ast::Expressao::Aritmetica(crate::ast::OperadorAritmetico::Subtracao, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoMultiplicacao> "+" <dir:ExpressaoMultiplicacao> => 
+        Expressao::Aritmetica(OperadorAritmetico::Soma, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoMultiplicacao> "-" <dir:ExpressaoMultiplicacao> => 
+        Expressao::Aritmetica(OperadorAritmetico::Subtracao, Box::new(esq), Box::new(dir)),
 };
 
-ExpressaoMultiplicacao: crate::ast::Expressao = {
-    #[precedence(level="1")]
-    ExpressaoUnaria,
-    
-    #[precedence(level="2")]
-    #[assoc(side="left")]
-    <esq:ExpressaoMultiplicacao> "*" <dir:ExpressaoUnaria> => 
-        crate::ast::Expressao::Aritmetica(crate::ast::OperadorAritmetico::Multiplicacao, Box::new(esq), Box::new(dir)),
-    <esq:ExpressaoMultiplicacao> "/" <dir:ExpressaoUnaria> => 
-        crate::ast::Expressao::Aritmetica(crate::ast::OperadorAritmetico::Divisao, Box::new(esq), Box::new(dir)),
-    <esq:ExpressaoMultiplicacao> "%" <dir:ExpressaoUnaria> => 
-        crate::ast::Expressao::Aritmetica(crate::ast::OperadorAritmetico::Modulo, Box::new(esq), Box::new(dir)),
-};
-
-ExpressaoUnaria: crate::ast::Expressao = {
+ExpressaoMultiplicacao: Expressao = {
     ExpressaoPrimaria,
-    "!" <expr:ExpressaoUnaria> => 
-        crate::ast::Expressao::Unario(crate::ast::OperadorUnario::Nao, Box::new(expr)),
-    "-" <expr:ExpressaoUnaria> => 
-        crate::ast::Expressao::Unario(crate::ast::OperadorUnario::Menos, Box::new(expr)),
+    <esq:ExpressaoPrimaria> "*" <dir:ExpressaoPrimaria> => 
+        Expressao::Aritmetica(OperadorAritmetico::Multiplicacao, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoPrimaria> "/" <dir:ExpressaoPrimaria> => 
+        Expressao::Aritmetica(OperadorAritmetico::Divisao, Box::new(esq), Box::new(dir)),
+    <esq:ExpressaoPrimaria> "%" <dir:ExpressaoPrimaria> => 
+        Expressao::Aritmetica(OperadorAritmetico::Modulo, Box::new(esq), Box::new(dir)),
 };
 
-ExpressaoPrimaria: crate::ast::Expressao = {
-    <n:r"[0-9]+"> => crate::ast::Expressao::Inteiro(n),
-    <s:r#""[^"]*""#> => crate::ast::Expressao::Texto(s),
-    "verdadeiro" => crate::ast::Expressao::Booleano(true),
-    "falso" => crate::ast::Expressao::Booleano(false),
-    <id:r"[a-zA-Z_][a-zA-Z0-9_]*"> => crate::ast::Expressao::Identificador(id),
+ExpressaoPrimaria: Expressao = {
+    <n:NumeroLiteral> => Expressao::Inteiro(n),
+    <s:StringLiteral> => Expressao::Texto(s),
+    "verdadeiro" => Expressao::Booleano(true),
+    "falso" => Expressao::Booleano(false),
+    <id:Identificador> => Expressao::Identificador(id),
     "(" <expr:Expressao> ")" => expr,
+    <funcao:Identificador> "(" ")" => 
+        Expressao::Chamada(funcao, vec![]),
+    <funcao:Identificador> "(" <arg:Expressao> ")" => 
+        Expressao::Chamada(funcao, vec![arg]),
+    <funcao:Identificador> "(" <arg1:Expressao> "," <arg2:Expressao> ")" => 
+        Expressao::Chamada(funcao, vec![arg1, arg2]),
+    <funcao:Identificador> "(" <arg1:Expressao> "," <arg2:Expressao> "," <arg3:Expressao> ")" => 
+        Expressao::Chamada(funcao, vec![arg1, arg2, arg3]),
 };
+
+Identificador: String = <id:TIdentificador> => id;
+NumeroLiteral: i64 = <n:TInteiro> => n;
+StringLiteral: String = <s:TString> => s;
 
 extern {
     type Location = usize;
@@ -148,41 +314,34 @@ extern {
         "então" => Token::TEntao,
         "senão" => Token::TSenao,
         "enquanto" => Token::TEnquanto,
-        "para" => Token::TPara,
         "funcao" => Token::TFuncao,
         "retorne" => Token::TRetorne,
         "imprima" => Token::TImprima,
         "inteiro" => Token::TTipoInteiro,
         "texto" => Token::TTipoTexto,
         "booleano" => Token::TTipoBooleano,
+        "vazio" => Token::TTipoVazio,
         "verdadeiro" => Token::TVerdadeiro,
         "falso" => Token::TFalso,
         "=" => Token::TAtribuicao,
         "==" => Token::TIgual,
         "!=" => Token::TDiferente,
         ">" => Token::TMaiorQue,
-        ">=" => Token::TMaiorIgual,
         "<" => Token::TMenor,
-        "<=" => Token::TMenorIgual,
         "+" => Token::TMais,
         "-" => Token::TMenos,
         "*" => Token::TMultiplicacao,
         "/" => Token::TDivisao,
-        "%" => Token::TModulo,  // Adicionado operador módulo
-        "&&" => Token::TE,
-        "||" => Token::TOu,
-        "!" => Token::TNao,
+        "%" => Token::TModulo,
         "(" => Token::TParenEsq,
         ")" => Token::TParenDir,
         "{" => Token::TChaveEsq,
         "}" => Token::TChaveDir,
-        "[" => Token::TColcheteEsq,
-        "]" => Token::TColcheteDir,
         ";" => Token::TPontoVirgula,
         "," => Token::TVirgula,
-        "->" => Token::TSeta,
-        r#""[^"]*""# => Token::TString(<String>),
-        r"[a-zA-Z_][a-zA-Z0-9_]*" => Token::TIdentificador(<String>),
-        r"[0-9]+" => Token::TInteiro(<i64>),
+        "=>" => Token::TSeta,
+        TString => Token::TString(<String>),
+        TIdentificador => Token::TIdentificador(<String>),
+        TInteiro => Token::TInteiro(<i64>),
     }
 }

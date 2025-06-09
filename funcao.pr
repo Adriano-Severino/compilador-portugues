@@ -1,0 +1,64 @@
+// Sintaxe 1: Sem tipo de retorno (implícito vazio)
+funcao principal() {
+    imprima("Olá mundo");
+}
+
+// Sintaxe 2: Com parâmetros, sem tipo de retorno
+funcao configurar(texto nome) {
+    imprima("Configurando: " + nome);
+}
+
+// Sintaxe 3: Tipo de retorno no final (original)
+funcao calcular() => inteiro {
+    retorne 42;
+}
+
+// Sintaxe 4: Com parâmetros e tipo no final
+funcao multiplicar(inteiro a, inteiro b) => inteiro {
+    retorne a * b;
+}
+
+// Sintaxe 5: NOVA - Tipo no início (sua preferência)
+funcao inteiro somar(inteiro a, inteiro b) {
+    retorne a + b;
+}
+
+// Sintaxe 6: NOVA - Outros tipos no início
+funcao texto obter_nome() {
+    retorne "João";
+}
+
+funcao booleano eh_par(inteiro numero) {
+    retorne numero % 2 == 0;
+}
+
+funcao vazio imprimir_linha() {
+    imprima("================");
+}
+
+// Para classes personalizadas
+funcao Pessoa criar_pessoa(texto nome, inteiro idade) {
+    retorne novo Pessoa(nome, idade);
+}
+
+// Sintaxe sem tipo de retorno
+funcao processar_dados(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) {
+    imprima("Processando dados completos");
+}
+
+// Sintaxe com tipo no início
+funcao texto gerar_relatorio(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) {
+    retorne "Relatório gerado";
+}
+
+// Sintaxe com seta
+funcao processar_completo(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) => texto {
+    retorne "Processamento completo";
+}
+
+// Chamadas das funções
+funcao principal() {
+    processar_dados("João", 30, verdadeiro, "Rua A", "123456789");
+    texto resultado = gerar_relatorio("Joana", 25, falso, "Rua B", "987654321");
+    texto processo = processar_completo("Mario", 35, verdadeiro, "Rua C", "123456789");
+}

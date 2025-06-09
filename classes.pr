@@ -1,0 +1,18 @@
+publico classe Pessoa {
+    privado texto nome;
+    privado inteiro idade;
+    
+    publico construtor(texto nome_param, inteiro idade_param) {
+        este.nome = nome_param;
+        este.idade = idade_param;
+    }
+    
+    publico metodo apresentar() => texto {
+        retorne "Olá, eu sou " + este.nome;
+    }
+}
+
+funcao principal() {
+    Pessoa p = novo Pessoa("João", 25);
+    imprima(p.apresentar());
+}
