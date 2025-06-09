@@ -140,6 +140,18 @@ MetodoClasse: ast::MetodoClasse = {
     },
 };
 
+// === CONSTRUTORES ===
+ConstrutorClasse: ast::ConstrutorClasse = {
+    <modificador:ModificadorAcesso?> <_nome_construtor_token:Identificador> "(" <params:ParametrosOpcionais> ")" <corpo:BlocoComando> => ast::ConstrutorClasse {
+        // O nome do construtor (_nome_construtor_token) deve corresponder ao nome da classe.
+        // Esta verificação é realizada durante a análise semântica.
+        // A lista 'params' (através de ParametrosOpcionais e ParametroCompleto) já suporta parâmetros com valores padrão.
+        parametros: params,
+        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico), // Construtores são públicos por padrão em C# se não especificado
+        corpo: corpo,
+    },
+};
+
 // === PARÂMETROS COM VALORES PADRÃO ===
 ParametroCompleto: ast::Parametro = {
     // Parâmetro obrigatório (sem valor padrão)
@@ -193,14 +205,6 @@ ParametrosOpcionais: Vec<ast::Parametro> = {
         if let Some(p) = e { params.push(p); }
         params
     }
-};
-
-ParametroCompleto: ast::Parametro = {
-    <tipo:TipoBasico> <nome:Identificador> <default_val_group: ("=" <Expressao>)?> => ast::Parametro {
-        nome,
-        tipo,
-        valor_padrao: default_val_group.map(|g| g.1), // Changed to access tuple element
-    },
 };
 
 // === ARGUMENTOS ===
@@ -370,9 +374,10 @@ ChamadaFuncao: ast::Expressao = {
 NomeQualificado: String = {
     <head:Identificador> <tail: ("." <Identificador>)*> => {
         let mut result = head;
-        for (_dot, ident_str) in tail { // Destructure the tuple
+        // Se 'tail' é Vec<String>, cada 'ident_part' é um segmento após um '.'
+        for ident_part in tail {
             result.push('.');
-            result.push_str(&ident_str); // Use the destructured ident_str
+            result.push_str(&ident_part);
         }
         result
     }

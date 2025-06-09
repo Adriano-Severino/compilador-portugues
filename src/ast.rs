@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+// use std::collections::HashMap; // Remova ou comente se não for usado diretamente aqui
 
 // === TIPOS BÁSICOS ===
 #[derive(Debug, Clone, PartialEq)]
@@ -44,7 +44,8 @@ pub enum Declaracao {
     DeclaracaoInterface(DeclaracaoInterface),
     DeclaracaoEnum(DeclaracaoEnum),
     DeclaracaoTipo(DeclaracaoTipo),
-    ImportDeclaration(ImportDeclaration),
+    Importacao(Importacao),
+    Exportacao(Exportacao),
     Comando(Comando),
 }
 
@@ -82,9 +83,16 @@ pub struct DeclaracaoTipo {
 }
 
 #[derive(Debug, Clone)]
-pub struct ImportDeclaration {
+pub struct Importacao {
     pub caminho: String,
     pub itens: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Exportacao {
+    pub nome: String, // O nome do item sendo exportado (função, classe, etc.)
+    // pub tipo_item: TipoItemExportado, // Opcional: para saber o que está sendo exportado
+    pub publico: bool, // Geralmente true para exportações
 }
 
 // === CLASSES ===
@@ -96,7 +104,7 @@ pub struct DeclaracaoClasse {
     pub campos: Vec<CampoClasse>,
     pub propriedades: Vec<PropriedadeClasse>,
     pub metodos: Vec<MetodoClasse>,
-    pub construtores: Vec<Construtor>,
+    pub construtores: Vec<ConstrutorClasse>,
     pub eh_abstrata: bool,
 }
 
@@ -105,7 +113,7 @@ pub enum MembroClasse {
     Campo(CampoClasse),
     Propriedade(PropriedadeClasse),
     Metodo(MetodoClasse),
-    Construtor(Construtor),
+    Construtor(ConstrutorClasse),
 }
 
 #[derive(Debug, Clone)]
@@ -147,7 +155,7 @@ pub struct MetodoClasse {
 }
 
 #[derive(Debug, Clone)]
-pub struct Construtor {
+pub struct ConstrutorClasse {
     pub parametros: Vec<Parametro>,
     pub modificador: ModificadorAcesso,
     pub corpo: Vec<Comando>,
@@ -213,7 +221,14 @@ pub enum Expressao {
     ChamadaMetodo(Box<Expressao>, String, Vec<Expressao>),
     Chamada(String, Vec<Expressao>),
     StringInterpolada(Vec<PartStringInterpolada>),
+    Unario(OperadorUnario, Box<Expressao>),
     Este,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum OperadorUnario {
+    NegacaoLogica, // !
+    NegacaoNumerica, // -
 }
 
 #[derive(Debug, Clone)]

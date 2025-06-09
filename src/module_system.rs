@@ -109,7 +109,7 @@ impl SistemaModulos {
         if let Some(modulo) = self.modulos.get(&importacao.caminho) {
             let mut declaracoes = Vec::new();
             
-            if importacao.items.is_empty() {
+            if importacao.itens.is_empty() {
                 // Importar tudo que é público
                 for decl in &modulo.declaracoes {
                     if self.is_declaracao_publica(decl) {
@@ -118,7 +118,7 @@ impl SistemaModulos {
                 }
             } else {
                 // Importar itens específicos
-                for item in &importacao.items {
+                for item in &importacao.itens {
                     if let Some(decl) = self.encontrar_declaracao_por_nome(&modulo.declaracoes, item) {
                         if self.is_declaracao_publica(decl) {
                             declaracoes.push(decl.clone());

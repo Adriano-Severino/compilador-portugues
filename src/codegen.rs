@@ -101,7 +101,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
             Declaracao::DeclaracaoTipo(tipo_decl) => {
                 println!("Registrando tipo personalizado: {}", tipo_decl.nome);
             }
-            Declaracao::ImportDeclaration(import) => {
+            Declaracao::Importacao(import) => {
                 println!("Processando import: {}", import.caminho);
             }
         }

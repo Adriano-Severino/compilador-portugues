@@ -62,81 +62,90 @@ impl AnalisadorOwnership {
 
     fn analisar_comando(&mut self, comando: &Comando) {
         self.instrucao_atual += 1;
-        
+
         match comando {
             Comando::DeclaracaoVariavel(tipo, nome, valor) => {
                 if let Some(expr) = valor {
                     self.analisar_expressao(expr);
                 }
-                
+
                 let pode_ser_movido = match tipo {
                     Tipo::Inteiro | Tipo::Booleano => false, // Tipos primitivos são copiados
                     Tipo::Texto | Tipo::Classe(_) | Tipo::Lista(_) => true, // Tipos complexos podem ser movidos
                     _ => false,
                 };
 
-                self.variaveis.insert(nome.clone(), InfoOwnership {
-                    status: StatusOwnership::Dono,
-                    escopo_criacao: self.escopo_atual,
-                    ultimo_uso: None,
-                    pode_ser_movido,
-                });
-            },
-            
+                self.variaveis.insert(
+                    nome.clone(),
+                    InfoOwnership {
+                        status: StatusOwnership::Dono,
+                        escopo_criacao: self.escopo_atual,
+                        ultimo_uso: None,
+                        pode_ser_movido,
+                    },
+                );
+            }
+
             Comando::Atribuicao(nome, expr) => {
                 self.analisar_movimento_em_expressao(expr);
                 if let Some(info) = self.variaveis.get_mut(nome) {
                     info.ultimo_uso = Some(self.instrucao_atual);
                     info.status = StatusOwnership::Dono; // Reassinalao restaura ownership
                 }
-            },
-            
+            }
+
             Comando::Se(cond, cmd_if, cmd_else) => {
                 self.analisar_expressao(cond);
                 self.analisar_comando(cmd_if);
                 if let Some(cmd) = cmd_else {
                     self.analisar_comando(cmd);
                 }
-            },
-            
+            }
+
             Comando::Enquanto(cond, corpo) => {
                 self.analisar_expressao(cond);
                 self.analisar_comando(corpo);
-            },
-            
+            }
+
             Comando::Para(var, inicio, fim, corpo) => {
-                self.analisar_expressao(inicio);
-                self.analisar_expressao(fim);
-                
+                if let Some(expr) = &inicio {
+                    self.analisar_expressao(expr);
+                }
+                if let Some(expr) = &fim {
+                    self.analisar_expressao(expr);
+                }
                 self.entrar_escopo();
-                self.variaveis.insert(var.clone(), InfoOwnership {
-                    status: StatusOwnership::Dono,
-                    escopo_criacao: self.escopo_atual,
-                    ultimo_uso: None,
-                    pode_ser_movido: false, // Variável de loop não pode ser movida
-                });
+                self.variaveis.insert(
+                    var.clone(),
+                    InfoOwnership {
+                        status: StatusOwnership::Dono,
+                        escopo_criacao: self.escopo_atual,
+                        ultimo_uso: None,
+                        pode_ser_movido: false, // Variável de loop não pode ser movida
+                    },
+                );
                 self.analisar_comando(corpo);
                 self.sair_escopo();
-            },
-            
+            }
+
             Comando::Bloco(comandos) => {
                 self.entrar_escopo();
                 for cmd in comandos {
                     self.analisar_comando(cmd);
                 }
                 self.sair_escopo();
-            },
-            
+            }
+
             Comando::Retorne(expr) => {
                 if let Some(expr) = expr {
                     self.analisar_movimento_em_expressao(expr);
                 }
-            },
-            
+            }
+
             Comando::Expressao(expr) => {
                 self.analisar_expressao(expr);
-            },
-            
+            }
+
             _ => {}
         }
     }
@@ -158,44 +167,44 @@ impl AnalisadorOwnership {
                         }
                     }
                 }
-            },
-            
+            }
+
             Expressao::AcessoMembro(obj, _) => {
                 self.analisar_expressao(obj);
-            },
-            
+            }
+
             Expressao::ChamadaMetodo(obj, _, args) => {
                 self.analisar_expressao(obj);
                 for arg in args {
                     self.analisar_movimento_em_expressao(arg);
                 }
-            },
-            
+            }
+
             Expressao::Chamada(_, args) => {
                 for arg in args {
                     self.analisar_movimento_em_expressao(arg);
                 }
-            },
-            
+            }
+
             Expressao::Aritmetica(_, esq, dir) => {
                 self.analisar_expressao(esq);
                 self.analisar_expressao(dir);
-            },
-            
+            }
+
             Expressao::Comparacao(_, esq, dir) => {
                 self.analisar_expressao(esq);
                 self.analisar_expressao(dir);
-            },
-            
+            }
+
             Expressao::Logica(_, esq, dir) => {
                 self.analisar_expressao(esq);
                 self.analisar_expressao(dir);
-            },
-            
+            }
+
             Expressao::Unario(_, expr) => {
                 self.analisar_expressao(expr);
-            },
-            
+            }
+
             _ => {}
         }
     }
@@ -218,7 +227,7 @@ impl AnalisadorOwnership {
                         info.ultimo_uso = Some(self.instrucao_atual);
                     }
                 }
-            },
+            }
             _ => self.analisar_expressao(expr),
         }
     }
@@ -227,7 +236,7 @@ impl AnalisadorOwnership {
         for metodo in &classe.metodos {
             self.analisar_metodo(metodo);
         }
-        
+
         for construtor in &classe.construtores {
             self.analisar_construtor(construtor);
         }
@@ -235,20 +244,23 @@ impl AnalisadorOwnership {
 
     fn analisar_funcao(&mut self, funcao: &DeclaracaoFuncao) {
         self.entrar_escopo();
-        
+
         // Parâmetros são donos de seus valores
         for param in &funcao.parametros {
             let pode_ser_movido = match param.tipo {
                 Tipo::Inteiro | Tipo::Booleano => false,
                 _ => true,
             };
-            
-            self.variaveis.insert(param.nome.clone(), InfoOwnership {
-                status: StatusOwnership::Dono,
-                escopo_criacao: self.escopo_atual,
-                ultimo_uso: None,
-                pode_ser_movido,
-            });
+
+            self.variaveis.insert(
+                param.nome.clone(),
+                InfoOwnership {
+                    status: StatusOwnership::Dono,
+                    escopo_criacao: self.escopo_atual,
+                    ultimo_uso: None,
+                    pode_ser_movido,
+                },
+            );
         }
 
         for comando in &funcao.corpo {
@@ -260,14 +272,17 @@ impl AnalisadorOwnership {
 
     fn analisar_metodo(&mut self, metodo: &MetodoClasse) {
         self.entrar_escopo();
-        
+
         // Adicionar 'este' implícito
-        self.variaveis.insert("este".to_string(), InfoOwnership {
-            status: StatusOwnership::Emprestado, // 'este' é sempre emprestado
-            escopo_criacao: self.escopo_atual,
-            ultimo_uso: None,
-            pode_ser_movido: false,
-        });
+        self.variaveis.insert(
+            "este".to_string(),
+            InfoOwnership {
+                status: StatusOwnership::Emprestado, // 'este' é sempre emprestado
+                escopo_criacao: self.escopo_atual,
+                ultimo_uso: None,
+                pode_ser_movido: false,
+            },
+        );
 
         // Parâmetros
         for param in &metodo.parametros {
@@ -275,13 +290,16 @@ impl AnalisadorOwnership {
                 Tipo::Inteiro | Tipo::Booleano => false,
                 _ => true,
             };
-            
-            self.variaveis.insert(param.nome.clone(), InfoOwnership {
-                status: StatusOwnership::Dono,
-                escopo_criacao: self.escopo_atual,
-                ultimo_uso: None,
-                pode_ser_movido,
-            });
+
+            self.variaveis.insert(
+                param.nome.clone(),
+                InfoOwnership {
+                    status: StatusOwnership::Dono,
+                    escopo_criacao: self.escopo_atual,
+                    ultimo_uso: None,
+                    pode_ser_movido,
+                },
+            );
         }
 
         for comando in &metodo.corpo {
@@ -291,22 +309,25 @@ impl AnalisadorOwnership {
         self.sair_escopo();
     }
 
-    fn analisar_construtor(&mut self, construtor: &Construtor) {
+    fn analisar_construtor(&mut self, construtor: &ConstrutorClasse) {
         self.entrar_escopo();
-        
+
         // Parâmetros
         for param in &construtor.parametros {
             let pode_ser_movido = match param.tipo {
                 Tipo::Inteiro | Tipo::Booleano => false,
                 _ => true,
             };
-            
-            self.variaveis.insert(param.nome.clone(), InfoOwnership {
-                status: StatusOwnership::Dono,
-                escopo_criacao: self.escopo_atual,
-                ultimo_uso: None,
-                pode_ser_movido,
-            });
+
+            self.variaveis.insert(
+                param.nome.clone(),
+                InfoOwnership {
+                    status: StatusOwnership::Dono,
+                    escopo_criacao: self.escopo_atual,
+                    ultimo_uso: None,
+                    pode_ser_movido,
+                },
+            );
         }
 
         for comando in &construtor.corpo {
@@ -319,9 +340,8 @@ impl AnalisadorOwnership {
     fn verificar_variaveis_nao_utilizadas(&mut self) {
         for (nome, info) in &self.variaveis {
             if info.ultimo_uso.is_none() && nome != "este" {
-                self.warnings.push(format!(
-                    "Variável '{}' declarada mas nunca utilizada", nome
-                ));
+                self.warnings
+                    .push(format!("Variável '{}' declarada mas nunca utilizada", nome));
             }
         }
     }
@@ -332,7 +352,8 @@ impl AnalisadorOwnership {
 
     fn sair_escopo(&mut self) {
         // Remove variáveis do escopo atual
-        self.variaveis.retain(|_, info| info.escopo_criacao < self.escopo_atual);
+        self.variaveis
+            .retain(|_, info| info.escopo_criacao < self.escopo_atual);
         self.escopo_atual -= 1;
     }
 }
