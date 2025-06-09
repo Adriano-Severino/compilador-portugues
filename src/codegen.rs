@@ -157,8 +157,10 @@ impl<'ctx> GeradorCodigo<'ctx> {
             Comando::AtribuirPropriedade(objeto, propriedade, expr) => {
                 let valor = self.avaliar_expressao(expr)?;
 
-                if let Some(ValorAvaliado::Objeto { propriedades, classe }) =
-                    self.buscar_variavel(objeto)
+                if let Some(ValorAvaliado::Objeto {
+                    propriedades,
+                    classe,
+                }) = self.buscar_variavel(objeto)
                 {
                     let mut nova_propriedades = propriedades;
                     nova_propriedades.insert(propriedade.clone(), valor);
@@ -229,23 +231,23 @@ impl<'ctx> GeradorCodigo<'ctx> {
 
             Comando::Para(inicializacao, condicao, incremento, corpo) => {
                 println!("Executando loop 'para'");
-                
+
                 self.entrar_escopo();
-                
+
                 if let Some(init) = inicializacao {
                     self.compilar_comando(init)?;
                 }
-                
+
                 let limite_iteracoes = 1000;
                 let mut iteracoes = 0;
-                
+
                 loop {
                     iteracoes += 1;
                     if iteracoes > limite_iteracoes {
                         self.sair_escopo();
                         return Err("Loop 'para' excedeu o limite máximo de iterações".to_string());
                     }
-                    
+
                     if let Some(cond) = condicao {
                         let cond_valor = self.avaliar_expressao(cond)?;
                         let continuar = match cond_valor {
@@ -253,19 +255,19 @@ impl<'ctx> GeradorCodigo<'ctx> {
                             ValorAvaliado::Inteiro(i) => i != 0,
                             _ => false,
                         };
-                        
+
                         if !continuar {
                             break;
                         }
                     }
-                    
+
                     self.compilar_comando(corpo)?;
-                    
+
                     if let Some(inc) = incremento {
                         self.compilar_comando(inc)?;
                     }
                 }
-                
+
                 self.sair_escopo();
             }
 
@@ -292,49 +294,71 @@ impl<'ctx> GeradorCodigo<'ctx> {
 
             Comando::CriarObjeto(var_nome, classe, argumentos) => {
                 println!("Criando objeto '{}' da classe '{}'", var_nome, classe);
-                
+
                 let objeto = self.criar_instancia_objeto(classe, argumentos)?;
                 self.definir_variavel(var_nome.clone(), objeto);
-                
+
                 println!("Objeto '{}' criado com sucesso", var_nome);
             }
 
             Comando::ChamarMetodo(objeto_nome, metodo, argumentos) => {
                 println!("Chamando método '{}.{}'", objeto_nome, metodo);
-                
+
                 if self.buscar_variavel(objeto_nome).is_none() {
                     return Err(format!("Objeto '{}' não encontrado", objeto_nome));
                 }
-                
-                println!("Método '{}.{}' executado com {} argumentos", objeto_nome, metodo, argumentos.len());
+
+                println!(
+                    "Método '{}.{}' executado com {} argumentos",
+                    objeto_nome,
+                    metodo,
+                    argumentos.len()
+                );
             }
 
             Comando::AcessarCampo(objeto_nome, campo) => {
                 println!("Acessando campo '{}.{}'", objeto_nome, campo);
-                
-                if let Some(ValorAvaliado::Objeto { propriedades, .. }) = self.buscar_variavel(objeto_nome) {
+
+                if let Some(ValorAvaliado::Objeto { propriedades, .. }) =
+                    self.buscar_variavel(objeto_nome)
+                {
                     if let Some(valor) = propriedades.get(campo) {
-                        println!("Valor do campo '{}.{}': {}", objeto_nome, campo, self.valor_para_string(valor));
+                        println!(
+                            "Valor do campo '{}.{}': {}",
+                            objeto_nome,
+                            campo,
+                            self.valor_para_string(valor)
+                        );
                     } else {
-                        return Err(format!("Campo '{}' não encontrado no objeto '{}'", campo, objeto_nome));
+                        return Err(format!(
+                            "Campo '{}' não encontrado no objeto '{}'",
+                            campo, objeto_nome
+                        ));
                     }
                 } else {
-                    return Err(format!("Objeto '{}' não encontrado ou não é um objeto", objeto_nome));
+                    return Err(format!(
+                        "Objeto '{}' não encontrado ou não é um objeto",
+                        objeto_nome
+                    ));
                 }
             }
 
             Comando::AtribuirCampo(objeto_expr, campo, valor_expr) => {
                 let valor = self.avaliar_expressao(valor_expr)?;
-                
+
                 if let Expressao::Identificador(objeto_nome) = objeto_expr.as_ref() {
-                    if let Some(ValorAvaliado::Objeto { mut propriedades, classe }) = self.buscar_variavel(objeto_nome) {
+                    if let Some(ValorAvaliado::Objeto {
+                        mut propriedades,
+                        classe,
+                    }) = self.buscar_variavel(objeto_nome)
+                    {
                         propriedades.insert(campo.clone(), valor);
-                        
+
                         let novo_objeto = ValorAvaliado::Objeto {
                             classe,
                             propriedades,
                         };
-                        
+
                         self.atualizar_variavel(objeto_nome, novo_objeto)?;
                         println!("Campo '{}.{}' atualizado", objeto_nome, campo);
                     } else {
@@ -350,27 +374,20 @@ impl<'ctx> GeradorCodigo<'ctx> {
     }
 
     // ✅ DINÂMICO: Resolver argumentos com parâmetros padrão automaticamente
+    // No seu codegen.rs, melhore esta função:
     fn resolver_argumentos_construtor(
         &self,
         argumentos: &[Expressao],
-        parametros: &[Parametro]
+        parametros: &[Parametro],
     ) -> Result<Vec<(String, ValorAvaliado)>, String> {
         let mut args_resolvidos = Vec::new();
-        
-        // Verificar se não passamos mais argumentos que parâmetros
-        if argumentos.len() > parametros.len() {
-            return Err(format!(
-                "Muitos argumentos: esperado no máximo {}, recebido {}",
-                parametros.len(),
-                argumentos.len()
-            ));
-        }
-        
-        // Verificar parâmetros obrigatórios
-        let obrigatorios = parametros.iter()
+
+        // Verificar limites de argumentos
+        let obrigatorios = parametros
+            .iter()
             .filter(|p| p.valor_padrao.is_none())
             .count();
-            
+
         if argumentos.len() < obrigatorios {
             return Err(format!(
                 "Poucos argumentos: esperado pelo menos {}, recebido {}",
@@ -378,39 +395,40 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 argumentos.len()
             ));
         }
-        
+
+        if argumentos.len() > parametros.len() {
+            return Err(format!(
+                "Muitos argumentos: esperado no máximo {}, recebido {}",
+                parametros.len(),
+                argumentos.len()
+            ));
+        }
+
         // Processar argumentos fornecidos
         for (i, arg) in argumentos.iter().enumerate() {
             let valor = self.avaliar_expressao(arg)?;
-            args_resolvidos.push((parametros[i].nome.clone(), valor.clone()));
-            println!("  ✓ Parâmetro '{}' = {}", 
-                     parametros[i].nome, 
-                     self.valor_para_string(&valor));
+            args_resolvidos.push((parametros[i].nome.clone(), valor));
         }
-        
-        // ✅ DINÂMICO: Usar valores padrão automaticamente para parâmetros não passados
+
+        // Usar valores padrão para parâmetros não fornecidos
         for i in argumentos.len()..parametros.len() {
             if let Some(valor_padrao) = &parametros[i].valor_padrao {
                 let valor = self.avaliar_expressao(valor_padrao)?;
-                args_resolvidos.push((parametros[i].nome.clone(), valor.clone()));
-                println!("  ✓ Parâmetro '{}' = {} (padrão)", 
-                         parametros[i].nome, 
-                         self.valor_para_string(&valor));
-            } else {
-                return Err(format!(
-                    "Parâmetro '{}' é obrigatório mas não foi fornecido",
-                    parametros[i].nome
-                ));
+                args_resolvidos.push((parametros[i].nome.clone(), valor));
             }
         }
-        
+
         Ok(args_resolvidos)
     }
 
     // ✅ DINÂMICO: Criar instância sem mapeamentos fixos
-    fn criar_instancia_objeto(&self, classe: &str, argumentos: &[Expressao]) -> Result<ValorAvaliado, String> {
+    fn criar_instancia_objeto(
+        &self,
+        classe: &str,
+        argumentos: &[Expressao],
+    ) -> Result<ValorAvaliado, String> {
         let mut propriedades = HashMap::new();
-        
+
         if let Some(def_classe) = self.classes.borrow().get(classe) {
             // Inicializar propriedades com valores padrão da classe
             for propriedade in &def_classe.propriedades {
@@ -426,27 +444,34 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 };
                 propriedades.insert(propriedade.nome.clone(), valor_padrao);
             }
-            
+
             // Encontrar construtor compatível
             if !def_classe.construtores.is_empty() {
-                println!("Procurando construtor compatível para {} argumentos", argumentos.len());
-                
+                println!(
+                    "Procurando construtor compatível para {} argumentos",
+                    argumentos.len()
+                );
+
                 for construtor in &def_classe.construtores {
                     if self.construtor_compativel(&construtor.parametros, argumentos.len()) {
                         println!("✓ Encontrado construtor compatível!");
-                        
+
                         // ✅ DINÂMICO: Resolver argumentos automaticamente
-                        let parametros_resolvidos = self.resolver_argumentos_construtor(argumentos, &construtor.parametros)?;
-                        
+                        let parametros_resolvidos = self
+                            .resolver_argumentos_construtor(argumentos, &construtor.parametros)?;
+
                         // ✅ DINÂMICO: Executar construtor sem mapeamentos fixos
-                        self.executar_construtor_dinamico(&parametros_resolvidos, &mut propriedades)?;
-                        
+                        self.executar_construtor_dinamico(
+                            &parametros_resolvidos,
+                            &mut propriedades,
+                        )?;
+
                         break;
                     }
                 }
             }
         }
-        
+
         Ok(ValorAvaliado::Objeto {
             classe: classe.to_string(),
             propriedades,
@@ -456,18 +481,23 @@ impl<'ctx> GeradorCodigo<'ctx> {
     // ✅ MELHORADO: Verificar compatibilidade do construtor dinamicamente
     fn construtor_compativel(&self, parametros: &[Parametro], num_argumentos: usize) -> bool {
         // Contar parâmetros obrigatórios (sem valor padrão)
-        let obrigatorios = parametros.iter()
+        let obrigatorios = parametros
+            .iter()
             .filter(|p| p.valor_padrao.is_none())
             .count();
-        
+
         // Deve ter pelo menos os obrigatórios e no máximo todos os parâmetros
         let resultado = num_argumentos >= obrigatorios && num_argumentos <= parametros.len();
-        
+
         if resultado {
-            println!("  ✓ Construtor compatível: {} obrigatórios, {} passados, {} total", 
-                     obrigatorios, num_argumentos, parametros.len());
+            println!(
+                "  ✓ Construtor compatível: {} obrigatórios, {} passados, {} total",
+                obrigatorios,
+                num_argumentos,
+                parametros.len()
+            );
         }
-        
+
         resultado
     }
 
@@ -475,19 +505,21 @@ impl<'ctx> GeradorCodigo<'ctx> {
     fn executar_construtor_dinamico(
         &self,
         parametros_resolvidos: &[(String, ValorAvaliado)],
-        propriedades: &mut HashMap<String, ValorAvaliado>
+        propriedades: &mut HashMap<String, ValorAvaliado>,
     ) -> Result<(), String> {
         for (nome_parametro, valor) in parametros_resolvidos {
             // ✅ DINÂMICO: Converter nome do parâmetro para nome da propriedade automaticamente
             let nome_propriedade = self.converter_parametro_para_propriedade(nome_parametro);
-            
+
             // Verificar se a propriedade existe na classe
             if propriedades.contains_key(&nome_propriedade) {
                 propriedades.insert(nome_propriedade.clone(), valor.clone());
-                println!("  ✓ Propriedade '{}' ← parâmetro '{}' = {}", 
-                         nome_propriedade, 
-                         nome_parametro, 
-                         self.valor_para_string(valor));
+                println!(
+                    "  ✓ Propriedade '{}' ← parâmetro '{}' = {}",
+                    nome_propriedade,
+                    nome_parametro,
+                    self.valor_para_string(valor)
+                );
             } else {
                 // Se não existe propriedade direta, tentar algumas variações
                 let variantes = vec![
@@ -495,26 +527,31 @@ impl<'ctx> GeradorCodigo<'ctx> {
                     nome_parametro.to_lowercase(),
                     self.capitalizar_primeira_letra(nome_parametro),
                 ];
-                
+
                 let mut encontrou = false;
                 for variante in &variantes {
                     if propriedades.contains_key(variante) {
                         propriedades.insert(variante.clone(), valor.clone());
-                        println!("  ✓ Propriedade '{}' ← parâmetro '{}' = {} (variante)", 
-                                 variante, 
-                                 nome_parametro, 
-                                 self.valor_para_string(valor));
+                        println!(
+                            "  ✓ Propriedade '{}' ← parâmetro '{}' = {} (variante)",
+                            variante,
+                            nome_parametro,
+                            self.valor_para_string(valor)
+                        );
                         encontrou = true;
                         break;
                     }
                 }
-                
+
                 if !encontrou {
-                    println!("  ⚠️ Propriedade para parâmetro '{}' não encontrada", nome_parametro);
+                    println!(
+                        "  ⚠️ Propriedade para parâmetro '{}' não encontrada",
+                        nome_parametro
+                    );
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -525,7 +562,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
             .replace("_param", "")
             .replace("Param", "")
             .replace("_", "");
-        
+
         // Capitalizar primeira letra (convenção C# para propriedades)
         self.capitalizar_primeira_letra(&nome_limpo)
     }
@@ -535,7 +572,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
         if texto.is_empty() {
             return String::new();
         }
-        
+
         let mut chars: Vec<char> = texto.chars().collect();
         chars[0] = chars[0].to_uppercase().next().unwrap_or(chars[0]);
         chars.iter().collect()
@@ -555,26 +592,42 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 let val_dir = self.avaliar_expressao(dir)?;
 
                 match (op, val_esq, val_dir) {
-                    (OperadorAritmetico::Soma, ValorAvaliado::Inteiro(a), ValorAvaliado::Inteiro(b)) => {
-                        Ok(ValorAvaliado::Inteiro(a + b))
-                    }
-                    (OperadorAritmetico::Soma, ValorAvaliado::Texto(a), ValorAvaliado::Texto(b)) => {
-                        Ok(ValorAvaliado::Texto(format!("{}{}", a, b)))
-                    }
-                    (OperadorAritmetico::Subtracao, ValorAvaliado::Inteiro(a), ValorAvaliado::Inteiro(b)) => {
-                        Ok(ValorAvaliado::Inteiro(a - b))
-                    }
-                    (OperadorAritmetico::Multiplicacao, ValorAvaliado::Inteiro(a), ValorAvaliado::Inteiro(b)) => {
-                        Ok(ValorAvaliado::Inteiro(a * b))
-                    }
-                    (OperadorAritmetico::Divisao, ValorAvaliado::Inteiro(a), ValorAvaliado::Inteiro(b)) => {
+                    (
+                        OperadorAritmetico::Soma,
+                        ValorAvaliado::Inteiro(a),
+                        ValorAvaliado::Inteiro(b),
+                    ) => Ok(ValorAvaliado::Inteiro(a + b)),
+                    (
+                        OperadorAritmetico::Soma,
+                        ValorAvaliado::Texto(a),
+                        ValorAvaliado::Texto(b),
+                    ) => Ok(ValorAvaliado::Texto(format!("{}{}", a, b))),
+                    (
+                        OperadorAritmetico::Subtracao,
+                        ValorAvaliado::Inteiro(a),
+                        ValorAvaliado::Inteiro(b),
+                    ) => Ok(ValorAvaliado::Inteiro(a - b)),
+                    (
+                        OperadorAritmetico::Multiplicacao,
+                        ValorAvaliado::Inteiro(a),
+                        ValorAvaliado::Inteiro(b),
+                    ) => Ok(ValorAvaliado::Inteiro(a * b)),
+                    (
+                        OperadorAritmetico::Divisao,
+                        ValorAvaliado::Inteiro(a),
+                        ValorAvaliado::Inteiro(b),
+                    ) => {
                         if b == 0 {
                             Err("Divisão por zero".to_string())
                         } else {
                             Ok(ValorAvaliado::Inteiro(a / b))
                         }
                     }
-                    (OperadorAritmetico::Modulo, ValorAvaliado::Inteiro(a), ValorAvaliado::Inteiro(b)) => {
+                    (
+                        OperadorAritmetico::Modulo,
+                        ValorAvaliado::Inteiro(a),
+                        ValorAvaliado::Inteiro(b),
+                    ) => {
                         if b == 0 {
                             Err("Módulo por zero".to_string())
                         } else {
@@ -590,12 +643,36 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 let val_dir = self.avaliar_expressao(dir)?;
 
                 let resultado = match (op, &val_esq, &val_dir) {
-                    (OperadorComparacao::Igual, ValorAvaliado::Inteiro(a), ValorAvaliado::Inteiro(b)) => a == b,
-                    (OperadorComparacao::Diferente, ValorAvaliado::Inteiro(a), ValorAvaliado::Inteiro(b)) => a != b,
-                    (OperadorComparacao::Menor, ValorAvaliado::Inteiro(a), ValorAvaliado::Inteiro(b)) => a < b,
-                    (OperadorComparacao::MaiorQue, ValorAvaliado::Inteiro(a), ValorAvaliado::Inteiro(b)) => a > b,
-                    (OperadorComparacao::MenorIgual, ValorAvaliado::Inteiro(a), ValorAvaliado::Inteiro(b)) => a <= b,
-                    (OperadorComparacao::MaiorIgual, ValorAvaliado::Inteiro(a), ValorAvaliado::Inteiro(b)) => a >= b,
+                    (
+                        OperadorComparacao::Igual,
+                        ValorAvaliado::Inteiro(a),
+                        ValorAvaliado::Inteiro(b),
+                    ) => a == b,
+                    (
+                        OperadorComparacao::Diferente,
+                        ValorAvaliado::Inteiro(a),
+                        ValorAvaliado::Inteiro(b),
+                    ) => a != b,
+                    (
+                        OperadorComparacao::Menor,
+                        ValorAvaliado::Inteiro(a),
+                        ValorAvaliado::Inteiro(b),
+                    ) => a < b,
+                    (
+                        OperadorComparacao::MaiorQue,
+                        ValorAvaliado::Inteiro(a),
+                        ValorAvaliado::Inteiro(b),
+                    ) => a > b,
+                    (
+                        OperadorComparacao::MenorIgual,
+                        ValorAvaliado::Inteiro(a),
+                        ValorAvaliado::Inteiro(b),
+                    ) => a <= b,
+                    (
+                        OperadorComparacao::MaiorIgual,
+                        ValorAvaliado::Inteiro(a),
+                        ValorAvaliado::Inteiro(b),
+                    ) => a >= b,
                     _ => return Err("Comparação inválida".to_string()),
                 };
 
@@ -652,31 +729,33 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 }
             }
 
-            Expressao::ChamadaMetodo(obj_expr, metodo, argumentos) => {
-                match metodo.as_str() {
-                    "apresentar" => Ok(ValorAvaliado::Texto("Resultado do método apresentar".to_string())),
-                    _ => Ok(ValorAvaliado::Texto(format!("Resultado do método {}", metodo))),
-                }
-            }
+            Expressao::ChamadaMetodo(obj_expr, metodo, argumentos) => match metodo.as_str() {
+                "apresentar" => Ok(ValorAvaliado::Texto(
+                    "Resultado do método apresentar".to_string(),
+                )),
+                _ => Ok(ValorAvaliado::Texto(format!(
+                    "Resultado do método {}",
+                    metodo
+                ))),
+            },
 
-            Expressao::Chamada(nome, argumentos) => {
-                match nome.as_str() {
-                    "tamanho" => Ok(ValorAvaliado::Inteiro(10)),
-                    _ => Ok(ValorAvaliado::Texto(format!("Resultado da função {}", nome))),
-                }
-            }
+            Expressao::Chamada(nome, argumentos) => match nome.as_str() {
+                "tamanho" => Ok(ValorAvaliado::Inteiro(10)),
+                _ => Ok(ValorAvaliado::Texto(format!(
+                    "Resultado da função {}",
+                    nome
+                ))),
+            },
 
-            Expressao::Este => {
-                Ok(ValorAvaliado::Objeto {
-                    classe: "Atual".to_string(),
-                    propriedades: HashMap::new(),
-                })
-            }
+            Expressao::Este => Ok(ValorAvaliado::Objeto {
+                classe: "Atual".to_string(),
+                propriedades: HashMap::new(),
+            }),
         }
     }
 
     // === MÉTODOS AUXILIARES ===
-    
+
     fn definir_variavel(&self, nome: String, valor: ValorAvaliado) {
         if let Some(escopo_atual) = self.escopos.borrow_mut().last_mut() {
             escopo_atual.insert(nome, valor);
@@ -702,7 +781,10 @@ impl<'ctx> GeradorCodigo<'ctx> {
             }
         }
 
-        Err(format!("Variável '{}' não encontrada para atualização", nome))
+        Err(format!(
+            "Variável '{}' não encontrada para atualização",
+            nome
+        ))
     }
 
     fn entrar_escopo(&self) {
@@ -718,8 +800,15 @@ impl<'ctx> GeradorCodigo<'ctx> {
             ValorAvaliado::Inteiro(i) => i.to_string(),
             ValorAvaliado::Texto(s) => s.clone(),
             ValorAvaliado::Booleano(b) => if *b { "verdadeiro" } else { "falso" }.to_string(),
-            ValorAvaliado::Objeto { classe, propriedades } => {
-                format!("Objeto de {} com {} propriedades", classe, propriedades.len())
+            ValorAvaliado::Objeto {
+                classe,
+                propriedades,
+            } => {
+                format!(
+                    "Objeto de {} com {} propriedades",
+                    classe,
+                    propriedades.len()
+                )
             }
         }
     }

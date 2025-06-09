@@ -140,18 +140,9 @@ MetodoClasse: ast::MetodoClasse = {
     },
 };
 
-// === CONSTRUTOR COM PARÂMETROS PADRÃO ===
-ConstrutorClasse: ast::Construtor = {
-    <modificador:ModificadorAcesso?> <nome_classe:Identificador> "(" <params:ParametrosOpcionais> ")" <corpo:BlocoComando> => ast::Construtor {
-        parametros: params,
-        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
-        corpo: corpo,
-    },
-};
-
 // === PARÂMETROS COM VALORES PADRÃO ===
 ParametroCompleto: ast::Parametro = {
-    // Parâmetro obrigatório
+    // Parâmetro obrigatório (sem valor padrão)
     <tipo:TipoBasico> <nome:Identificador> => ast::Parametro { 
         nome, 
         tipo, 
