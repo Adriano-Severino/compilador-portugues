@@ -35,6 +35,7 @@ pub enum Comando {
     DeclaracaoVariavel(Tipo, String, Option<Expressao>),
     DeclaracaoVar(String, Expressao),
     Atribuicao(String, Expressao),
+    AtribuirPropriedade(String, String, Expressao),
     Retorne(Option<Expressao>),
     Expressao(Expressao),
     CriarObjeto(String, String, Vec<Expressao>),
@@ -111,6 +112,37 @@ pub struct DeclaracaoClasse {
     pub metodos: Vec<MetodoClasse>,
     pub construtores: Vec<Construtor>,
     pub eh_abstrata: bool,
+}
+
+// Adicionar estas estruturas se não existirem
+#[derive(Debug, Clone)]
+pub struct DeclaracaoModulo {
+    pub nome: String,
+    pub conteudo: Vec<Declaracao>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeclaracaoInterface {
+    pub nome: String,
+    pub metodos: Vec<AssinaturaMetodo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeclaracaoEnum {
+    pub nome: String,
+    pub valores: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeclaracaoTipo {
+    pub nome: String,
+    pub tipo_base: Tipo,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportDeclaration {
+    pub caminho: String,
+    pub itens: Vec<String>,
 }
 
 // NOVO: Propriedades com get/set traduzidos
