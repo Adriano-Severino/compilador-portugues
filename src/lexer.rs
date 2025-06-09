@@ -142,7 +142,7 @@ pub enum Token {
     #[token("usar")]
     TUsar,
     
-    // NOVO: String interpolation
+    // String interpolation
     #[regex(r#"\$"[^"]*""#, |lex| {
         let content = lex.slice();
         // Remove $" no início e " no final

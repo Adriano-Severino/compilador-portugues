@@ -1,14 +1,12 @@
-@{
+use crate::ast;
+use crate::lexer::Token;
 use crate::interpolacao::parse_string_interpolada;
-}
 
 grammar;
 
-// --- REGRAS DE TOPO ---
-// Define o ponto de entrada do parser. Um arquivo é um programa.
+// === PROGRAMA PRINCIPAL ===
 pub Arquivo: ast::Programa = <Programa>;
 
-// Um programa é uma lista de itens, que podem ser namespaces ou declarações.
 Programa: ast::Programa = {
     <items:ItemPrograma*> => {
         let mut namespaces = Vec::new();
@@ -23,13 +21,12 @@ Programa: ast::Programa = {
     }
 };
 
-// Helper para distinguir namespaces de outras declarações no topo.
 ItemPrograma: ast::ItemPrograma = {
     <n:Namespace> => ast::ItemPrograma::Namespace(n),
     <d:Declaracao> => ast::ItemPrograma::Declaracao(d),
 };
 
-// --- ESTRUTURAS PRINCIPAIS ---
+// === NAMESPACES ===
 Namespace: ast::DeclaracaoNamespace = {
     "espaco" <nome:NomeQualificado> "{" <declaracoes:Declaracao*> "}" => ast::DeclaracaoNamespace {
         nome,
@@ -37,21 +34,21 @@ Namespace: ast::DeclaracaoNamespace = {
     }
 };
 
-// Uma declaração pode ser uma classe, função, ou um comando solto (como `imprima`).
+// === DECLARAÇÕES ===
 Declaracao: ast::Declaracao = {
     <c:DeclaracaoClasse> => ast::Declaracao::DeclaracaoClasse(c),
     <f:DeclaracaoFuncao> => ast::Declaracao::DeclaracaoFuncao(f),
     <cmd:Comando> => ast::Declaracao::Comando(cmd),
 };
 
-
-// --- CLASSES ---
+// === CLASSES ===
 DeclaracaoClasse: ast::DeclaracaoClasse = {
     <modificador:ModificadorAcesso?> "classe" <nome:Identificador> <heranca:("herda" <Identificador>)?> "{" <membros:MembroClasse*> "}" => {
         let mut campos = Vec::new();
         let mut propriedades = Vec::new();
         let mut metodos = Vec::new();
         let mut construtores = Vec::new();
+        
         for membro in membros {
             match membro {
                 ast::MembroClasse::Campo(c) => campos.push(c),
@@ -60,10 +57,11 @@ DeclaracaoClasse: ast::DeclaracaoClasse = {
                 ast::MembroClasse::Construtor(c) => construtores.push(c),
             }
         }
+        
         ast::DeclaracaoClasse {
             nome,
-            modificador: modificador.unwrap_or(ast::ModificadorAcesso::Privado),
             classe_pai: heranca,
+            modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
             campos,
             propriedades,
             metodos,
@@ -80,7 +78,7 @@ MembroClasse: ast::MembroClasse = {
     <f:CampoClasse> => ast::MembroClasse::Campo(f),
 };
 
-// Campo de classe: `privado texto nome;`
+// === CAMPOS ===
 CampoClasse: ast::CampoClasse = {
     <modificador:ModificadorAcesso?> <tipo:Tipo> <nome:Identificador> <valor_inicial:("=" <Expressao>)?> ";" => ast::CampoClasse {
         nome,
@@ -91,73 +89,198 @@ CampoClasse: ast::CampoClasse = {
     },
 };
 
-// Propriedade: `publico texto Nome { buscar; privado definir; }`
+// === PROPRIEDADES ===
 PropriedadeClasse: ast::PropriedadeClasse = {
     <modificador:ModificadorAcesso> <tipo:Tipo> <nome:Identificador> "{" <acessores:Acessor*> "}" => {
         let mut buscar = None;
         let mut definir = None;
-        for acc in acessores {
-            match acc {
-                (Token::TBuscar, m) => buscar = Some(ast::AcessorPropriedade { modificador: m, corpo: None }),
-                (Token::TDefinir, m) => definir = Some(ast::AcessorPropriedade { modificador: m, corpo: None }),
-                 _ => unreachable!(), // A gramática garante que só TBuscar e TDefinir chegam aqui
+        
+        for (tipo_acessor, mod_acessor) in acessores {
+            match tipo_acessor.as_str() {
+                "buscar" => buscar = Some(ast::AcessorPropriedade { 
+                    modificador: mod_acessor, 
+                    corpo: None 
+                }),
+                "definir" => definir = Some(ast::AcessorPropriedade { 
+                    modificador: mod_acessor, 
+                    corpo: None 
+                }),
+                _ => {}
             }
         }
-        ast::PropriedadeClasse { nome, tipo, modificador, buscar, definir, valor_inicial: None }
+        
+        ast::PropriedadeClasse { 
+            nome, 
+            tipo, 
+            modificador, 
+            buscar, 
+            definir, 
+            valor_inicial: None 
+        }
     }
 };
 
-// Acessor de propriedade: `buscar;` ou `privado definir;`
-Acessor: (Token, Option<ast::ModificadorAcesso>) = {
-    <modificador:ModificadorAcesso?> "buscar" ";" => (Token::TBuscar, modificador),
-    <modificador:ModificadorAcesso?> "definir" ";" => (Token::TDefinir, modificador),
+Acessor: (String, Option<ast::ModificadorAcesso>) = {
+    <modificador:ModificadorAcesso?> "buscar" ";" => ("buscar".to_string(), modificador),
+    <modificador:ModificadorAcesso?> "definir" ";" => ("definir".to_string(), modificador),
 };
 
-// Método de Classe (Sintaxe C#)
+// === MÉTODOS ===
 MetodoClasse: ast::MetodoClasse = {
-    <modificador:ModificadorAcesso?> <tipo_retorno:Tipo> <nome:Identificador> "(" <params:ListaParametros?> ")" <corpo:Bloco> => ast::MetodoClasse {
+    // Método sem parâmetros
+    <modificador:ModificadorAcesso?> <tipo_retorno:Tipo> <nome:Identificador> "(" ")" <corpo:Bloco> => ast::MetodoClasse {
         nome,
-        parametros: params.unwrap_or_default(),
+        parametros: Vec::new(),
         tipo_retorno: Some(tipo_retorno),
-        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Privado),
-        corpo: match corpo { ast::Comando::Bloco(c) => c, cmd => vec![cmd] },
-        eh_virtual: false, eh_override: false, eh_abstrato: false, eh_estatico: false,
+        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
+        corpo: match corpo { 
+            ast::Comando::Bloco(c) => c, 
+            cmd => vec![cmd] 
+        },
+        eh_virtual: false,
+        eh_override: false,
+        eh_abstrato: false,
+        eh_estatico: false,
     },
-};
-
-// Construtor (com o nome da classe)
-Construtor: ast::Construtor = {
-    <modificador:ModificadorAcesso?> <nome_classe:Identificador> "(" <params:ListaParametros?> ")" <corpo:Bloco> => ast::Construtor {
-        // A verificação se `nome_classe` é igual ao nome da classe deve ser feita no type_checker
-        parametros: params.unwrap_or_default(),
-        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Privado),
-        corpo: match corpo { ast::Comando::Bloco(c) => c, cmd => vec![cmd] },
-    },
-};
-
-// --- FUNÇÕES GLOBAIS ---
-// Unifica todas as sintaxes de função em uma única regra.
-DeclaracaoFuncao: ast::DeclaracaoFuncao = {
-    <modificador:ModificadorAcesso?> "funcao" <tipo_retorno:Tipo?> <nome:Identificador> "(" <params:ListaParametros?> ")" <corpo:Bloco> => ast::DeclaracaoFuncao {
+    // Método com parâmetros
+    <modificador:ModificadorAcesso?> <tipo_retorno:Tipo> <nome:Identificador> "(" <params:ListaParametros> ")" <corpo:Bloco> => ast::MetodoClasse {
         nome,
-        parametros: params.unwrap_or_default(),
-        tipo_retorno: tipo_retorno, // Será None se não especificado
+        parametros: params,
+        tipo_retorno: Some(tipo_retorno),
+        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
+        corpo: match corpo { 
+            ast::Comando::Bloco(c) => c, 
+            cmd => vec![cmd] 
+        },
+        eh_virtual: false,
+        eh_override: false,
+        eh_abstrato: false,
+        eh_estatico: false,
+    },
+};
+
+// === CONSTRUTORES ===
+Construtor: ast::Construtor = {
+    // Construtor sem parâmetros
+    <modificador:ModificadorAcesso?> <_nome_classe:Identificador> "(" ")" <corpo:Bloco> => ast::Construtor {
+        parametros: Vec::new(),
+        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
+        corpo: match corpo { 
+            ast::Comando::Bloco(c) => c, 
+            cmd => vec![cmd] 
+        },
+    },
+    // Construtor com parâmetros
+    <modificador:ModificadorAcesso?> <_nome_classe:Identificador> "(" <params:ListaParametros> ")" <corpo:Bloco> => ast::Construtor {
+        parametros: params,
+        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
+        corpo: match corpo { 
+            ast::Comando::Bloco(c) => c, 
+            cmd => vec![cmd] 
+        },
+    },
+};
+
+// === FUNÇÕES GLOBAIS ===
+DeclaracaoFuncao: ast::DeclaracaoFuncao = {
+    // Função sem parâmetros, sem tipo de retorno
+    <modificador:ModificadorAcesso?> "funcao" <nome:Identificador> "(" ")" <corpo:Bloco> => ast::DeclaracaoFuncao {
+        nome,
+        parametros: Vec::new(),
+        tipo_retorno: None,
+        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
+        corpo: match corpo { ast::Comando::Bloco(c) => c, cmd => vec![cmd] },
+    },
+    
+    // Função com parâmetros, sem tipo de retorno
+    <modificador:ModificadorAcesso?> "funcao" <nome:Identificador> "(" <params:ListaParametros> ")" <corpo:Bloco> => ast::DeclaracaoFuncao {
+        nome,
+        parametros: params,
+        tipo_retorno: None,
+        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
+        corpo: match corpo { ast::Comando::Bloco(c) => c, cmd => vec![cmd] },
+    },
+    
+    // Função sem parâmetros, com tipo de retorno (seta)
+    <modificador:ModificadorAcesso?> "funcao" <nome:Identificador> "(" ")" "=>" <tipo_retorno:Tipo> <corpo:Bloco> => ast::DeclaracaoFuncao {
+        nome,
+        parametros: Vec::new(),
+        tipo_retorno: Some(tipo_retorno),
+        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
+        corpo: match corpo { ast::Comando::Bloco(c) => c, cmd => vec![cmd] },
+    },
+    
+    // Função com parâmetros, com tipo de retorno (seta)
+    <modificador:ModificadorAcesso?> "funcao" <nome:Identificador> "(" <params:ListaParametros> ")" "=>" <tipo_retorno:Tipo> <corpo:Bloco> => ast::DeclaracaoFuncao {
+        nome,
+        parametros: params,
+        tipo_retorno: Some(tipo_retorno),
+        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
+        corpo: match corpo { ast::Comando::Bloco(c) => c, cmd => vec![cmd] },
+    },
+    
+    // Função sem parâmetros, tipo no início
+    <modificador:ModificadorAcesso?> "funcao" <tipo_retorno:Tipo> <nome:Identificador> "(" ")" <corpo:Bloco> => ast::DeclaracaoFuncao {
+        nome,
+        parametros: Vec::new(),
+        tipo_retorno: Some(tipo_retorno),
+        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
+        corpo: match corpo { ast::Comando::Bloco(c) => c, cmd => vec![cmd] },
+    },
+    
+    // Função com parâmetros, tipo no início
+    <modificador:ModificadorAcesso?> "funcao" <tipo_retorno:Tipo> <nome:Identificador> "(" <params:ListaParametros> ")" <corpo:Bloco> => ast::DeclaracaoFuncao {
+        nome,
+        parametros: params,
+        tipo_retorno: Some(tipo_retorno),
         modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
         corpo: match corpo { ast::Comando::Bloco(c) => c, cmd => vec![cmd] },
     },
 };
 
-// --- COMANDOS ---
+// === LISTAS DE PARÂMETROS ===
+ListaParametros: Vec<ast::Parametro> = {
+    <param:Parametro> => vec![param],
+    <params:ListaParametros> "," <param:Parametro> => {
+        let mut params = params;
+        params.push(param);
+        params
+    },
+};
+
+Parametro: ast::Parametro = {
+    <tipo:Tipo> <nome:Identificador> <valor_padrao:("=" <Expressao>)?> => ast::Parametro { 
+        nome, 
+        tipo, 
+        valor_padrao 
+    },
+};
+
+// === LISTAS DE ARGUMENTOS ===
+ListaArgumentos: Vec<ast::Expressao> = {
+    <expr:Expressao> => vec![expr],
+    <args:ListaArgumentos> "," <expr:Expressao> => {
+        let mut args = args;
+        args.push(expr);
+        args
+    },
+};
+
+// === COMANDOS ===
 Comando: ast::Comando = {
     <cmd:ComandoSimples> => cmd,
     <bloco:Bloco> => bloco,
     <se:ComandoSe> => se,
     <enquanto:ComandoEnquanto> => enquanto,
 };
+
 ComandoSimples: ast::Comando = {
     "imprima" "(" <expr:Expressao> ")" ";" => ast::Comando::Imprima(expr),
     "var" <nome:Identificador> "=" <valor:Expressao> ";" => ast::Comando::DeclaracaoVar(nome, valor),
     <tipo:Tipo> <nome:Identificador> <valor:("=" <Expressao>)?> ";" => ast::Comando::DeclaracaoVariavel(tipo, nome, valor),
+    <target:AcessoMembro> "=" <valor:Expressao> ";" => ast::Comando::AtribuirCampo(
+        target.0, target.1, valor
+    ),
     <nome:Identificador> "=" <valor:Expressao> ";" => ast::Comando::Atribuicao(nome, valor),
     "retorne" <expr:Expressao?> ";" => ast::Comando::Retorne(expr),
     <expr:Expressao> ";" => ast::Comando::Expressao(expr),
@@ -168,7 +291,7 @@ Bloco: ast::Comando = {
 };
 
 ComandoSe: ast::Comando = {
-    "se" <cond:Expressao> <bloco_then:Bloco> <senao:ClausulaSenao?> => ast::Comando::Se(
+    "se" "(" <cond:Expressao> ")" <bloco_then:Bloco> <senao:ClausulaSenao?> => ast::Comando::Se(
         cond,
         Box::new(bloco_then),
         senao.map(Box::new)
@@ -176,36 +299,85 @@ ComandoSe: ast::Comando = {
 };
 
 ClausulaSenao: ast::Comando = {
-    "senão" <ComandoSe>,
-    "senão" <Bloco>,
+    "senão" <cmd_se:ComandoSe> => cmd_se,
+    "senão" <bloco:Bloco> => bloco,
 };
 
 ComandoEnquanto: ast::Comando = {
     "enquanto" <cond:Expressao> <bloco:Bloco> => ast::Comando::Enquanto(cond, Box::new(bloco)),
 };
 
-// --- EXPRESSÕES ---
+// === EXPRESSÕES ===
 pub Expressao: ast::Expressao = {
-    <val:TStringInterpolada> =>? parse_string_interpolada(&val),
+    <val:TStringInterpolada> =>? parse_string_interpolada(&val).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+    <expr:ExpressaoLogica> => expr,
+};
 
-    "novo" <classe:Identificador> "(" <args:ListaArgumentos?> ")" => ast::Expressao::NovoObjeto(classe, args.unwrap_or_default()),
-    Termo,
+ExpressaoLogica: ast::Expressao = {
+    <esq:ExpressaoLogica> "||" <dir:ExpressaoComparacao> => {
+        ast::Expressao::Logica(ast::OperadorLogico::Ou, Box::new(esq), Box::new(dir))
+    },
+    <esq:ExpressaoLogica> "&&" <dir:ExpressaoComparacao> => {
+        ast::Expressao::Logica(ast::OperadorLogico::E, Box::new(esq), Box::new(dir))
+    },
+    <expr:ExpressaoComparacao> => expr,
+};
+
+ExpressaoComparacao: ast::Expressao = {
+    <esq:ExpressaoAritmetica> "==" <dir:ExpressaoAritmetica> => {
+        ast::Expressao::Comparacao(ast::OperadorComparacao::Igual, Box::new(esq), Box::new(dir))
+    },
+    <esq:ExpressaoAritmetica> "!=" <dir:ExpressaoAritmetica> => {
+        ast::Expressao::Comparacao(ast::OperadorComparacao::Diferente, Box::new(esq), Box::new(dir))
+    },
+    <esq:ExpressaoAritmetica> "<" <dir:ExpressaoAritmetica> => {
+        ast::Expressao::Comparacao(ast::OperadorComparacao::Menor, Box::new(esq), Box::new(dir))
+    },
+    <esq:ExpressaoAritmetica> ">" <dir:ExpressaoAritmetica> => {
+        ast::Expressao::Comparacao(ast::OperadorComparacao::MaiorQue, Box::new(esq), Box::new(dir))
+    },
+    <esq:ExpressaoAritmetica> ">=" <dir:ExpressaoAritmetica> => {
+        ast::Expressao::Comparacao(ast::OperadorComparacao::MaiorIgual, Box::new(esq), Box::new(dir))
+    },
+    <esq:ExpressaoAritmetica> "<=" <dir:ExpressaoAritmetica> => {
+        ast::Expressao::Comparacao(ast::OperadorComparacao::MenorIgual, Box::new(esq), Box::new(dir))
+    },
+    <expr:ExpressaoAritmetica> => expr,
+};
+
+ExpressaoAritmetica: ast::Expressao = {
+    <esq:ExpressaoAritmetica> "+" <dir:Termo> => {
+        ast::Expressao::Aritmetica(ast::OperadorAritmetico::Soma, Box::new(esq), Box::new(dir))
+    },
+    <esq:ExpressaoAritmetica> "-" <dir:Termo> => {
+        ast::Expressao::Aritmetica(ast::OperadorAritmetico::Subtracao, Box::new(esq), Box::new(dir))
+    },
+    <termo:Termo> => termo,
 };
 
 Termo: ast::Expressao = {
-    Fator <op:("+" | "-")> <term:Termo> =>? {
-        // Implementar soma/subtração
-        Ok(ast::Expressao::Identificador("TODO".to_string()))
+    <esq:Termo> "*" <dir:Fator> => {
+        ast::Expressao::Aritmetica(ast::OperadorAritmetico::Multiplicacao, Box::new(esq), Box::new(dir))
     },
-    Fator
+    <esq:Termo> "/" <dir:Fator> => {
+        ast::Expressao::Aritmetica(ast::OperadorAritmetico::Divisao, Box::new(esq), Box::new(dir))
+    },
+    <esq:Termo> "%" <dir:Fator> => {
+        ast::Expressao::Aritmetica(ast::OperadorAritmetico::Modulo, Box::new(esq), Box::new(dir))
+    },
+    <fator:Fator> => fator,
 };
 
 Fator: ast::Expressao = {
-    Primario <op:("*" | "/")> <factor:Fator> =>? {
-       // Implementar mult/div
-       Ok(ast::Expressao::Identificador("TODO".to_string()))
+    // Criação de objeto sem argumentos
+    "novo" <classe:Identificador> "(" ")" => {
+        ast::Expressao::NovoObjeto(classe, Vec::new())
     },
-    Primario
+    // Criação de objeto com argumentos
+    "novo" <classe:Identificador> "(" <args:ListaArgumentos> ")" => {
+        ast::Expressao::NovoObjeto(classe, args)
+    },
+    <primario:Primario> => primario,
 };
 
 Primario: ast::Expressao = {
@@ -214,32 +386,57 @@ Primario: ast::Expressao = {
     "verdadeiro" => ast::Expressao::Booleano(true),
     "falso" => ast::Expressao::Booleano(false),
     "este" => ast::Expressao::Este,
+    <acesso:AcessoMembro> => ast::Expressao::AcessoMembro(Box::new(acesso.0), acesso.1),
+    <chamada:ChamadaFuncao> => chamada,
     <id:Identificador> => ast::Expressao::Identificador(id),
-    "(" <Expressao> ")",
+    "(" <expr:Expressao> ")" => expr,
 };
 
-// --- HELPERS E LISTAS ---
+// === ACESSO A MEMBROS ===
+AcessoMembro: (ast::Expressao, String) = {
+    <obj:AcessoMembro> "." <membro:Identificador> => {
+        (ast::Expressao::AcessoMembro(Box::new(obj.0), obj.1), membro)
+    },
+    <obj:Identificador> "." <membro:Identificador> => {
+        (ast::Expressao::Identificador(obj), membro)
+    },
+    "este" "." <membro:Identificador> => {
+        (ast::Expressao::Este, membro)
+    },
+};
+
+// === CHAMADAS DE FUNÇÃO ===
+ChamadaFuncao: ast::Expressao = {
+    // Chamada de método sem argumentos
+    <obj:AcessoMembro> "(" ")" => {
+        ast::Expressao::ChamadaMetodo(Box::new(obj.0), obj.1, Vec::new())
+    },
+    // Chamada de método com argumentos
+    <obj:AcessoMembro> "(" <args:ListaArgumentos> ")" => {
+        ast::Expressao::ChamadaMetodo(Box::new(obj.0), obj.1, args)
+    },
+    // Chamada de função sem argumentos
+    <nome:Identificador> "(" ")" => {
+        ast::Expressao::Chamada(nome, Vec::new())
+    },
+    // Chamada de função com argumentos
+    <nome:Identificador> "(" <args:ListaArgumentos> ")" => {
+        ast::Expressao::Chamada(nome, args)
+    },
+};
+
+// === HELPERS ===
 NomeQualificado: String = {
     <head:Identificador> <tail:("." <Identificador>)*> => {
         let mut result = head;
-        for part in tail {
+        for ident_part in tail { // `tail` is Vec<String>, so `ident_part` is String
             result.push('.');
-            result.push_str(&part.1);
+            result.push_str(&ident_part);
         }
         result
     }
 };
 
-// Lista de parâmetros para funções e métodos.
-ListaParametros: Vec<ast::Parametro> = Comma<Parametro, ",">;
-Parametro: ast::Parametro = {
-    <tipo:Tipo> <nome:Identificador> => ast::Parametro { nome, tipo, valor_padrao: None },
-};
-
-// Lista de argumentos para chamadas de função.
-ListaArgumentos: Vec<ast::Expressao> = Comma<Expressao, ",">;
-
-// --- DEFINIÇÕES BÁSICAS ---
 Tipo: ast::Tipo = {
     "inteiro" => ast::Tipo::Inteiro,
     "texto" => ast::Tipo::Texto,
@@ -254,34 +451,18 @@ ModificadorAcesso: ast::ModificadorAcesso = {
     "protegido" => ast::ModificadorAcesso::Protegido,
 };
 
-// Mapeia tokens para seus tipos de dados.
 Identificador: String = <s:TIdentificador> => s;
 
-// Helper para listas separadas por vírgula ou ponto
-Comma<T, S>: Vec<T> = {
-    <v:(<T> S)*> <e:T?> => match e {
-        None => v,
-        Some(e) => {
-            let mut v = v;
-            v.push(e);
-            v
-        }
-    }
-};
-
-// --- TOKENS EXTERNOS ---
+// === TOKENS EXTERNOS ===
 extern {
     type Location = usize;
     type Error = String;
 
-    // A lista de tokens deve corresponder exatamente ao seu lexer.rs
     enum Token {
         "espaco" => Token::TEspaco,
         "classe" => Token::TClasse,
         "herda" => Token::THerda,
         "funcao" => Token::TFuncao,
-        "metodo" => Token::TMetodo,
-        "construtor" => Token::TConstrutor,
         "publico" => Token::TPublico,
         "privado" => Token::TPrivado,
         "protegido" => Token::TProtegido,
@@ -290,7 +471,6 @@ extern {
         "buscar" => Token::TBuscar,
         "definir" => Token::TDefinir,
         "se" => Token::TSe,
-        "então" => Token::TEntao,
         "senão" => Token::TSenao,
         "enquanto" => Token::TEnquanto,
         "imprima" => Token::TImprima,
@@ -303,6 +483,19 @@ extern {
         "verdadeiro" => Token::TVerdadeiro,
         "falso" => Token::TFalso,
         "=" => Token::TAtribuicao,
+        "==" => Token::TIgual,
+        "!=" => Token::TDiferente,
+        "<" => Token::TMenor,
+        ">" => Token::TMaiorQue,
+        ">=" => Token::TMaiorIgual,
+        "<=" => Token::TMenorIgual,
+        "+" => Token::TMais,
+        "-" => Token::TMenos,
+        "*" => Token::TMultiplicacao,
+        "/" => Token::TDivisao,
+        "%" => Token::TModulo,
+        "&&" => Token::TE,
+        "||" => Token::TOu,
         "(" => Token::TParenEsq,
         ")" => Token::TParenDir,
         "{" => Token::TChaveEsq,
@@ -310,6 +503,7 @@ extern {
         ";" => Token::TPontoVirgula,
         "," => Token::TVirgula,
         "." => Token::TPonto,
+        "=>" => Token::TSeta,
         TStringInterpolada => Token::TStringInterpolada(<String>),
         TString => Token::TString(<String>),
         TIdentificador => Token::TIdentificador(<String>),

@@ -216,6 +216,23 @@ pub enum ModificadorAcesso {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
+pub enum ItemPrograma {
+    Namespace(DeclaracaoNamespace),
+    Declaracao(Declaracao),
+}
+
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum MembroClasse {
+    Campo(CampoClasse),
+    Propriedade(PropriedadeClasse),
+    Metodo(MetodoClasse),
+    Construtor(Construtor),
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub enum OperadorComparacao {
     Igual,
     Diferente,
@@ -249,7 +266,6 @@ pub enum OperadorUnario {
     Menos,
 }
 
-// Resto das estruturas existentes...
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum StatusOwnership {
