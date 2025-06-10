@@ -398,8 +398,8 @@ ExpressaoMembro: ast::Expressao = {
 };
 
 ExpressaoAtomo: ast::Expressao = {
-    <valor:Token![TInteiro]> => ast::Expressao::Inteiro(valor),
-    <valor:Token![TString]> => ast::Expressao::Texto(valor),
+    <valor:TInteiro> => ast::Expressao::Inteiro(valor),
+    <valor:TString> => ast::Expressao::Texto(valor),
     <valor:StringInterpolada> => valor,
     "verdadeiro" => ast::Expressao::Booleano(true),
     "falso" => ast::Expressao::Booleano(false),
@@ -416,7 +416,7 @@ ExpressaoAtomo: ast::Expressao = {
 
 // ✅ NOVA: String interpolada
 StringInterpolada: ast::Expressao = {
-    Token![TStringInterpolada] => {
+    TStringInterpolada => {
         match crate::interpolacao::parse_string_interpolada(&<>) {
             Ok(expr) => expr,
             Err(_) => ast::Expressao::Texto("".to_string()),
