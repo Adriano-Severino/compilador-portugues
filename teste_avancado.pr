@@ -35,3 +35,5 @@ p3.Idade = 28;
 p1.apresentar();
 p2.apresentar();
 p3.apresentar();
+
+imprima("=== Teste Concluído ===");
