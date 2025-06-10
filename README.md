@@ -123,6 +123,27 @@ Se você quiser entender o que o script `build_production.sh` faz:
     ./meu_programa
     ```
 
+
+## 📚 Referência da Linguagem
+
+### Tipos de Dados
+
+| Tipo      | Exemplo         | Descrição                      |
+|-----------|-----------------|-------------------------------|
+| inteiro   | 42, -10         | Números inteiros de 64 bits   |
+| texto     | "Olá"           | Strings de texto               |
+| booleano  | verdadeiro, falso | Valores lógicos             |
+
+### Operadores
+
+| Categoria     | Operadores         | Exemplo           |
+|--------------|--------------------|-------------------|
+| Aritméticos  | +, -, *, /         | a + b * c         |
+| Comparação   | >, <, >=, <=, ==, != | idade >= 18    |
+| Lógicos      | &&, ||, !          | a > 0 && b < 10   |
+| Atribuição   | =                  | idade = 25        |
+
+
 ## 💡 Exemplos de Código
 
 ### Olá, Mundo!
@@ -245,25 +266,69 @@ Código (`funcoes.pr`):
 ```por do sol
 espaco Meu_Programa.funcoes
 {
-publico funcao bemvindo() { imprima("Olá mundo"); }
-publico funcao configurar(texto nome) { imprima("Configurando: " + nome); }
-publico funcao calcular() => inteiro { retorne 42; }
-publico funcao multiplicar(inteiro a, inteiro b) => inteiro { retorne a * b; }
-privado funcao inteiro somar(inteiro a, inteiro b) { retorne a + b; }
-publico funcao texto obter_nome() { retorne "João"; }
-publico funcao booleano eh_par(inteiro numero) { retorne numero % 2 == 0; }
-publico funcao vazio imprimir_linha() { imprima("================"); }
-publico funcao Pessoa criar_pessoa(texto nome, inteiro idade) { retorne novo Pessoa(nome, idade); }
-publico funcao processar_dados(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) { imprima("Processando dados completos"); }
-publico funcao texto gerar_relatorio(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) { retorne "Relatório gerado"; }
-publico funcao processar_completo(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) => texto { retorne "Processamento completo"; }
-publico funcao testar_funcoes() {
-    processar_dados("João", 30, verdadeiro, "Rua A", "123456789");
-    texto resultado = gerar_relatorio("Joana", 25, falso, "Rua B", "987654321");
-    var processo = processar_completo("Mario", 35, verdadeiro, "Rua C", "123456789");
-    imprima("Resultado do relatório: " + resultado);
-    imprima("Resultado do processo: " + processo);
-}
+    publico funcao bemvindo() 
+    { 
+        imprima("Olá mundo"); 
+    }
+    publico funcao configurar(texto nome) 
+    { 
+        imprima("Configurando: " + nome); 
+    }
+    publico funcao calcular() => inteiro 
+    { 
+        retorne 42; 
+    }
+
+    publico funcao multiplicar(inteiro a, inteiro b) => inteiro { retorne a * b; }
+
+    privado funcao inteiro somar(inteiro a, inteiro b) 
+    { 
+     retorne a + b; 
+    }
+    publico funcao
+    { 
+        retorne a + b; 
+    }
+    publico funcao texto obter_nome() 
+    { 
+        retorne "João"; 
+    }
+
+    publico funcao booleano eh_par(inteiro numero) 
+    { 
+        retorne numero % 2 == 0; 
+    }
+
+    publico funcao vazio imprimir_linha() 
+    { 
+        imprima("================"); 
+    }
+
+    publico funcao Pessoa criar_pessoa(texto nome, inteiro idade) 
+    { 
+     retorne novo Pessoa(nome, idade); 
+    }
+
+    publico funcao processar_dados(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) 
+    { 
+        imprima("Processando dados completos"); 
+    }
+
+    publico funcao texto gerar_relatorio(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) 
+    { 
+        retorne "Relatório gerado"; 
+    }
+
+    publico funcao processar_completo(texto nome, inteiro idade, booleano ativo, texto endereco, texto
+    telefone) => texto { retorne "Processamento completo"; }
+    publico funcao testar_funcoes() 
+    {
+        processar_dados("João", 30, verdadeiro, "Rua A", "123456789");
+        texto resultado = gerar_relatorio("Joana", 25, falso, "Rua B", "987654321");
+        var processo = processar_completo("Mario", 35, verdadeiro, "Rua C", "123456789");
+        imprima("Resultado do relatório: " + resultado);
+        imprima("Resultado do processo: " + processo);
+    }
 }
 ```
 
@@ -272,56 +337,228 @@ publico funcao testar_funcoes() {
 imprima($"Nome: {Nome}, Idade: {Idade}");
 ```
 
-### Exemplo de Sistema Completo
-Veja o arquivo `biblioteca_sistema.pr` para um sistema de biblioteca digital completo, com classes, métodos, propriedades, construtores opcionais, controle de fluxo, operações aritméticas, strings interpoladas e muito mais.
+## 🏆 Exemplo Completo: Sistema de Biblioteca Digital
 
-## 📚 Referência da Linguagem
+Abaixo um exemplo real de programa completo, mostrando classes, propriedades, construtores opcionais, métodos, funções, strings interpoladas, controle de fluxo e mais:
 
-### Tipos de Dados
+```pordosol
+espaco BibliotecaDigital.Sistema {
+    publico classe Livro {
+        publico texto Titulo { buscar; definir; }
+        publico texto Autor { buscar; definir; }
+        publico texto ISBN { buscar; definir; }
+        publico inteiro AnoPublicacao { buscar; definir; }
+        publico booleano Disponivel { buscar; definir; }
+        publico texto Categoria { buscar; definir; }
+        publico inteiro QuantidadeTotal { buscar; definir; }
+        publico inteiro QuantidadeDisponivel { buscar; definir; }
+        // Construtor com parâmetros opcionais
+        publico Livro(texto titulo, texto autor, texto isbn, inteiro ano = 2024, texto categoria = "Geral", inteiro quantidade = 1) {
+            Titulo = titulo;
+            Autor = autor;
+            ISBN = isbn;
+            AnoPublicacao = ano;
+            Categoria = categoria;
+            QuantidadeTotal = quantidade;
+            QuantidadeDisponivel = quantidade;
+            Disponivel = verdadeiro;
+        }
+        publico vazio apresentarDetalhes(booleano completo = verdadeiro) {
+            se (completo) {
+                imprima($"📚 LIVRO: {Titulo}");
+                imprima($"   Autor: {Autor}");
+                imprima($"   ISBN: {ISBN}");
+                imprima($"   Ano: {AnoPublicacao}");
+                imprima($"   Categoria: {Categoria}");
+                imprima($"   Disponível: {QuantidadeDisponivel}/{QuantidadeTotal}");
+                imprima($"   Status: {se (Disponivel) 'Disponível' senão 'Indisponível'}");
+            } senão {
+                imprima($"📚 {Titulo} - {Autor} ({se (Disponivel) '✅' senão '❌'})");
+            }
+        }
+        publico booleano emprestar() {
+            se (QuantidadeDisponivel > 0) {
+                QuantidadeDisponivel = QuantidadeDisponivel - 1;
+                se (QuantidadeDisponivel == 0) {
+                    Disponivel = falso;
+                }
+                retorne verdadeiro;
+            }
+            retorne falso;
+        }
+        publico vazio devolver() {
+            QuantidadeDisponivel = QuantidadeDisponivel + 1;
+            se (QuantidadeDisponivel > 0) {
+                Disponivel = verdadeiro;
+            }
+        }
+    }
+    publico classe Usuario {
+        publico texto Nome { buscar; definir; }
+        publico texto Email { buscar; definir; }
+        publico texto Telefone { buscar; definir; }
+        publico inteiro NumeroCartao { buscar; definir; }
+        publico texto TipoUsuario { buscar; definir; }
+        publico inteiro LivrosEmprestados { buscar; definir; }
+        publico inteiro LimiteEmprestimos { buscar; definir; }
+        publico Usuario(texto nome, texto email, texto telefone = "", texto tipo = "Comum", inteiro limite = 3) {
+            Nome = nome;
+            Email = email;
+            Telefone = telefone;
+            TipoUsuario = tipo;
+            LimiteEmprestimos = limite;
+            LivrosEmprestados = 0;
+            NumeroCartao = 1000 + (nome.tamanho() * 7);
+        }
+        publico vazio apresentarPerfil() {
+            imprima($"👤 USUÁRIO: {Nome}");
+            imprima($"   Email: {Email}");
+            imprima($"   Cartão: #{NumeroCartao}");
+            imprima($"   Tipo: {TipoUsuario}");
+            imprima($"   Empréstimos: {LivrosEmprestados}/{LimiteEmprestimos}");
+        }
+        publico booleano podeEmprestar() {
+            retorne LivrosEmprestados < LimiteEmprestimos;
+        }
+    }
+    publico classe Biblioteca {
+        publico texto Nome { buscar; definir; }
+        publico texto Endereco { buscar; definir; }
+        publico inteiro TotalLivros { buscar; definir; }
+        publico inteiro TotalUsuarios { buscar; definir; }
+        publico Biblioteca(texto nome, texto endereco = "Endereço não informado") {
+            Nome = nome;
+            Endereco = endereco;
+            TotalLivros = 0;
+            TotalUsuarios = 0;
+        }
+        publico vazio adicionarLivro(Livro livro) {
+            TotalLivros = TotalLivros + 1;
+            imprima($"✅ Livro '{livro.Titulo}' adicionado à biblioteca!");
+        }
+        publico vazio cadastrarUsuario(Usuario usuario) {
+            TotalUsuarios = TotalUsuarios + 1;
+            imprima($"✅ Usuário '{usuario.Nome}' cadastrado com sucesso!");
+            imprima($"   Número do cartão: #{usuario.NumeroCartao}");
+        }
+        publico vazio realizarEmprestimo(Usuario usuario, Livro livro) {
+            se (usuario.podeEmprestar()) {
+                se (livro.emprestar()) {
+                    usuario.LivrosEmprestados = usuario.LivrosEmprestados + 1;
+                    imprima($"📖 EMPRÉSTIMO REALIZADO:");
+                    imprima($"   Livro: {livro.Titulo}");
+                    imprima($"   Usuário: {usuario.Nome}");
+                    imprima($"   Cartão: #{usuario.NumeroCartao}");
+                } senão {
+                    imprima($"❌ Livro '{livro.Titulo}' não está disponível!");
+                }
+            } senão {
+                imprima($"❌ Usuário '{usuario.Nome}' atingiu o limite de empréstimos!");
+            }
+        }
+        publico vazio realizarDevolucao(Usuario usuario, Livro livro) {
+            livro.devolver();
+            usuario.LivrosEmprestados = usuario.LivrosEmprestados - 1;
+            imprima($"📥 DEVOLUÇÃO REALIZADA:");
+            imprima($"   Livro: {livro.Titulo}");
+            imprima($"   Usuário: {usuario.Nome}");
+        }
+        publico vazio gerarRelatorio() {
+            imprima("📊 ========== RELATÓRIO DA BIBLIOTECA ==========");
+            imprima($"🏛️  Biblioteca: {Nome}");
+            imprima($"📍 Endereço: {Endereco}");
+            imprima($"📚 Total de Livros: {TotalLivros}");
+            imprima($"👥 Total de Usuários: {TotalUsuarios}");
+            imprima("============================================");
+        }
+        publico vazio buscarLivrosPorCategoria(texto categoria) {
+            imprima($"🔍 Buscando livros da categoria: {categoria}");
+            imprima("   (Simulação - em implementação real buscaria no banco de dados)");
+        }
+    }
+    publico funcao demonstrarSistema() {
+        imprima("🎯 ===== SISTEMA DE BIBLIOTECA DIGITAL =====");
+        imprima("");
+        Biblioteca biblioteca = novo Biblioteca("Biblioteca Central de São Paulo", "Av. Paulista, 1000");
+        Livro livro1 = novo Livro("Dom Casmurro", "Machado de Assis", "978-85-359-0277-5", 1899, "Literatura", 3);
+        Livro livro2 = novo Livro("1984", "George Orwell", "978-85-250-4099-1", 1949, "Ficção Científica", 2);
+        Livro livro3 = novo Livro("Clean Code", "Robert Martin", "978-0-13-235088-4", 2008, "Tecnologia");
+        Livro livro4 = novo Livro("O Pequeno Príncipe", "Antoine de Saint-Exupéry", "978-85-325-2734-9");
+        biblioteca.adicionarLivro(livro1);
+        biblioteca.adicionarLivro(livro2);
+        biblioteca.adicionarLivro(livro3);
+        biblioteca.adicionarLivro(livro4);
+        imprima("");
+        Usuario usuario1 = novo Usuario("Ana Silva", "ana.silva@email.com", "11987654321", "Premium", 5);
+        Usuario usuario2 = novo Usuario("João Santos", "joao@email.com", "11876543210");
+        Usuario usuario3 = novo Usuario("Maria Oliveira", "maria@email.com");
+        biblioteca.cadastrarUsuario(usuario1);
+        biblioteca.cadastrarUsuario(usuario2);
+        biblioteca.cadastrarUsuario(usuario3);
+        imprima("");
+        imprima("📋 CATÁLOGO DE LIVROS:");
+        livro1.apresentarDetalhes();
+        imprima("");
+        livro2.apresentarDetalhes(falso);
+        livro3.apresentarDetalhes(falso);
+        livro4.apresentarDetalhes(falso);
+        imprima("");
+        imprima("👥 USUÁRIOS CADASTRADOS:");
+        usuario1.apresentarPerfil();
+        imprima("");
+        usuario2.apresentarPerfil();
+        imprima("");
+        imprima("📖 REALIZANDO EMPRÉSTIMOS:");
+        biblioteca.realizarEmprestimo(usuario1, livro1);
+        biblioteca.realizarEmprestimo(usuario1, livro2);
+        biblioteca.realizarEmprestimo(usuario2, livro1);
+        biblioteca.realizarEmprestimo(usuario2, livro3);
+        imprima("");
+        imprima("📊 STATUS APÓS EMPRÉSTIMOS:");
+        livro1.apresentarDetalhes(falso);
+        livro2.apresentarDetalhes(falso);
+        livro3.apresentarDetalhes(falso);
+        imprima("");
+        imprima("📥 REALIZANDO DEVOLUÇÕES:");
+        biblioteca.realizarDevolucao(usuario1, livro1);
+        imprima("");
+        livro1.apresentarDetalhes(falso);
+        imprima("");
+        biblioteca.gerarRelatorio();
+        biblioteca.buscarLivrosPorCategoria("Literatura");
+        biblioteca.buscarLivrosPorCategoria("Tecnologia");
+        imprima("");
+        imprima("✨ Sistema funcionando perfeitamente!");
+    }
+}
 
-| Tipo      | Exemplo         | Descrição                      |
-|-----------|-----------------|-------------------------------|
-| inteiro   | 42, -10         | Números inteiros de 64 bits   |
-| texto     | "Olá"           | Strings de texto               |
-| booleano  | verdadeiro, falso | Valores lógicos             |
-
-### Operadores
-
-| Categoria     | Operadores         | Exemplo           |
-|--------------|--------------------|-------------------|
-| Aritméticos  | +, -, *, /         | a + b * c         |
-| Comparação   | >, <, >=, <=, ==, != | idade >= 18    |
-| Lógicos      | &&, ||, !          | a > 0 && b < 10   |
-| Atribuição   | =                  | idade = 25        |
-
-### Estruturas de Controle
-
-```por do sol
-se condicao então comando;
-```
-
-Condicional com Bloco:
-```por do sol
-se condicao então {
-    // comandos se verdadeiro
+// Executando o sistema
+espaco principal {
+    funcao inicio() {
+        BibliotecaDigital.Sistema.demonstrarSistema();
+        inteiro totalOperacoes = 0;
+        imprima("🧮 CONTABILIZANDO OPERAÇÕES DO SISTEMA:");
+        totalOperacoes = totalOperacoes + 4; // Livros adicionados
+        totalOperacoes = totalOperacoes + 3; // Usuários cadastrados
+        totalOperacoes = totalOperacoes + 4; // Empréstimos tentados
+        totalOperacoes = totalOperacoes + 1; // Devoluções
+        imprima($"📈 Total de operações realizadas: {totalOperacoes}");
+        se (totalOperacoes > 10) {
+            imprima("🎯 Sistema com alta atividade!");
+        } senão {
+            imprima("📊 Sistema com atividade moderada.");
+        }
+        imprima("🏁 ===== FIM DA DEMONSTRAÇÃO =====");
+    }
 }
 ```
 
-Condicional Completa:
-```por do sol
-se condicao então {
-    // comandos se verdadeiro
-} senão {
-    // comandos se falso
-}
-```
+## 🧩 Extensões e Ferramentas para VS Code
 
-Loop enquanto:
-```por do sol
-enquanto condicao {
-    // comandos
-}
-```
+- [Servidor de Linguagem Por do Sol (LSP)](https://github.com/Adriano-Severino/pordosol-language-server)
+- [Extensão oficial VS Code: linguagem-portugues-por-do-sol](https://github.com/Adriano-Severino/linguagem-portugues-por-do-sol)
+
+Essas extensões fornecem realce de sintaxe, auto-complete, diagnósticos e integração moderna para desenvolvimento com a linguagem Por do Sol no VS Code.
 
 ## 🏗️ Estrutura do Projeto
 
