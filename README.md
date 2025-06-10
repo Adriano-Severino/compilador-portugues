@@ -20,9 +20,11 @@ Criar uma linguagem de programação que seja:
 - Tipagem estática forte para maior segurança e detecção precoce de erros.
 - Sintaxe em português inspirada em C#, adaptada para falantes nativos.
 - Geração de código LLVM eficiente para performance nativa.
-- Estruturas de controle como `se`, `então`, `senão`, `enquanto` e blocos com `{}`.
-- Suporte completo a variáveis (`inteiro`, `texto`, `booleano`) com atribuições.
-- Expressões aritméticas e de comparação (`+`, `-`, `*`, `/`, `>`, `<`, `==`, `!=`).
+- Estruturas de controle como `se`, `senão`, `enquanto`, `para` e blocos com `{}`.
+- Suporte completo a variáveis (`inteiro`, `texto`, `booleano`, `var`) com atribuições e inferência.
+- Expressões aritméticas, lógicas e de comparação (`+`, `-`, `*`, `/`, `%`, `>`, `<`, `==`, `!=`, `&&`, `||`, `!`).
+- Propriedades, métodos, funções, construtores com parâmetros opcionais (igual C#).
+- Strings interpoladas com `$"texto {variavel}"`.
 - Compilação multiplataforma para código nativo executável.
 - Comentários com `//` (linha) e `/* */` (bloco).
 
@@ -130,179 +132,148 @@ Código (`ola_mundo.pr`):
 imprima("Olá, Mundo!");
 imprima("Bem-vindo à programação em português!");
 ```
-Compilar e executar:
-```bash
-./build_production.sh ola_mundo
-./ola_mundo
-```
-Saída esperada:
-```text
-Olá, Mundo!
-Bem-vindo à programação em português!
-```
 
-### Variáveis
+### Variáveis e Operações Aritméticas
 Código (`variaveis.pr`):
 
 ```por do sol
-// Declaração e inicialização de variáveis
-inteiro idade = 21;
-texto nome = "João Silva";
-booleano estudante = verdadeiro;
+inteiro a = 10;
+inteiro b = 5;
 
-// Exibindo valores
-imprima("=== Informações Pessoais ===");
-imprima(nome);
-imprima(idade);
-
-// Modificando variáveis
-idade = idade + 1;
-nome = "João Santos";
-
-imprima("=== Após Mudanças ===");
-imprima(nome);
-imprima(idade);
+imprima("=== Teste Aritmética ===");
+imprima(a);
+imprima(b);
+imprima(a + b);
+imprima(a - b);
+imprima(a * b);
 ```
 
 ### Estruturas Condicionais
 Código (`condicionais.pr`):
 
 ```por do sol
-// Declaração e inicialização de variáveis
-inteiro nota = 85;
-texto nome = "Ana";
+inteiro a = 10;
+inteiro b = 5;
 
-imprima("=== Sistema de Avaliação ===");
-imprima(nome);
-imprima(nota);
-
-se nota >= 90 então {
-    imprima("Excelente! Parabéns!");
+se (a > b) {
+    imprima("a é maior que b");
 } senão {
-    se nota >= 70 então {
-        imprima("Bom trabalho!");
-    } senão {
-        imprima("Precisa melhorar.");
-    }
+    imprima("a não é maior que b");
 }
 
-// Comparações múltiplas
-se nota > 60 && nota < 100 então {
-    imprima("Nota válida aprovada");
+inteiro idade = 25;
+texto nome = "João";
+
+imprima("Olá mundo!");
+imprima(nome);
+imprima(idade);
+
+se (idade > 18) {
+    imprima("Maior de idade");
+} senão {
+    imprima("Menor de idade");
 }
-```
 
-### Operações Aritméticas
-Código (`operacoes_aritmeticas.pr`):
-
-```por do sol
-inteiro a = 15;
-inteiro b = 4;
-
-imprima("=== Calculadora Básica ===");
-imprima("Número A:");
-imprima(a);
-imprima("Número B:");
-imprima(b);
-
-imprima("Soma:");
-imprima(a + b);
-
-imprima("Subtração:");
-imprima(a - b);
-
-imprima("Multiplicação:");
-imprima(a * b);
-
-imprima("Divisão:");
-imprima(a / b); // Divisão inteira
-
-// Operações compostas
-inteiro resultado = (a + b) * 2;
-imprima("(A + B) * 2 =");
-imprima(resultado);
+se (idade > 18)  {
+    imprima("Maior de idade");
+} 
+senão se (idade == 18) {
+    imprima("Tem 18 anos");
+}
+senão {
+    imprima("Menor de idade");
+}
 ```
 
 ### Loops e Contadores
 Código (`loops.pr`):
 
 ```por do sol
-inteiro contador = 1;
-inteiro limite = 5;
+inteiro contador = 0;
+imprima("Iniciando contador...");
 
-imprima("=== Contagem de 1 a 5 ===");
-
-enquanto contador <= limite {
-    imprima("Contador:");
-    imprima(contador);
+se (contador < 5) {
+    imprima("Contador é menor que 5");
     contador = contador + 1;
-}
-
-imprima("Contagem finalizada!");
-
-// Exemplo com condição mais complexa
-inteiro numero = 2;
-imprima("=== Números Pares até (menor que) 20 ===");
-enquanto numero < 20 {
-    // Assumindo que '%' é o operador módulo para verificar paridade.
-    // Se sua linguagem não tiver '%', a lógica de paridade precisará ser adaptada.
-    // Exemplo de verificação de paridade sem '%': se (numero / 2) * 2 == numero então { ... }
-    se numero % 2 == 0 então { 
-        imprima("Par:");
-        imprima(numero);
-    }
-    numero = numero + 2;
+    imprima(contador);
 }
 ```
 
-### Programa Completo - Sistema de Notas
-Código (`sistema_notas.pr`):
+### Classes, Propriedades e Construtores Opcionais
+Código (`exemplo_teste.pr`):
 
 ```por do sol
-// Sistema simples de avaliação de estudantes
-texto estudante = "Joana";
-inteiro nota1 = 85;
-inteiro nota2 = 92;
-inteiro nota3 = 78;
+espaco Meu_Programa.Domain
+{
+    publico classe Pessoa2
+    {
+        publico texto Nome { buscar; definir; }
+        publico inteiro Idade { buscar; definir; }
+        publico texto Sobrenome { buscar; definir; }
+        publico texto Endereco { buscar; definir; }
+        publico texto Telefone { buscar; definir; }
 
-imprima("=== Sistema de Avaliação Acadêmica ===");
-imprima("Estudante:");
-imprima(estudante);
+        // Construtor com parâmetros padrão (como C#)
+        publico Pessoa2(texto nome, texto endereco, texto telefone, inteiro idade = 24, texto sobrenome = "Silva") {
+            Nome = nome;
+            Endereco = endereco;
+            Telefone = telefone;
+            Idade = idade;
+            Sobrenome = sobrenome;
+        }
 
-imprima("Notas individuais:");
-imprima(nota1);
-imprima(nota2);
-imprima(nota3);
-
-// Calcular média
-inteiro soma = nota1 + nota2 + nota3;
-inteiro media = soma / 3; // Divisão inteira
-
-imprima("Média:");
-imprima(media);
-
-// Determinar situação
-se media >= 90 então {
-    imprima("Situação: EXCELENTE");
-} senão {
-    se media >= 80 então {
-        imprima("Situação: BOM");
-    } senão {
-        se media >= 70 então {
-            imprima("Situação: REGULAR");
-        } senão {
-            imprima("Situação: INSUFICIENTE");
+        publico vazio apresentar() {
+            imprima($"Nome: {Nome}, Endereço: {Endereco}, Telefone: {Telefone}, Idade: {Idade}, Sobrenome: {Sobrenome}");
         }
     }
-}
 
-// Verificar se passou
-se media >= 70 então {
-    imprima("Status: APROVADO");
-} senão {
-    imprima("Status: REPROVADO");
+    publico funcao teste_pessoa() 
+    {
+        Pessoa2 p1 = novo Pessoa2("Joana", "Rua de exemplo", "123456789");
+        Pessoa2 p2 = novo Pessoa2("Maria", "Rua B", "987654321", 30);
+        Pessoa2 p3 = novo Pessoa2("Mariano", "Rua C", "123456789", 35, "Silva");
+        p1.apresentar();
+        p2.apresentar();
+        p3.apresentar();
+    }
 }
 ```
+
+### Funções Fora de Classe (Sintaxe Flexível)
+Código (`funcoes.pr`):
+
+```por do sol
+espaco Meu_Programa.funcoes
+{
+publico funcao bemvindo() { imprima("Olá mundo"); }
+publico funcao configurar(texto nome) { imprima("Configurando: " + nome); }
+publico funcao calcular() => inteiro { retorne 42; }
+publico funcao multiplicar(inteiro a, inteiro b) => inteiro { retorne a * b; }
+privado funcao inteiro somar(inteiro a, inteiro b) { retorne a + b; }
+publico funcao texto obter_nome() { retorne "João"; }
+publico funcao booleano eh_par(inteiro numero) { retorne numero % 2 == 0; }
+publico funcao vazio imprimir_linha() { imprima("================"); }
+publico funcao Pessoa criar_pessoa(texto nome, inteiro idade) { retorne novo Pessoa(nome, idade); }
+publico funcao processar_dados(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) { imprima("Processando dados completos"); }
+publico funcao texto gerar_relatorio(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) { retorne "Relatório gerado"; }
+publico funcao processar_completo(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) => texto { retorne "Processamento completo"; }
+publico funcao testar_funcoes() {
+    processar_dados("João", 30, verdadeiro, "Rua A", "123456789");
+    texto resultado = gerar_relatorio("Joana", 25, falso, "Rua B", "987654321");
+    var processo = processar_completo("Mario", 35, verdadeiro, "Rua C", "123456789");
+    imprima("Resultado do relatório: " + resultado);
+    imprima("Resultado do processo: " + processo);
+}
+}
+```
+
+### Strings Interpoladas
+```por do sol
+imprima($"Nome: {Nome}, Idade: {Idade}");
+```
+
+### Exemplo de Sistema Completo
+Veja o arquivo `biblioteca_sistema.pr` para um sistema de biblioteca digital completo, com classes, métodos, propriedades, construtores opcionais, controle de fluxo, operações aritméticas, strings interpoladas e muito mais.
 
 ## 📚 Referência da Linguagem
 
