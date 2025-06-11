@@ -1,4 +1,4 @@
-// use std::collections::HashMap; // Remova ou comente se não for usado diretamente aqui
+use std::collections::HashMap;
 
 // === TIPOS BÁSICOS ===
 #[derive(Debug, Clone, PartialEq)]
@@ -90,9 +90,8 @@ pub struct Importacao {
 
 #[derive(Debug, Clone)]
 pub struct Exportacao {
-    pub nome: String, // O nome do item sendo exportado (função, classe, etc.)
-    // pub tipo_item: TipoItemExportado, // Opcional: para saber o que está sendo exportado
-    pub publico: bool, // Geralmente true para exportações
+    pub nome: String,
+    pub publico: bool,
 }
 
 // === CLASSES ===
@@ -171,11 +170,35 @@ pub struct DeclaracaoFuncao {
     pub corpo: Vec<Comando>,
 }
 
+// ✅ PARÂMETROS CORRIGIDOS PARA C#
 #[derive(Debug, Clone)]
 pub struct Parametro {
     pub nome: String,
     pub tipo: Tipo,
     pub valor_padrao: Option<Expressao>,
+}
+
+// ✅ Implementação dos helpers para parâmetros opcionais
+impl Parametro {
+    pub fn obrigatorio(nome: String, tipo: Tipo) -> Self {
+        Self {
+            nome,
+            tipo,
+            valor_padrao: None,
+        }
+    }
+
+    pub fn opcional(nome: String, tipo: Tipo, valor_padrao: Expressao) -> Self {
+        Self {
+            nome,
+            tipo,
+            valor_padrao: Some(valor_padrao),
+        }
+    }
+
+    pub fn eh_opcional(&self) -> bool {
+        self.valor_padrao.is_some()
+    }
 }
 
 // === MODIFICADORES DE ACESSO ===
