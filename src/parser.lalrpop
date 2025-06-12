@@ -305,11 +305,15 @@ ComandoTopLevel: ast::Comando = {
 
 ComandoSimples: ast::Comando = {
     // Declarações de variáveis
+    <tipo:Tipo> <nome:TIdentificador> "=" <expr:Expressao> ";" => {
+    ast::Comando::DeclaracaoVariavel(tipo, nome, Some(expr))
+    },
+    <tipo:Tipo> <nome:TIdentificador> ";" => {
+    ast::Comando::DeclaracaoVariavel(tipo, nome, None)
+    },
+
     "var" <nome:TIdentificador> "=" <expr:Expressao> ";" => {
         ast::Comando::DeclaracaoVar(nome, expr)
-    },
-    <tipo:Tipo> <nome:TIdentificador> <init:("=" <ExpressaoAtomo>)?> ";" => {
-        ast::Comando::DeclaracaoVariavel(tipo, nome, init)
     },
     // Comandos de expressão e bloco
     <cmd:ChamadaMetodoOuBloco> => cmd,
