@@ -62,6 +62,12 @@ pub enum Token {
     #[token("=>")]TSeta,
 
     /* literais */
+    #[regex(r#"\$\"([^"\\]|\\.)*\""#, |lex| {
+    // slice = $" … "
+    let s = lex.slice();
+    s[2..s.len() - 1].to_string()          // devolve só o miolo
+    })]
+    TStringInterpolada(String),
     #[regex(r#""([^"\\]|\\.)*""#, |lex| lex.slice()[1..lex.slice().len()-1].to_string())]
     TString(String),
     #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().unwrap())]

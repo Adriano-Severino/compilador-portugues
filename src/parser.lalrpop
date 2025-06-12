@@ -1,4 +1,3 @@
-use std::str::FromStr;
 use crate::ast;
 use crate::lexer::Token;
 
@@ -447,8 +446,10 @@ ExpressaoPostfixa: ast::Expressao = {
 };
 
 ExpressaoAtomo: ast::Expressao = {
-    <valor:TInteiro> => ast::Expressao::Inteiro(valor),
-    <valor:TString> => ast::Expressao::Texto(valor),
+    //<valor:TInteiro> => ast::Expressao::Inteiro(valor),
+    //<valor:TString> => ast::Expressao::Texto(valor),
+    <lit:ExpressaoLiteral> => lit,
+    //<s:TStringInterpolada> => crate::interpolacao::parse_string_interpolada(&s).unwrap(),
     "verdadeiro" => ast::Expressao::Booleano(true),
     "falso" => ast::Expressao::Booleano(false),
     "este" => ast::Expressao::Este,
@@ -480,6 +481,11 @@ ValorLiteral: ast::Expressao = {
     <obj:CriacaoObjeto> => obj,
 };
 
+ExpressaoLiteral: ast::Expressao = {
+    <s:TStringInterpolada> => crate::interpolacao::parse_string_interpolada(&s).unwrap(),
+    <t:TString>            => ast::Expressao::Texto(t),
+    <n:TInteiro>           => ast::Expressao::Inteiro(n),
+};
 
 // === ARGUMENTOS ===
 ArgumentosVazios: Vec<ast::Expressao> = {
@@ -494,7 +500,6 @@ ListaArgumentos: Vec<ast::Expressao> = {
         lista
     },
 };
-
 
 // === MAPEAMENTO DE TOKENS ===
 extern {
@@ -562,5 +567,7 @@ extern {
         TString => Token::TString(<String>),
         TIdentificador => Token::TIdentificador(<String>),
         TInteiro => Token::TInteiro(<i64>),
+        TStringInterpolada => Token::TStringInterpolada(<String>),
+
     }
 }

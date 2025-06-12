@@ -63,6 +63,11 @@ fn compilar_arquivo(caminho_arquivo: &str) -> Result<(), Box<dyn std::error::Err
     let parser = parser::ArquivoParser::new();
     let mut ast = parser.parse(tokens.iter().cloned())
         .map_err(|e| format!("Erro sintático: {:?}", e))?;
+    
+    // percorre e converte as StringInterpolada->somar strings
+    crate::interpolacao::walk_programa(&mut ast, |e| {
+        *e = interpolacao::planificar_interpolada(e.clone());
+});
 
     println!("   ✓ AST gerado com sucesso");
     println!("   - {} namespaces", ast.namespaces.len());
