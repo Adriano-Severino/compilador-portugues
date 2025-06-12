@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-// === TIPOS BÁSICOS ===
+/* ========================================================================== */
+/* TIPOS BÁSICOS                                                              */
+/* ========================================================================== */
 #[derive(Debug, Clone, PartialEq)]
 pub enum Tipo {
     Inteiro,
@@ -15,7 +17,9 @@ pub enum Tipo {
     Inferido,
 }
 
-// === PROGRAMA ===
+/* ========================================================================== */
+/* PROGRAMA                                                                   */
+/* ========================================================================== */
 #[derive(Debug, Clone)]
 pub struct Programa {
     pub namespaces: Vec<DeclaracaoNamespace>,
@@ -28,14 +32,18 @@ pub enum ItemPrograma {
     Declaracao(Declaracao),
 }
 
-// === NAMESPACES ===
+/* ========================================================================== */
+/* NAMESPACES                                                                 */
+/* ========================================================================== */
 #[derive(Debug, Clone)]
 pub struct DeclaracaoNamespace {
     pub nome: String,
     pub declaracoes: Vec<Declaracao>,
 }
 
-// === DECLARAÇÕES ===
+/* ========================================================================== */
+/* DECLARAÇÕES TOP-LEVEL                                                      */
+/* ========================================================================== */
 #[derive(Debug, Clone)]
 pub enum Declaracao {
     DeclaracaoClasse(DeclaracaoClasse),
@@ -49,7 +57,7 @@ pub enum Declaracao {
     Comando(Comando),
 }
 
-// === ESTRUTURAS ADICIONAIS ===
+/* — módulos / interfaces / enums / type-alias — */
 #[derive(Debug, Clone)]
 pub struct DeclaracaoModulo {
     pub nome: String,
@@ -94,7 +102,9 @@ pub struct Exportacao {
     pub publico: bool,
 }
 
-// === CLASSES ===
+/* ========================================================================== */
+/* CLASSES                                                                    */
+/* ========================================================================== */
 #[derive(Debug, Clone)]
 pub struct DeclaracaoClasse {
     pub nome: String,
@@ -158,9 +168,12 @@ pub struct ConstrutorClasse {
     pub parametros: Vec<Parametro>,
     pub modificador: ModificadorAcesso,
     pub corpo: Vec<Comando>,
+    pub nome_escrito: Option<String>, // para construtor “Classe(...)”
 }
 
-// === FUNÇÕES ===
+/* ========================================================================== */
+/* FUNÇÕES                                                                    */
+/* ========================================================================== */
 #[derive(Debug, Clone)]
 pub struct DeclaracaoFuncao {
     pub nome: String,
@@ -170,7 +183,7 @@ pub struct DeclaracaoFuncao {
     pub corpo: Vec<Comando>,
 }
 
-// ✅ PARÂMETROS CORRIGIDOS PARA C#
+/* — parâmetros com valor padrão (C#-style) — */
 #[derive(Debug, Clone)]
 pub struct Parametro {
     pub nome: String,
@@ -178,30 +191,21 @@ pub struct Parametro {
     pub valor_padrao: Option<Expressao>,
 }
 
-// ✅ Implementação dos helpers para parâmetros opcionais
 impl Parametro {
     pub fn obrigatorio(nome: String, tipo: Tipo) -> Self {
-        Self {
-            nome,
-            tipo,
-            valor_padrao: None,
-        }
+        Self { nome, tipo, valor_padrao: None }
     }
-
     pub fn opcional(nome: String, tipo: Tipo, valor_padrao: Expressao) -> Self {
-        Self {
-            nome,
-            tipo,
-            valor_padrao: Some(valor_padrao),
-        }
+        Self { nome, tipo, valor_padrao: Some(valor_padrao) }
     }
-
     pub fn eh_opcional(&self) -> bool {
         self.valor_padrao.is_some()
     }
 }
 
-// === MODIFICADORES DE ACESSO ===
+/* ========================================================================== */
+/* MODIFICADORES                                                              */
+/* ========================================================================== */
 #[derive(Debug, Clone, PartialEq)]
 pub enum ModificadorAcesso {
     Publico,
@@ -209,7 +213,9 @@ pub enum ModificadorAcesso {
     Protegido,
 }
 
-// === COMANDOS ===
+/* ========================================================================== */
+/* COMANDOS                                                                   */
+/* ========================================================================== */
 #[derive(Debug, Clone)]
 pub enum Comando {
     DeclaracaoVariavel(Tipo, String, Option<Expressao>),
@@ -220,7 +226,12 @@ pub enum Comando {
     Imprima(Expressao),
     Se(Expressao, Box<Comando>, Option<Box<Comando>>),
     Enquanto(Expressao, Box<Comando>),
-    Para(Option<Box<Comando>>, Option<Expressao>, Option<Box<Comando>>, Box<Comando>),
+    Para(
+        Option<Box<Comando>>,
+        Option<Expressao>,
+        Option<Box<Comando>>,
+        Box<Comando>,
+    ),
     Bloco(Vec<Comando>),
     Retorne(Option<Expressao>),
     Expressao(Expressao),
@@ -229,7 +240,9 @@ pub enum Comando {
     AcessarCampo(String, String),
 }
 
-// === EXPRESSÕES ===
+/* ========================================================================== */
+/* EXPRESSÕES                                                                 */
+/* ========================================================================== */
 #[derive(Debug, Clone)]
 pub enum Expressao {
     Inteiro(i64),
@@ -250,8 +263,8 @@ pub enum Expressao {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum OperadorUnario {
-    NegacaoLogica, // !
-    NegacaoNumerica, // -
+    NegacaoLogica,
+    NegacaoNumerica,
 }
 
 #[derive(Debug, Clone)]
@@ -260,7 +273,6 @@ pub enum PartStringInterpolada {
     Expressao(Expressao),
 }
 
-// === OPERADORES ===
 #[derive(Debug, Clone)]
 pub enum OperadorAritmetico {
     Soma,

@@ -44,8 +44,13 @@ IdentificadorCompleto: String = {
     }
 };
 
-IdentificadorSimples: String = {
-    TIdentificador => <>
+// === IDENTIFICADORES ======================================================
+// Nome simples vindo do lexer
+IdentificadorSimples: String = { TIdentificador => <> };
+
+// Alias para manter compatibilidade com regras antigas
+Identificador: String = {
+    <s:IdentificadorSimples> => s,
 };
 
 // === DECLARAÇÕES ===
@@ -53,6 +58,13 @@ Declaracao: ast::Declaracao = {
     <classe:DeclaracaoClasse> => ast::Declaracao::DeclaracaoClasse(classe),
     <funcao:DeclaracaoFuncao> => ast::Declaracao::DeclaracaoFuncao(funcao),
     <cmd:ComandoTopLevel> => ast::Declaracao::Comando(cmd),
+};
+
+// === MODIFICADORES DE ACESSO =============================================
+ModificadorAcesso: ast::ModificadorAcesso = {
+    "publico"   => ast::ModificadorAcesso::Publico,
+    "privado"   => ast::ModificadorAcesso::Privado,
+    "protegido" => ast::ModificadorAcesso::Protegido,
 };
 
 // === CLASSES ===
@@ -86,23 +98,31 @@ DeclaracaoClasse: ast::DeclaracaoClasse = {
 };
 
 MembroClasse: ast::MembroClasse = {
-    <prop:PropriedadeClasse> => ast::MembroClasse::Propriedade(prop),
-    <metodo:MetodoClasse> => ast::MembroClasse::Metodo(metodo),
-    <construtor:ConstrutorClasse> => ast::MembroClasse::Construtor(construtor),
-    <campo:CampoClasse> => ast::MembroClasse::Campo(campo),
+    <c:ConstrutorDecl>    => ast::MembroClasse::Construtor(c),
+    <f:CampoClasse>       => ast::MembroClasse::Campo(f),
+    <p:PropriedadeClasse> => ast::MembroClasse::Propriedade(p),
+    <m:MetodoClasse>      => ast::MembroClasse::Metodo(m),
 };
 
 // === CAMPOS ===
 CampoClasse: ast::CampoClasse = {
-    <modificador:ModificadorAcesso?> <tipo:Tipo> <nome:IdentificadorSimples> <valor:("=" <ValorLiteral>)?> ";" => {
+    <acesso:ModificadorAcesso?> <t:Tipo> <id:IdentificadorSimples> ";" =>
         ast::CampoClasse {
-            nome,
-            tipo,
-            modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
-            valor_inicial: valor,
+            nome: id,
+            tipo: t,
+            modificador: acesso.unwrap_or(ast::ModificadorAcesso::Privado),
+            valor_inicial: None,
             eh_estatico: false,
-        }
-    }
+        },
+
+    <acesso:ModificadorAcesso?> <t:Tipo> <id:IdentificadorSimples> "=" <v:ValorLiteral> ";" =>
+        ast::CampoClasse {
+            nome: id,
+            tipo: t,
+             modificador: acesso.unwrap_or(ast::ModificadorAcesso::Privado),
+            valor_inicial: Some(v),
+            eh_estatico: false,
+        },
 };
 
 // === PROPRIEDADES ===
@@ -170,14 +190,16 @@ MetodoClasse: ast::MetodoClasse = {
 };
 
 // === CONSTRUTORES ===
-ConstrutorClasse: ast::ConstrutorClasse = {
-    <modificador:ModificadorAcesso?> "construtor" "(" <params:ParametrosVazios> ")" <corpo:BlocoComando> => {
-        ast::ConstrutorClasse {
-            parametros: params,
-            modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
-            corpo,
-        }
-    }
+ConstrutorDecl: ast::ConstrutorClasse = {
+    //C# — mesmo nome da classe -------------------- */
+    <m:ModificadorAcesso?> <nome:IdentificadorSimples>
+        "(" <p:ListaParametros?> ")" <b:BlocoComando>
+        => ast::ConstrutorClasse {
+            parametros:     p.unwrap_or_default(),
+            modificador:    m.unwrap_or(ast::ModificadorAcesso::Publico),
+            corpo:          b,
+            nome_escrito:   Some(nome),
+        },
 };
 
 // === PARÂMETROS ===
@@ -189,9 +211,9 @@ ParametrosVazios: Vec<ast::Parametro> = {
 ListaParametros: Vec<ast::Parametro> = {
     <p:ParametroSimples> => vec![p],
     <mut lista:ListaParametros> "," <p:ParametroSimples> => {
-        // Validar ordem dos parâmetros opcionais
+         // Validar ordem dos parâmetros opcionais
         if lista.iter().any(|param| param.eh_opcional()) && !p.eh_opcional() {
-            panic!("Parâmetros obrigatórios devem vir antes dos opcionais");
+             panic!("Parâmetros obrigatórios devem vir antes dos opcionais");
         }
         lista.push(p);
         lista
@@ -199,10 +221,10 @@ ListaParametros: Vec<ast::Parametro> = {
 };
 
 ParametroSimples: ast::Parametro = {
-    // Parâmetro com valor padrão (C#-style)
+      // Parâmetro com valor padrão (C#-style)
     <tipo:Tipo> <nome:TIdentificador> "=" <valor:ExpressaoAtomo> => 
         ast::Parametro::opcional(nome, tipo, valor),
-    // Parâmetro obrigatório
+     // Parâmetro obrigatório
     <tipo:Tipo> <nome:TIdentificador> => 
         ast::Parametro::obrigatorio(nome, tipo),
 };
@@ -219,7 +241,7 @@ ComandoSe: ast::Comando = {
     },
 };
 
-ComandoSimplesSemSe: ast::Comando = {    // Tudo que está em ComandoSimples exceto o comando Se
+ComandoSimplesSemSe: ast::Comando = {     // Tudo que está em ComandoSimples exceto o comando Se
     "var" <nome:IdentificadorSimples> "=" <expr:Expressao> ";" => {
         ast::Comando::DeclaracaoVar(nome, expr)
     },
@@ -349,7 +371,7 @@ pub Expressao: ast::Expressao = {
 };
 
 ExpressaoLogica: ast::Expressao = {
-    // Expressões booleanas binárias
+   // Expressões booleanas binárias
     <esq:ExpressaoLogica> "&&" <dir:ExpressaoComparacao> => {
         ast::Expressao::Logica(ast::OperadorLogico::E, Box::new(esq), Box::new(dir))
     },
@@ -451,7 +473,7 @@ ValorLiteral: ast::Expressao = {
     <valor:TString> => ast::Expressao::Texto(valor),
     "verdadeiro" => ast::Expressao::Booleano(true),
     "falso" => ast::Expressao::Booleano(false),
-    // ✅ Suporte para expressões em valores padrão
+    // âœ… Suporte para expressÃµes em valores padrÃ£o
     "este" => ast::Expressao::Este,
     <nome:TIdentificador> => ast::Expressao::Identificador(nome),
     <nome:TIdentificador> "(" <args:ArgumentosVazios> ")" => ast::Expressao::Chamada(nome, args),
@@ -473,12 +495,6 @@ ListaArgumentos: Vec<ast::Expressao> = {
     },
 };
 
-// === MODIFICADORES ===
-ModificadorAcesso: ast::ModificadorAcesso = {
-    "publico" => ast::ModificadorAcesso::Publico,
-    "privado" => ast::ModificadorAcesso::Privado,
-    "protegido" => ast::ModificadorAcesso::Protegido,
-};
 
 // === MAPEAMENTO DE TOKENS ===
 extern {

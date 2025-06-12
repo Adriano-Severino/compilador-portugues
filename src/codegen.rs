@@ -1,9 +1,9 @@
 use crate::ast::*;
-use inkwell::builder::Builder;
-use inkwell::context::Context;
-use inkwell::module::Module;
-use std::cell::RefCell;
-use std::collections::HashMap;
+use inkwell::{builder::Builder, context::Context, module::Module};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+};
 
 #[derive(Debug, Clone)]
 pub enum ValorAvaliado {
@@ -18,13 +18,14 @@ pub enum ValorAvaliado {
 
 pub struct GeradorCodigo<'ctx> {
     pub context: &'ctx Context,
-    pub module: Module<'ctx>,
+    pub module:  Module<'ctx>,
     pub builder: Builder<'ctx>,
-    escopos: RefCell<Vec<HashMap<String, ValorAvaliado>>>,
-    classes: RefCell<HashMap<String, DeclaracaoClasse>>,
-    funcoes: RefCell<HashMap<String, DeclaracaoFuncao>>,
-    contador_loop: RefCell<u32>,
-    escopo_este: RefCell<Option<ValorAvaliado>>, // ✅ NOVO: Para rastrear 'este'
+
+    escopos:       RefCell<Vec<HashMap<String, ValorAvaliado>>>,
+    classes:       RefCell<HashMap<String, DeclaracaoClasse>>,
+    funcoes:       RefCell<HashMap<String, DeclaracaoFuncao>>,
+    contador_loop: RefCell<u64>,
+    escopo_este:   RefCell<Option<ValorAvaliado>>,
 }
 
 impl<'ctx> GeradorCodigo<'ctx> {

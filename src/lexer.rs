@@ -2,168 +2,76 @@ use logos::Logos;
 
 #[derive(Logos, Debug, PartialEq, Clone)]
 pub enum Token {
-    // Palavras-chave básicas
-    #[token("se")]
-    TSe,
-    #[token("então")]
-    TEntao,
-    #[token("senão")]
-    TSenao,
-    #[token("enquanto")]
-    TEnquanto,
-    #[token("para")]
-    TPara,
-    #[token("funcao")]
-    TFuncao,
-    #[token("metodo")]
-    TMetodo,
-    #[token("retorne")]
-    TRetorne,
-    #[token("imprima")]
-    TImprima,
-    #[token("var")]
-    TVar,
-   #[token("espaco")]
-    TEspaco,
+    /* palavras-chave básicas */
+    #[token("se")]        TSe,
+    #[token("então")]     TEntao,
+    #[token("senão")]     TSenao,
+    #[token("enquanto")]  TEnquanto,
+    #[token("para")]      TPara,
+    #[token("funcao")]    TFuncao,
+    #[token("retorne")]   TRetorne,
+    #[token("imprima")]   TImprima,
+    #[token("var")]       TVar,
+    #[token("espaco")]    TEspaco,
 
-    // Tipos
-    #[token("inteiro")]
-    TTipoInteiro,
-    #[token("texto")]
-    TTipoTexto,
-    #[token("booleano")]
-    TTipoBooleano,
-    #[token("vazio")]
-    TTipoVazio,
-    #[token("Lista")]
-    TTipoLista,
-    #[token("verdadeiro")]
-    TVerdadeiro,
-    #[token("falso")]
-    TFalso,
-    
-    // Operadores
-    #[token("=")]
-    TAtribuicao,
-    #[token("==")]
-    TIgual,
-    #[token("!=")]
-    TDiferente,
-    #[token(">")]
-    TMaiorQue,
-    #[token(">=")]
-    TMaiorIgual,
-    #[token("<")]
-    TMenor,
-    #[token("<=")]
-    TMenorIgual,
-    #[token("+")]
-    TMais,
-    #[token("-")]
-    TMenos,
-    #[token("*")]
-    TMultiplicacao,
-    #[token("/")]
-    TDivisao,
-    #[token("%")]
-    TModulo,
-    #[token("&&")]
-    TE,
-    #[token("||")]
-    TOu,
-    #[token("!")]
-    TNao,
-    
-    // Delimitadores
-    #[token("(")]
-    TParenEsq,
-    #[token(")")]
-    TParenDir,
-    #[token("{")]
-    TChaveEsq,
-    #[token("}")]
-    TChaveDir,
-    #[token("[")]
-    TColcheteEsq,
-    #[token("]")]
-    TColcheteDir,
-    #[token(";")]
-    TPontoVirgula,
-    #[token(",")]
-    TVirgula,
-    #[token("=>")]
-    TSeta,
-    #[token(".")]
-    TPonto,
-    #[token(":")]
-    TDoisPontos,
-    
-    // Tokens para OOP
-    #[token("classe")]
-    TClasse,
-    #[token("herda")]
-    THerda,
-    #[token("construtor")]
-    TConstrutor,
-    #[token("publico")]
-    TPublico,
-    #[token("privado")]
-    TPrivado,
-    #[token("protegido")]
-    TProtegido,
-    #[token("virtual")]
-    TVirtual,
-    #[token("override")]
-    TOverride,
-    #[token("novo")]
-    TNovo,
-    #[token("este")]
-    TEste,
-    #[token("super")]
-    TSuper,
+    /* tipos */
+    #[token("inteiro")]   TTipoInteiro,
+    #[token("texto")]     TTipoTexto,
+    #[token("booleano")]  TTipoBooleano,
+    #[token("vazio")]     TTipoVazio,
+    #[token("verdadeiro")]TVerdadeiro,
+    #[token("falso")]     TFalso,
 
-    // NOVO: Tokens para propriedades
-    #[token("buscar")]       // get
-    TBuscar,
-    #[token("definir")]      // set
-    TDefinir,
+    /* OOP */
+    #[token("classe")]    TClasse,
+    #[token("construtor")]TConstrutor,
+    #[token("herda")]     THerda,
+    #[token("publico")]   TPublico,
+    #[token("privado")]   TPrivado,
+    #[token("protegido")] TProtegido,
+    #[token("novo")]      TNovo,
+    #[token("este")]      TEste,
+    #[token("buscar")]    TBuscar,
+    #[token("definir")]   TDefinir,
 
-    // Tokens para módulos
-    #[token("modulo")]
-    TModuloToken,
-    #[token("importar")]
-    TImportar,
-    #[token("exportar")]
-    TExportar,
-    #[token("de")]
-    TDe,
-    #[token("como")]
-    TComo,
-    #[token("usar")]
-    TUsar,
-    
-    // String interpolation
-    #[regex(r#"\$"[^"]*""#, |lex| {
-        let content = lex.slice();
-        // Remove $" no início e " no final
-        let inner = &content[2..content.len()-1];
-        inner.to_string()
-    })]
-    TStringInterpolada(String),
-    
-    // Literais
-    #[regex(r#""[^"]*""#, |lex| lex.slice().trim_matches('"').to_string())]
+    /* operadores */
+    #[token("==")] TIgual,
+    #[token("!=")] TDiferente,
+    #[token(">=")] TMaiorIgual,
+    #[token("<=")] TMenorIgual,
+    #[token(">")]  TMaiorQue,
+    #[token("<")]  TMenor,
+    #[token("+")]  TMais,
+    #[token("-")]  TMenos,
+    #[token("*")]  TMultiplicacao,
+    #[token("/")]  TDivisao,
+    #[token("%")]  TModulo,
+    #[token("&&")] TE,
+    #[token("||")] TOu,
+    #[token("!")]  TNao,
+    #[token("=")]  TAtribuicao,
+
+    /* delimitadores */
+    #[token("(")] TParenEsq,
+    #[token(")")] TParenDir,
+    #[token("{")] TChaveEsq,
+    #[token("}")] TChaveDir,
+    #[token(";")] TPontoVirgula,
+    #[token(",")] TVirgula,
+    #[token(".")] TPonto,
+    #[token("=>")]TSeta,
+
+    /* literais */
+    #[regex(r#""([^"\\]|\\.)*""#, |lex| lex.slice()[1..lex.slice().len()-1].to_string())]
     TString(String),
+    #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().unwrap())]
+    TInteiro(i64),
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
     TIdentificador(String),
-    #[regex(r"[0-9]+", |lex| lex.slice().parse().ok())]
-    TInteiro(i64),
-    
-    // Comentários e espaços
+
+    /* comentários / espaço */
     #[regex(r"//[^\n]*", logos::skip)]
     ComentarioLinha,
-    #[regex(r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/", logos::skip)]
-    ComentarioBloco,
-    #[regex(r"[\s\t\n]+", logos::skip)]
+    #[regex(r"[ \t\r\n]+", logos::skip)]
     Whitespace,
 }
