@@ -304,13 +304,13 @@ ComandoSimplesSemSe: ast::Comando = {     // Tudo que está em ComandoSimples ex
 };
 
 ComandosBasicos: ast::Comando = {
-    <obj:ExpressaoIdentificador> "." <metodo:IdentificadorSimples> "(" <args:InnerArgList> ";" => {
+    <obj:ExpressaoAtomo> "." <metodo:IdentificadorSimples> "(" <args:InnerArgList> ";" => {
         match obj {
             ast::Expressao::Identificador(nome) => ast::Comando::ChamarMetodo(nome, metodo, args),
             _ => panic!("Esperava um identificador simples")
         }
     },
-    <obj:ExpressaoIdentificador> "." <prop:IdentificadorSimples> "=" <expr:Expressao> ";" => {
+    <obj:ExpressaoAtomo> "." <prop:IdentificadorSimples> "=" <expr:Expressao> ";" => {
         match obj {
             ast::Expressao::Identificador(nome) => ast::Comando::AtribuirPropriedade(nome, prop, expr),
             _ => panic!("Esperava um identificador simples")
@@ -326,11 +326,6 @@ ComandosBasicos: ast::Comando = {
     "retorne" <expr:Expressao?> ";" => {
         ast::Comando::Retorne(expr)
     },
-};
-
-// === EXPRESSÃO IDENTIFICADOR ===
-ExpressaoIdentificador: ast::Expressao = {
-    <nome:IdentificadorSimples> => ast::Expressao::Identificador(nome),
 };
 
 // === TIPOS E IDENTIFICADORES ===
@@ -380,7 +375,7 @@ ComandoSimples: ast::Comando = {
 };
 
 ChamadaMetodoOuBloco: ast::Comando = {
-    <obj:ExpressaoIdentificador> "." <metodo:TIdentificador> "(" <args:InnerArgList> ";" => {
+    <obj:ExpressaoAtomo> "." <metodo:TIdentificador> "(" <args:InnerArgList> ";" => {
         match obj {
             ast::Expressao::Identificador(nome) => ast::Comando::ChamarMetodo(nome, metodo, args),
             _ => panic!("Esperava um identificador simples")
@@ -390,7 +385,7 @@ ChamadaMetodoOuBloco: ast::Comando = {
 };
 
 AtribuicaoOuDeclaracao: ast::Comando = {
-    <obj:ExpressaoIdentificador> "." <prop:TIdentificador> "=" <expr:Expressao> ";" => { // This is property assignment
+    <obj:ExpressaoAtomo> "." <prop:TIdentificador> "=" <expr:Expressao> ";" => { // This is property assignment
         match obj {
             ast::Expressao::Identificador(nome) => ast::Comando::AtribuirPropriedade(nome, prop, expr),
             _ => panic!("Esperava um identificador simples")
@@ -406,6 +401,11 @@ AtribuicaoOuDeclaracao: ast::Comando = {
     "retorne" <expr:Expressao?> ";" => {
         ast::Comando::Retorne(expr)
     },
+    // Explicitly allow standalone function calls as statements.
+    // This replaces the general `Expressao ";"` to resolve R/R conflicts.
+    <nome:TIdentificador> "(" <args:InnerArgList> ";" => {
+        ast::Comando::Expressao(ast::Expressao::Chamada(nome, args))
+    }
 };
 
 
