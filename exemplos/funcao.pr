@@ -1,14 +1,12 @@
 espaco Meu_Programa.funcoes
 {
 // Sintaxe 1: Sem tipo de retorno (implícito vazio)
-publico funcao bemvindo() 
-{
+publico funcao bemvindo() {
     imprima("Olá mundo");
 }
 
 // Sintaxe 2: Com parâmetros, sem tipo de retorno
-publico funcao configurar(texto nome) 
-{
+publico funcao configurar(texto nome) {
     imprima("Configurando: " + nome);
 }
 
@@ -18,29 +16,24 @@ publico funcao calcular() => inteiro {
 }
 
 // Sintaxe 4: Com parâmetros e tipo no final
-publico funcao multiplicar(inteiro a, inteiro b) => inteiro 
-{
+publico funcao multiplicar(inteiro a, inteiro b) => inteiro {
     retorne a * b;
 }
 
-privado funcao multiplicar2(inteiro a, inteiro b) => inteiro 
-{
+privado funcao multiplicar2(inteiro a, inteiro b) => inteiro {
     retorne a * b;
 }
 // Sintaxe 5: NOVA - Tipo no início (sua preferência)
-privado funcao inteiro somar(inteiro a, inteiro b) 
-{
+privado funcao inteiro somar(inteiro a, inteiro b) {
     retorne a + b;
 }
 
 // Sintaxe 6: NOVA - Outros tipos no início
-publico funcao texto obter_nome() 
-{
+publico funcao texto obter_nome() {
     retorne "João";
 }
 
-publico funcao booleano eh_par(inteiro numero) 
-{
+publico funcao booleano eh_par(inteiro numero) {
     retorne numero % 2 == 0;
 }
 
@@ -49,26 +42,22 @@ publico funcao vazio imprimir_linha() {
 }
 
 // Para classes personalizadas
-publico funcao Pessoa criar_pessoa(texto nome, inteiro idade) 
-{
+publico funcao Pessoa criar_pessoa(texto nome, inteiro idade) {
     retorne novo Pessoa(nome, idade);
 }
 
 // Sintaxe sem tipo de retorno
-publico funcao processar_dados(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) 
-{
+publico funcao processar_dados(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) {
     imprima("Processando dados completos");
 }
 
 // Sintaxe com tipo no início
-publico funcao texto gerar_relatorio(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) 
-{
+publico funcao texto gerar_relatorio(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) {
     retorne "Relatório gerado";
 }
 
 // Sintaxe com seta
-publico funcao processar_completo(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) => texto 
-{
+publico funcao processar_completo(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) => texto {
     retorne "Processamento completo";
 }
 
@@ -79,4 +68,24 @@ publico funcao testar_funcoes() {
     imprima("Resultado do relatório: " + resultado);
     imprima("Resultado do processo: " + processo);
 }
+
+publico classe Pessoa
+{
+    // Propriedades automáticas 100 % compatíveis com a gramática
+    publico texto Nome  { buscar; definir; }
+    publico inteiro Idade { buscar; definir; }
+
+    // Construtor – mesmo nome da classe            ← C# style[5]
+    publico Pessoa(texto nome, inteiro idade)
+    {
+        Nome  = nome;
+        Idade = idade;
+    }
+
+    // Método de instância
+    publico vazio apresentar() {
+        imprima($"👤 {Nome}, {Idade} anos");
+    }
+}
+
 }
