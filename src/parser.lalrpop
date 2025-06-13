@@ -164,19 +164,45 @@ AcessorPropriedade: (bool, Option<ast::ModificadorAcesso>) = {
     <modificador:ModificadorAcesso?> "buscar" ";" => (true, modificador),
     <modificador:ModificadorAcesso?> "definir" ";" => (false, modificador),
 };
-
 // === FUNÇÕES E MÉTODOS ===
 DeclaracaoFuncao: ast::DeclaracaoFuncao = {
-    <modificador:ModificadorAcesso?> "funcao" <tipo:Tipo?> <nome:IdentificadorSimples> 
-    "(" <params:InnerParamList> ")" <corpo:BlocoComando> => {
+    // 1. [mod] funcao nome (params) { corpo }      → retorno implícito = Vazio
+    <m:ModificadorAcesso?> "funcao"
+    <nome:IdentificadorSimples> "(" <params:InnerParamList> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
             nome,
-            parametros: params, // InnerParamList directly returns Vec
-            tipo_retorno: tipo.or(Some(ast::Tipo::Vazio)),
-            modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
-            corpo,
+            parametros: params,
+            tipo_retorno: Some(ast::Tipo::Vazio),
+            modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
+            corpo: body,
         }
-    }
+    },
+
+    // 2. [mod] funcao nome (params) => Tipo { corpo }
+    <m:ModificadorAcesso?> "funcao"
+    <nome:IdentificadorSimples>
+    "(" <params:InnerParamList> "=>" <ret:Tipo> <body:BlocoComando> => {
+        ast::DeclaracaoFuncao {
+            nome,
+            parametros: params,
+            tipo_retorno: Some(ret),
+            modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
+            corpo: body,
+        }
+    },
+
+    // 3. [mod] funcao Tipo nome (params) { corpo }  – tipo antes do nome
+    <m:ModificadorAcesso?> "funcao"
+    <ret:Tipo> <nome:IdentificadorSimples>
+    "(" <params:InnerParamList> <body:BlocoComando> => {
+        ast::DeclaracaoFuncao {
+            nome,
+            parametros: params,
+            tipo_retorno: Some(ret),
+            modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
+            corpo: body,
+        }
+    },
 };
 
 // — MÉTODO DE INSTÂNCIA ----------------------------------------------------
@@ -184,7 +210,7 @@ MetodoClasse: ast::MetodoClasse = {
     <m:ModificadorAcesso?>            // publico | privado | protegido
     <ret:Tipo>                       // inteiro | texto | Classe ...
     <nome:IdentificadorSimples>      // apresentar
-    "(" <p:InnerParamList> ")"    // (...)
+    "(" <p:InnerParamList>    // (...)
     <b:BlocoComando>                 // { ... }
         => ast::MetodoClasse {
             nome,
@@ -199,11 +225,11 @@ MetodoClasse: ast::MetodoClasse = {
         },
 };
 
-// — CONSTRUTOR (palavra-chave opcional, nome da classe obrigatório) -------
+// — CONSTRUTOR DE CLASSE ---------------------------------------------------
 ConstrutorDecl: ast::ConstrutorClasse = {
     // sintaxe “C#” — contrutor nome da classe
     <m:ModificadorAcesso?> <nome:IdentificadorSimples>
-        "(" <p:InnerParamList> ")" <b:BlocoComando>
+        "(" <p:InnerParamList> <b:BlocoComando>
         => ast::ConstrutorClasse {
             parametros: p, // InnerParamList directly returns Vec
             modificador: m.unwrap_or(ast::ModificadorAcesso::Publico), // Construtores são geralmente públicos por padrão se não especificado
@@ -215,19 +241,26 @@ ConstrutorDecl: ast::ConstrutorClasse = {
 
 // === PARÂMETROS ===
 // InnerParamList defines the content *between* parentheses for parameters.
-InnerParamList: Vec<ast::Parametro> = {
-    <params:ListaParametros?> => params.unwrap_or_default(),
+//InnerParamList: Vec<ast::Parametro> = {
+    //<params:ListaParametros?> => params.unwrap_or_default(),
+//};
+
+#[inline]                     // argumentos de chamada
+ListaArgumentos: Vec<ast::Expressao> = {
+    // primeiro , resto*
+    <primeiro:Expressao> <rest:("," Expressao)*> => {
+        let mut v = vec![primeiro];
+        v.extend(rest.into_iter().map(|(_, e)| e));
+        v
+    }
 };
 
+#[inline]                     // parâmetros de declaração
 ListaParametros: Vec<ast::Parametro> = {
-    <p:ParametroSimples> => vec![p],
-    <mut lista:ListaParametros> "," <p:ParametroSimples> => {
-         // Validar ordem dos parâmetros opcionais
-        if lista.iter().any(|param| param.eh_opcional()) && !p.eh_opcional() {
-             panic!("Parâmetros obrigatórios devem vir antes dos opcionais");
-        }
-        lista.push(p);
-        lista
+    <primeiro:ParametroSimples> <rest:("," ParametroSimples)*> => {
+        let mut v = vec![primeiro];
+        v.extend(rest.into_iter().map(|(_, p)| p));
+        v
     }
 };
 
@@ -271,7 +304,7 @@ ComandoSimplesSemSe: ast::Comando = {     // Tudo que está em ComandoSimples ex
 };
 
 ComandosBasicos: ast::Comando = {
-    <obj:ExpressaoIdentificador> "." <metodo:IdentificadorSimples> "(" <args:InnerArgList> ")" ";" => {
+    <obj:ExpressaoIdentificador> "." <metodo:IdentificadorSimples> "(" <args:InnerArgList> ";" => {
         match obj {
             ast::Expressao::Identificador(nome) => ast::Comando::ChamarMetodo(nome, metodo, args),
             _ => panic!("Esperava um identificador simples")
@@ -347,7 +380,7 @@ ComandoSimples: ast::Comando = {
 };
 
 ChamadaMetodoOuBloco: ast::Comando = {
-    <obj:ExpressaoIdentificador> "." <metodo:TIdentificador> "(" <args:InnerArgList> ")" ";" => {
+    <obj:ExpressaoIdentificador> "." <metodo:TIdentificador> "(" <args:InnerArgList> ";" => {
         match obj {
             ast::Expressao::Identificador(nome) => ast::Comando::ChamarMetodo(nome, metodo, args),
             _ => panic!("Esperava um identificador simples")
@@ -453,7 +486,7 @@ ExpressaoUnaria: ast::Expressao = {
 
 ExpressaoPostfixa: ast::Expressao = {
     <base:ExpressaoAtomo> => base,
-    <obj:ExpressaoPostfixa> "." <membro:TIdentificador> "(" <args:InnerArgList> ")" => {
+    <obj:ExpressaoPostfixa> "." <membro:TIdentificador> "(" <args:InnerArgList> => {
         ast::Expressao::ChamadaMetodo(Box::new(obj), membro, args)
     },
     <obj:ExpressaoPostfixa> "." <membro:TIdentificador> => { // Property/field access
@@ -468,31 +501,23 @@ ExpressaoAtomo: ast::Expressao = {
     //<s:TStringInterpolada> => crate::interpolacao::parse_string_interpolada(&s).unwrap(),
     "verdadeiro" => ast::Expressao::Booleano(true),
     "falso" => ast::Expressao::Booleano(false),
-    "este" => ast::Expressao::Este,
-    <nome:TIdentificador> => ast::Expressao::Identificador(nome), // Variable access
-    <nome:TIdentificador> "(" <args:InnerArgList> ")" => { // Function call
+    <nome:TIdentificador> "(" <args:InnerArgList> => { // Function call
         ast::Expressao::Chamada(nome, args)
     },
     <obj:CriacaoObjeto> => obj,
     "(" <expr:Expressao> ")" => expr,
+    "este" => ast::Expressao::Este,    // Moved este after specific TIdentificador rules
+    <nome:TIdentificador> => ast::Expressao::Identificador(nome), // Variable access (last among identifier-like atoms)
 };
 // Criação de objeto específica
 CriacaoObjeto: ast::Expressao = {
-    "novo" <classe:TIdentificador> "(" <args:InnerArgList> ")" => {
+    "novo" <classe:TIdentificador> "(" <args:InnerArgList> => {
         ast::Expressao::NovoObjeto(classe, args)
     },
 };
 
 // === VALORES LITERAIS ===
 ValorLiteral: ast::Expressao = {
-    <valor:TInteiro> => ast::Expressao::Inteiro(valor),
-    <valor:TString> => ast::Expressao::Texto(valor),
-    "verdadeiro" => ast::Expressao::Booleano(true),
-    "falso" => ast::Expressao::Booleano(false),
-    "este" => ast::Expressao::Este,
-    <nome:TIdentificador> => ast::Expressao::Identificador(nome), // Variable access
-    <nome:TIdentificador> "(" <args:InnerArgList> ")" => ast::Expressao::Chamada(nome, args), // Function call
-    <obj:CriacaoObjeto> => obj,
 };
 
 ExpressaoLiteral: ast::Expressao = {
@@ -502,17 +527,24 @@ ExpressaoLiteral: ast::Expressao = {
 };
 
 // === ARGUMENTOS ===
+/* ========= LISTAS INTERNAS (entre parênteses) ============= */
+
+#[inline]                     // chamada de função
 InnerArgList: Vec<ast::Expressao> = {
-    <args:ListaArgumentos?> => args.unwrap_or_default(),
+    ")"                         => vec![],                 // 0 argumentos
+    <lista:ListaArgumentos> ")" => lista,                  // 1+ argumentos
 };
 
-ListaArgumentos: Vec<ast::Expressao> = {
-    <expr:Expressao> => vec![expr],
-    <mut lista:ListaArgumentos> "," <expr:Expressao> => {
-        lista.push(expr);
-        lista
-    },
+#[inline]                     // cabeçalho de função
+InnerParamList: Vec<ast::Parametro> = {
+    ")"                         => vec![],                 // 0 parâmetros
+    <lista:ListaParametros> ")" => lista,                  // 1+ parâmetros
 };
+
+// -------------------------------------------------------------------------
+// LISTAS SEPARADAS POR VÍRGULA (1 ou mais) – argumentos e parâmetros
+// -------------------------------------------------------------------------
+
 
 // === MAPEAMENTO DE TOKENS ===
 extern {

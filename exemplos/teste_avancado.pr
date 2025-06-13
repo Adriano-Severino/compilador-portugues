@@ -1,18 +1,18 @@
 espaco Meu_Programa.Domain
 {
-    publico classe Pessoa2
+    publico classe Pessoa
     {
         publico texto Nome { buscar; definir; }
         publico inteiro Idade { buscar; definir; }
         publico texto Sobrenome { buscar; privado definir; }
 
-        publico Pessoa2(texto nome, inteiro idade = 25, texto sobrenome = "Padrão") {
+        publico Pessoa(texto nome, inteiro idade = 25, texto sobrenome = "Padrão") {
             Nome = nome;
             Idade = idade;
             Sobrenome = sobrenome;
         }
 
-        publico Pessoa2() {
+        publico Pessoa() {
         }
 
         publico vazio apresentar() {
@@ -25,9 +25,9 @@ espaco Meu_Programa.Domain
 var nome = "João";
 var idade = 30;
 
-Pessoa2 p1 = novo Pessoa2("Maria");
-Pessoa2 p2 = novo Pessoa2("José", 35);
-Pessoa2 p3 = novo Pessoa2();
+Pessoa p1 = novo Pessoa("Maria");
+Pessoa p2 = novo Pessoa("José", 35);
+Pessoa p3 = novo Pessoa();
 
 p3.Nome = "Ana";
 p3.Idade = 28;

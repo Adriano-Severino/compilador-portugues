@@ -3,7 +3,7 @@ inteiro limite = 5;
 
 imprima("=== Contagem de 1 a 5 ===");
 
-enquanto contador <= limite {
+enquanto (contador <= limite) {
     imprima("Contador:");
     imprima(contador);
     contador = contador + 1;
@@ -13,7 +13,7 @@ imprima("Contagem finalizada!");
 
 inteiro numero = 2;
 imprima("=== Números Pares até 20 ===");
-enquanto numero < 20 {
+enquanto (numero < 20) {
     se numero % 2 == 0 então {
         imprima("Par:");
         imprima(numero);
