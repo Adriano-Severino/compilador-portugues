@@ -45,6 +45,7 @@ IdentificadorCompleto: String = {
 
 // === IDENTIFICADORES ======================================================
 // Nome simples vindo do lexer
+#[inline]
 IdentificadorSimples: String = { TIdentificador => <> };
 
 // Alias para manter compatibilidade com regras antigas
@@ -97,32 +98,37 @@ DeclaracaoClasse: ast::DeclaracaoClasse = {
 };
 
 MembroClasse: ast::MembroClasse = {
-    <c:ConstrutorDecl>    => ast::MembroClasse::Construtor(c),
-    <f:CampoClasse>       => ast::MembroClasse::Campo(f),
-    <p:PropriedadeClasse> => ast::MembroClasse::Propriedade(p),
-    <m:MetodoClasse>      => ast::MembroClasse::Metodo(m),
+    <c:ConstrutorDecl>      => ast::MembroClasse::Construtor(c),
+    <f:CampoClasse>         => ast::MembroClasse::Campo(f),        // ← 1º
+    <p:PropriedadeClasse>   => ast::MembroClasse::Propriedade(p),
+    <m:MetodoClasse>        => ast::MembroClasse::Metodo(m),       // ←  por último
 };
 
 // === CAMPOS ===
 CampoClasse: ast::CampoClasse = {
-    <acesso:ModificadorAcesso?> <t:Tipo> <id:IdentificadorSimples> ";" =>
+    // sem valor inicial
+    <acc:ModificadorAcesso?> <t:Tipo> <id:IdentificadorSimples> ";" => {
         ast::CampoClasse {
             nome: id,
             tipo: t,
-            modificador: acesso.unwrap_or(ast::ModificadorAcesso::Privado),
+            modificador: acc.unwrap_or(ast::ModificadorAcesso::Privado),
             valor_inicial: None,
             eh_estatico: false,
-        },
+        }
+    },
 
-    <acesso:ModificadorAcesso?> <t:Tipo> <id:IdentificadorSimples> "=" <v:ValorLiteral> ";" =>
+    // com valor inicial
+    <acc:ModificadorAcesso?> <t:Tipo> <id:IdentificadorSimples> "=" <v:Expressao> ";" => {
         ast::CampoClasse {
             nome: id,
             tipo: t,
-             modificador: acesso.unwrap_or(ast::ModificadorAcesso::Privado),
+            modificador: acc.unwrap_or(ast::ModificadorAcesso::Privado),
             valor_inicial: Some(v),
             eh_estatico: false,
-        },
+        }
+    },
 };
+
 
 // === PROPRIEDADES ===
 PropriedadeClasse: ast::PropriedadeClasse = {
@@ -162,10 +168,10 @@ AcessorPropriedade: (bool, Option<ast::ModificadorAcesso>) = {
 // === FUNÇÕES E MÉTODOS ===
 DeclaracaoFuncao: ast::DeclaracaoFuncao = {
     <modificador:ModificadorAcesso?> "funcao" <tipo:Tipo?> <nome:IdentificadorSimples> 
-    "(" <params:ParametrosVazios> ")" <corpo:BlocoComando> => {
+    "(" <params:InnerParamList> ")" <corpo:BlocoComando> => {
         ast::DeclaracaoFuncao {
             nome,
-            parametros: params,
+            parametros: params, // InnerParamList directly returns Vec
             tipo_retorno: tipo.or(Some(ast::Tipo::Vazio)),
             modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
             corpo,
@@ -173,38 +179,44 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
     }
 };
 
+// — MÉTODO DE INSTÂNCIA ----------------------------------------------------
 MetodoClasse: ast::MetodoClasse = {
-    <modificador:ModificadorAcesso?> <tipo:Tipo?> <nome:IdentificadorSimples>
-    "(" <params:ParametrosVazios> ")" <corpo:BlocoComando> => ast::MetodoClasse {
-        nome,
-        parametros: params,
-        tipo_retorno: tipo.or(Some(ast::Tipo::Vazio)),
-        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
-        corpo,
-        eh_virtual: false,
-        eh_override: false,
-        eh_abstrato: false,
-        eh_estatico: false,
-    }
-};
-
-// === CONSTRUTORES ===
-ConstrutorDecl: ast::ConstrutorClasse = {
-    //C# — mesmo nome da classe -------------------- */
-    <m:ModificadorAcesso?> <nome:IdentificadorSimples>
-        "(" <p:ListaParametros?> ")" <b:BlocoComando>
-        => ast::ConstrutorClasse {
-            parametros:     p.unwrap_or_default(),
-            modificador:    m.unwrap_or(ast::ModificadorAcesso::Publico),
-            corpo:          b,
-            nome_escrito:   Some(nome),
+    <m:ModificadorAcesso?>            // publico | privado | protegido
+    <ret:Tipo>                       // inteiro | texto | Classe ...
+    <nome:IdentificadorSimples>      // apresentar
+    "(" <p:InnerParamList> ")"    // (...)
+    <b:BlocoComando>                 // { ... }
+        => ast::MetodoClasse {
+            nome,
+            parametros: p, // InnerParamList directly returns Vec
+            tipo_retorno: if ret == ast::Tipo::Vazio { None } else { Some(ret) }, // Handle 'vazio' for methods
+            modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
+            corpo: b,
+            eh_virtual: false,
+            eh_override: false,
+            eh_abstrato: false,
+            eh_estatico: false,
         },
 };
 
+// — CONSTRUTOR (palavra-chave opcional, nome da classe obrigatório) -------
+ConstrutorDecl: ast::ConstrutorClasse = {
+    // sintaxe “C#” — contrutor nome da classe
+    <m:ModificadorAcesso?> <nome:IdentificadorSimples>
+        "(" <p:InnerParamList> ")" <b:BlocoComando>
+        => ast::ConstrutorClasse {
+            parametros: p, // InnerParamList directly returns Vec
+            modificador: m.unwrap_or(ast::ModificadorAcesso::Publico), // Construtores são geralmente públicos por padrão se não especificado
+            corpo: b,
+            nome_escrito: Some(nome),
+        },
+
+};
+
 // === PARÂMETROS ===
-ParametrosVazios: Vec<ast::Parametro> = {
-    ")" => vec![],
-    <params:ListaParametros> ")" => params,
+// InnerParamList defines the content *between* parentheses for parameters.
+InnerParamList: Vec<ast::Parametro> = {
+    <params:ListaParametros?> => params.unwrap_or_default(),
 };
 
 ListaParametros: Vec<ast::Parametro> = {
@@ -259,7 +271,7 @@ ComandoSimplesSemSe: ast::Comando = {     // Tudo que está em ComandoSimples ex
 };
 
 ComandosBasicos: ast::Comando = {
-    <obj:ExpressaoIdentificador> "." <metodo:IdentificadorSimples> "(" <args:ArgumentosVazios> ")" ";" => {
+    <obj:ExpressaoIdentificador> "." <metodo:IdentificadorSimples> "(" <args:InnerArgList> ")" ";" => {
         match obj {
             ast::Expressao::Identificador(nome) => ast::Comando::ChamarMetodo(nome, metodo, args),
             _ => panic!("Esperava um identificador simples")
@@ -335,7 +347,7 @@ ComandoSimples: ast::Comando = {
 };
 
 ChamadaMetodoOuBloco: ast::Comando = {
-    <obj:ExpressaoIdentificador> "." <metodo:TIdentificador> "(" <args:ArgumentosVazios> ")" ";" => {
+    <obj:ExpressaoIdentificador> "." <metodo:TIdentificador> "(" <args:InnerArgList> ")" ";" => {
         match obj {
             ast::Expressao::Identificador(nome) => ast::Comando::ChamarMetodo(nome, metodo, args),
             _ => panic!("Esperava um identificador simples")
@@ -345,7 +357,7 @@ ChamadaMetodoOuBloco: ast::Comando = {
 };
 
 AtribuicaoOuDeclaracao: ast::Comando = {
-    <obj:ExpressaoIdentificador> "." <prop:TIdentificador> "=" <expr:Expressao> ";" => {
+    <obj:ExpressaoIdentificador> "." <prop:TIdentificador> "=" <expr:Expressao> ";" => { // This is property assignment
         match obj {
             ast::Expressao::Identificador(nome) => ast::Comando::AtribuirPropriedade(nome, prop, expr),
             _ => panic!("Esperava um identificador simples")
@@ -441,10 +453,10 @@ ExpressaoUnaria: ast::Expressao = {
 
 ExpressaoPostfixa: ast::Expressao = {
     <base:ExpressaoAtomo> => base,
-    <obj:ExpressaoPostfixa> "." <membro:TIdentificador> "(" <args:ArgumentosVazios> ")" => {
+    <obj:ExpressaoPostfixa> "." <membro:TIdentificador> "(" <args:InnerArgList> ")" => {
         ast::Expressao::ChamadaMetodo(Box::new(obj), membro, args)
     },
-    <obj:ExpressaoPostfixa> "." <membro:TIdentificador> => {
+    <obj:ExpressaoPostfixa> "." <membro:TIdentificador> => { // Property/field access
         ast::Expressao::AcessoMembro(Box::new(obj), membro)
     },
 };
@@ -457,17 +469,16 @@ ExpressaoAtomo: ast::Expressao = {
     "verdadeiro" => ast::Expressao::Booleano(true),
     "falso" => ast::Expressao::Booleano(false),
     "este" => ast::Expressao::Este,
-    <nome:TIdentificador> => ast::Expressao::Identificador(nome),
-    <nome:TIdentificador> "(" <args:ArgumentosVazios> ")" => {
+    <nome:TIdentificador> => ast::Expressao::Identificador(nome), // Variable access
+    <nome:TIdentificador> "(" <args:InnerArgList> ")" => { // Function call
         ast::Expressao::Chamada(nome, args)
     },
     <obj:CriacaoObjeto> => obj,
     "(" <expr:Expressao> ")" => expr,
 };
-
 // Criação de objeto específica
 CriacaoObjeto: ast::Expressao = {
-    "novo" <classe:TIdentificador> "(" <args:ArgumentosVazios> ")" => {
+    "novo" <classe:TIdentificador> "(" <args:InnerArgList> ")" => {
         ast::Expressao::NovoObjeto(classe, args)
     },
 };
@@ -478,10 +489,9 @@ ValorLiteral: ast::Expressao = {
     <valor:TString> => ast::Expressao::Texto(valor),
     "verdadeiro" => ast::Expressao::Booleano(true),
     "falso" => ast::Expressao::Booleano(false),
-    // âœ… Suporte para expressÃµes em valores padrÃ£o
     "este" => ast::Expressao::Este,
-    <nome:TIdentificador> => ast::Expressao::Identificador(nome),
-    <nome:TIdentificador> "(" <args:ArgumentosVazios> ")" => ast::Expressao::Chamada(nome, args),
+    <nome:TIdentificador> => ast::Expressao::Identificador(nome), // Variable access
+    <nome:TIdentificador> "(" <args:InnerArgList> ")" => ast::Expressao::Chamada(nome, args), // Function call
     <obj:CriacaoObjeto> => obj,
 };
 
@@ -492,9 +502,8 @@ ExpressaoLiteral: ast::Expressao = {
 };
 
 // === ARGUMENTOS ===
-ArgumentosVazios: Vec<ast::Expressao> = {
-    ")" => vec![], // Lista vazia
-    <args:ListaArgumentos> ")" => args,
+InnerArgList: Vec<ast::Expressao> = {
+    <args:ListaArgumentos?> => args.unwrap_or_default(),
 };
 
 ListaArgumentos: Vec<ast::Expressao> = {

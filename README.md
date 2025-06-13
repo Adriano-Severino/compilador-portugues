@@ -226,7 +226,7 @@ Código (`exemplo_teste.pr`):
 ```por do sol
 espaco Meu_Programa.Domain
 {
-    publico classe Pessoa2
+    publico classe Pessoa
     {
         publico texto Nome { buscar; definir; }
         publico inteiro Idade { buscar; definir; }
@@ -235,7 +235,7 @@ espaco Meu_Programa.Domain
         publico texto Telefone { buscar; definir; }
 
         // Construtor com parâmetros padrão (como C#)
-        publico Pessoa2(texto nome, texto endereco, texto telefone, inteiro idade = 24, texto sobrenome = "Silva") {
+        publico Pessoa(texto nome, texto endereco, texto telefone, inteiro idade = 24, texto sobrenome = "Silva") {
             Nome = nome;
             Endereco = endereco;
             Telefone = telefone;
@@ -250,9 +250,9 @@ espaco Meu_Programa.Domain
 
     publico funcao teste_pessoa() 
     {
-        Pessoa2 p1 = novo Pessoa2("Joana", "Rua de exemplo", "123456789");
-        Pessoa2 p2 = novo Pessoa2("Maria", "Rua B", "987654321", 30);
-        Pessoa2 p3 = novo Pessoa2("Mariano", "Rua C", "123456789", 35, "Silva");
+        Pessoa p1 = novo Pessoa("Joana", "Rua de exemplo", "123456789");
+        Pessoa p2 = novo Pessoa("Maria", "Rua B", "987654321", 30);
+        Pessoa p3 = novo Pessoa("Mariano", "Rua C", "123456789", 35, "Silva");
         p1.apresentar();
         p2.apresentar();
         p3.apresentar();
