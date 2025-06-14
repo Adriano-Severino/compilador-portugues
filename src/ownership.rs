@@ -15,6 +15,7 @@ pub struct InfoOwnership {
     pub escopo_criacao: usize,
     pub ultimo_uso: Option<usize>,
     pub pode_ser_movido: bool,
+    pub eh_parametro_este: bool, // ✅ NOVO: Marcar se é contexto 'este'
 }
 
 #[derive(Debug, Clone)]
@@ -34,6 +35,8 @@ pub struct AnalisadorOwnership {
     instrucao_atual: usize,
     erros: Vec<String>,
     warnings: Vec<String>,
+    classes: HashMap<String, DeclaracaoClasse>, // ✅ NOVO: Armazenar classes para herança
+    contexto_metodo_atual: Option<String>, // ✅ NOVO: Rastrear método atual
 }
 
 impl AnalisadorOwnership {
@@ -44,10 +47,25 @@ impl AnalisadorOwnership {
             instrucao_atual: 0,
             erros: Vec::new(),
             warnings: Vec::new(),
+            classes: HashMap::new(), // ✅ NOVO
+            contexto_metodo_atual: None, // ✅ NOVO
         }
     }
 
+    // ✅ NOVO: Registrar classes para análise de herança
+    pub fn registrar_classe(&mut self, classe: DeclaracaoClasse) {
+        self.classes.insert(classe.nome.clone(), classe);
+    }
+
     pub fn analisar_programa(&mut self, programa: &Programa) -> Result<Vec<String>, Vec<String>> {
+        // ✅ NOVO: Primeiro registrar todas as classes
+        for declaracao in &programa.declaracoes {
+            if let Declaracao::DeclaracaoClasse(classe) = declaracao {
+                self.registrar_classe(classe.clone());
+            }
+        }
+
+        // Analisar declarações
         for declaracao in &programa.declaracoes {
             self.analisar_declaracao(declaracao);
         }
@@ -73,7 +91,7 @@ impl AnalisadorOwnership {
 
     fn analisar_comando(&mut self, comando: &Comando) {
         self.instrucao_atual += 1;
-
+        
         match comando {
             Comando::DeclaracaoVariavel(tipo, nome, valor) => {
                 if let Some(expr) = valor {
@@ -93,6 +111,7 @@ impl AnalisadorOwnership {
                         escopo_criacao: self.escopo_atual,
                         ultimo_uso: None,
                         pode_ser_movido,
+                        eh_parametro_este: false, // ✅ NOVO
                     },
                 );
             }
@@ -106,6 +125,7 @@ impl AnalisadorOwnership {
                         escopo_criacao: self.escopo_atual,
                         ultimo_uso: None,
                         pode_ser_movido: true,
+                        eh_parametro_este: false, // ✅ NOVO
                     },
                 );
             }
@@ -120,8 +140,19 @@ impl AnalisadorOwnership {
 
             Comando::AtribuirPropriedade(objeto, _propriedade, expr) => {
                 self.analisar_expressao(expr);
-                if let Some(info) = self.variaveis.get_mut(objeto) {
-                    info.ultimo_uso = Some(self.instrucao_atual);
+                
+                // ✅ NOVO: Tratamento especial para 'este' em herança
+                if objeto == "este" {
+                    // 'este' é sempre disponível em métodos
+                    if self.contexto_metodo_atual.is_none() {
+                        self.warnings.push(
+                            "Uso de 'este' fora de contexto de método".to_string()
+                        );
+                    }
+                } else {
+                    if let Some(info) = self.variaveis.get_mut(objeto) {
+                        info.ultimo_uso = Some(self.instrucao_atual);
+                    }
                 }
             }
 
@@ -138,25 +169,21 @@ impl AnalisadorOwnership {
                 self.analisar_comando(corpo);
             }
 
-            // ✅ CORREÇÃO: Para loop corrigido
             Comando::Para(inicializacao, condicao, incremento, corpo) => {
                 self.entrar_escopo();
-
-                // ✅ Verificar se inicialização existe antes de analisar
+                
                 if let Some(init) = inicializacao {
-                    self.analisar_comando(init); // ✅ Agora passa &Comando corretamente
+                    self.analisar_comando(init);
                 }
 
-                // ✅ Verificar se condição existe antes de analisar
                 if let Some(cond) = condicao {
-                    self.analisar_expressao(cond); // ✅ Agora passa &Expressao corretamente
+                    self.analisar_expressao(cond);
                 }
 
                 self.analisar_comando(corpo);
-
-                // ✅ Verificar se incremento existe antes de analisar
+                
                 if let Some(inc) = incremento {
-                    self.analisar_comando(inc); // ✅ Agora passa &Comando corretamente
+                    self.analisar_comando(inc);
                 }
 
                 self.sair_escopo();
@@ -186,10 +213,30 @@ impl AnalisadorOwnership {
                 }
             }
 
-            Comando::ChamarMetodo(objeto_nome, _metodo, argumentos) => {
+            Comando::ChamarMetodo(objeto_nome, metodo, argumentos) => {
+                // ✅ NOVO: Análise especial para métodos redefiníveis
                 if let Some(info) = self.variaveis.get_mut(objeto_nome) {
                     info.ultimo_uso = Some(self.instrucao_atual);
+                    
+                    // ✅ NOVO: Verificar se método existe na hierarquia
+                    if let Some(classe_obj) = self.obter_classe_objeto(objeto_nome) {
+                        if !self.metodo_existe_na_hierarquia(&classe_obj, metodo) {
+                            self.warnings.push(format!(
+                                "Método '{}' pode não existir na hierarquia da classe '{}'",
+                                metodo, classe_obj
+                            ));
+                        }
+                        
+                        // ✅ NOVO: Verificar se é método polimórfico
+                        if self.eh_metodo_polimorfismo(&classe_obj, metodo) {
+                            self.warnings.push(format!(
+                                "Chamada polimórfica detectada: '{}.{}'",
+                                objeto_nome, metodo
+                            ));
+                        }
+                    }
                 }
+
                 for arg in argumentos {
                     self.analisar_expressao(arg);
                 }
@@ -215,28 +262,62 @@ impl AnalisadorOwnership {
     fn analisar_expressao(&mut self, expr: &Expressao) {
         match expr {
             Expressao::Identificador(nome) => {
-                if let Some(info) = self.variaveis.get_mut(nome) {
-                    if info.status == StatusOwnership::Movido {
-                        self.erros.push(format!(
-                            "Uso de variável '{}' após movimento na linha {}",
-                            nome, self.instrucao_atual
-                        ));
-                    } else {
-                        info.ultimo_uso = Some(self.instrucao_atual);
-                        // Leitura simples cria empréstimo
-                        if info.status == StatusOwnership::Dono {
-                            info.status = StatusOwnership::Emprestado;
+                if nome == "este" {
+                    // ✅ NOVO: Tratamento especial para 'este'
+                    if self.contexto_metodo_atual.is_none() {
+                        self.warnings.push(
+                            "Uso de 'este' fora de contexto de método".to_string()
+                        );
+                    }
+                } else {
+                    if let Some(info) = self.variaveis.get_mut(nome) {
+                        if info.status == StatusOwnership::Movido {
+                            self.erros.push(format!(
+                                "Uso de variável '{}' após movimento na linha {}",
+                                nome, self.instrucao_atual
+                            ));
+                        } else {
+                            info.ultimo_uso = Some(self.instrucao_atual);
+                            // Leitura simples cria empréstimo
+                            if info.status == StatusOwnership::Dono {
+                                info.status = StatusOwnership::Emprestado;
+                            }
                         }
                     }
                 }
             }
 
-            Expressao::AcessoMembro(obj, _) => {
+            Expressao::AcessoMembro(obj, membro) => {
                 self.analisar_expressao(obj);
+                
+                // ✅ NOVO: Verificar acesso a membro herdado
+                if let Expressao::Identificador(obj_nome) = obj.as_ref() {
+                    if let Some(classe_obj) = self.obter_classe_objeto(obj_nome) {
+                        if !self.membro_existe_na_hierarquia(&classe_obj, membro) {
+                            self.warnings.push(format!(
+                                "Membro '{}' pode não existir na hierarquia da classe '{}'",
+                                membro, classe_obj
+                            ));
+                        }
+                    }
+                }
             }
 
-            Expressao::ChamadaMetodo(obj, _, args) => {
+            Expressao::ChamadaMetodo(obj, metodo, args) => {
                 self.analisar_expressao(obj);
+                
+                // ✅ NOVO: Análise de método polimórfico
+                if let Expressao::Identificador(obj_nome) = obj.as_ref() {
+                    if let Some(classe_obj) = self.obter_classe_objeto(obj_nome) {
+                        if self.eh_metodo_redefinivel(&classe_obj, metodo) {
+                            self.warnings.push(format!(
+                                "Chamada a método redefinível '{}' - comportamento pode variar",
+                                metodo
+                            ));
+                        }
+                    }
+                }
+                
                 for arg in args {
                     self.analisar_movimento_em_expressao(arg);
                 }
@@ -263,7 +344,6 @@ impl AnalisadorOwnership {
                 self.analisar_expressao(dir);
             }
 
-            // ✅ CORREÇÃO: Adicionar case faltante para operadores unários
             Expressao::Unario(_, expr) => {
                 self.analisar_expressao(expr);
             }
@@ -282,6 +362,15 @@ impl AnalisadorOwnership {
                 }
             }
 
+            Expressao::Este => {
+                // ✅ NOVO: Verificar contexto de 'este'
+                if self.contexto_metodo_atual.is_none() {
+                    self.warnings.push(
+                        "Uso de 'este' fora de contexto de método".to_string()
+                    );
+                }
+            }
+
             _ => {}
         }
     }
@@ -289,19 +378,28 @@ impl AnalisadorOwnership {
     fn analisar_movimento_em_expressao(&mut self, expr: &Expressao) {
         match expr {
             Expressao::Identificador(nome) => {
-                if let Some(info) = self.variaveis.get_mut(nome) {
-                    if info.status == StatusOwnership::Movido {
-                        self.erros.push(format!(
-                            "Uso de variável '{}' após movimento na linha {}",
-                            nome, self.instrucao_atual
-                        ));
-                    } else if info.pode_ser_movido {
-                        // Move a variável
-                        info.status = StatusOwnership::Movido;
-                        info.ultimo_uso = Some(self.instrucao_atual);
-                    } else {
-                        // Tipos primitivos são copiados
-                        info.ultimo_uso = Some(self.instrucao_atual);
+                if nome == "este" {
+                    // ✅ NOVO: 'este' nunca é movido
+                    if self.contexto_metodo_atual.is_none() {
+                        self.warnings.push(
+                            "Uso de 'este' fora de contexto de método".to_string()
+                        );
+                    }
+                } else {
+                    if let Some(info) = self.variaveis.get_mut(nome) {
+                        if info.status == StatusOwnership::Movido {
+                            self.erros.push(format!(
+                                "Uso de variável '{}' após movimento na linha {}",
+                                nome, self.instrucao_atual
+                            ));
+                        } else if info.pode_ser_movido && !info.eh_parametro_este {
+                            // Move a variável
+                            info.status = StatusOwnership::Movido;
+                            info.ultimo_uso = Some(self.instrucao_atual);
+                        } else {
+                            // Tipos primitivos são copiados
+                            info.ultimo_uso = Some(self.instrucao_atual);
+                        }
                     }
                 }
             }
@@ -321,14 +419,14 @@ impl AnalisadorOwnership {
 
     fn analisar_funcao(&mut self, funcao: &DeclaracaoFuncao) {
         self.entrar_escopo();
-
+        
         // Parâmetros são donos de seus valores
         for param in &funcao.parametros {
             let pode_ser_movido = match param.tipo {
                 Tipo::Inteiro | Tipo::Booleano => false,
                 _ => true,
             };
-
+            
             self.variaveis.insert(
                 param.nome.clone(),
                 InfoOwnership {
@@ -336,6 +434,7 @@ impl AnalisadorOwnership {
                     escopo_criacao: self.escopo_atual,
                     ultimo_uso: None,
                     pode_ser_movido,
+                    eh_parametro_este: false, // ✅ NOVO
                 },
             );
         }
@@ -349,6 +448,31 @@ impl AnalisadorOwnership {
 
     fn analisar_metodo(&mut self, metodo: &MetodoClasse) {
         self.entrar_escopo();
+        
+        // ✅ NOVO: Definir contexto do método atual
+        self.contexto_metodo_atual = Some(metodo.nome.clone());
+        
+        // ✅ NOVO: Verificar método redefinível/sobrescreve
+        if metodo.eh_virtual && metodo.eh_override {
+            self.erros.push(format!(
+                "Método '{}' não pode ser redefinível e sobrescreve ao mesmo tempo",
+                metodo.nome
+            ));
+        }
+        
+        if metodo.eh_override {
+            self.warnings.push(format!(
+                "Método '{}' sobrescreve método da classe pai - verificar compatibilidade",
+                metodo.nome
+            ));
+        }
+        
+        if metodo.eh_virtual {
+            self.warnings.push(format!(
+                "Método '{}' é redefinível - pode ser sobrescrito por subclasses",
+                metodo.nome
+            ));
+        }
 
         // Adicionar 'este' implícito
         self.variaveis.insert(
@@ -358,6 +482,7 @@ impl AnalisadorOwnership {
                 escopo_criacao: self.escopo_atual,
                 ultimo_uso: None,
                 pode_ser_movido: false,
+                eh_parametro_este: true, // ✅ NOVO
             },
         );
 
@@ -367,7 +492,7 @@ impl AnalisadorOwnership {
                 Tipo::Inteiro | Tipo::Booleano => false,
                 _ => true,
             };
-
+            
             self.variaveis.insert(
                 param.nome.clone(),
                 InfoOwnership {
@@ -375,6 +500,7 @@ impl AnalisadorOwnership {
                     escopo_criacao: self.escopo_atual,
                     ultimo_uso: None,
                     pode_ser_movido,
+                    eh_parametro_este: false, // ✅ NOVO
                 },
             );
         }
@@ -383,11 +509,29 @@ impl AnalisadorOwnership {
             self.analisar_comando(comando);
         }
 
+        // ✅ NOVO: Limpar contexto do método
+        self.contexto_metodo_atual = None;
+        
         self.sair_escopo();
     }
 
     fn analisar_construtor(&mut self, construtor: &ConstrutorClasse) {
         self.entrar_escopo();
+        
+        // ✅ NOVO: Construtor tem contexto implícito de 'este'
+        self.contexto_metodo_atual = Some("construtor".to_string());
+        
+        // Adicionar 'este' implícito no construtor
+        self.variaveis.insert(
+            "este".to_string(),
+            InfoOwnership {
+                status: StatusOwnership::Dono, // Em construtor, 'este' é dono
+                escopo_criacao: self.escopo_atual,
+                ultimo_uso: None,
+                pode_ser_movido: false,
+                eh_parametro_este: true, // ✅ NOVO
+            },
+        );
 
         // Parâmetros
         for param in &construtor.parametros {
@@ -395,7 +539,7 @@ impl AnalisadorOwnership {
                 Tipo::Inteiro | Tipo::Booleano => false,
                 _ => true,
             };
-
+            
             self.variaveis.insert(
                 param.nome.clone(),
                 InfoOwnership {
@@ -403,6 +547,7 @@ impl AnalisadorOwnership {
                     escopo_criacao: self.escopo_atual,
                     ultimo_uso: None,
                     pode_ser_movido,
+                    eh_parametro_este: false, // ✅ NOVO
                 },
             );
         }
@@ -411,14 +556,100 @@ impl AnalisadorOwnership {
             self.analisar_comando(comando);
         }
 
+        // ✅ NOVO: Limpar contexto
+        self.contexto_metodo_atual = None;
+        
         self.sair_escopo();
+    }
+
+    // ✅ NOVO: Obter classe de um objeto
+    fn obter_classe_objeto(&self, objeto_nome: &str) -> Option<String> {
+        // Implementação simplificada - em versão completa, buscaria no tipo da variável
+        if let Some(_info) = self.variaveis.get(objeto_nome) {
+            Some("Objeto".to_string()) // Fallback genérico
+        } else {
+            None
+        }
+    }
+
+    // ✅ NOVO: Verificar se método existe na hierarquia
+    fn metodo_existe_na_hierarquia(&self, classe: &str, metodo: &str) -> bool {
+        let mut classe_atual = Some(classe.to_string());
+        
+        while let Some(nome_classe) = classe_atual {
+            if let Some(def_classe) = self.classes.get(&nome_classe) {
+                // Verificar se método existe nesta classe
+                for metodo_classe in &def_classe.metodos {
+                    if metodo_classe.nome == metodo {
+                        return true;
+                    }
+                }
+                
+                // Ir para classe pai
+                classe_atual = def_classe.classe_pai.clone();
+            } else {
+                break;
+            }
+        }
+        
+        false
+    }
+
+    // ✅ NOVO: Verificar se membro existe na hierarquia
+    fn membro_existe_na_hierarquia(&self, classe: &str, membro: &str) -> bool {
+        let mut classe_atual = Some(classe.to_string());
+        
+        while let Some(nome_classe) = classe_atual {
+            if let Some(def_classe) = self.classes.get(&nome_classe) {
+                // Verificar propriedades
+                for prop in &def_classe.propriedades {
+                    if prop.nome == membro {
+                        return true;
+                    }
+                }
+                
+                // Verificar campos
+                for campo in &def_classe.campos {
+                    if campo.nome == membro {
+                        return true;
+                    }
+                }
+                
+                // Ir para classe pai
+                classe_atual = def_classe.classe_pai.clone();
+            } else {
+                break;
+            }
+        }
+        
+        false
+    }
+
+    // ✅ NOVO: Verificar se método é redefinível
+    fn eh_metodo_redefinivel(&self, classe: &str, metodo: &str) -> bool {
+        if let Some(def_classe) = self.classes.get(classe) {
+            for metodo_classe in &def_classe.metodos {
+                if metodo_classe.nome == metodo {
+                    return metodo_classe.eh_virtual;
+                }
+            }
+        }
+        false
+    }
+
+    // ✅ NOVO: Verificar se há polimorfismo
+    fn eh_metodo_polimorfismo(&self, classe: &str, metodo: &str) -> bool {
+        // Verificar se método é redefinível e a classe tem subclasses
+        self.eh_metodo_redefinivel(classe, metodo)
     }
 
     fn verificar_variaveis_nao_utilizadas(&mut self) {
         for (nome, info) in &self.variaveis {
             if info.ultimo_uso.is_none() && nome != "este" {
-                self.warnings
-                    .push(format!("Variável '{}' declarada mas nunca utilizada", nome));
+                self.warnings.push(format!(
+                    "Variável '{}' declarada mas nunca utilizada", 
+                    nome
+                ));
             }
         }
     }
@@ -429,8 +660,7 @@ impl AnalisadorOwnership {
 
     fn sair_escopo(&mut self) {
         // Remove variáveis do escopo atual
-        self.variaveis
-            .retain(|_, info| info.escopo_criacao < self.escopo_atual);
+        self.variaveis.retain(|_, info| info.escopo_criacao < self.escopo_atual);
         self.escopo_atual -= 1;
     }
 }

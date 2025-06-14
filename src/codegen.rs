@@ -16,23 +16,28 @@ pub enum ValorAvaliado {
     },
 }
 
+// ✅ NOVO: Estrutura para método com origem (para polimorfismo)
+#[derive(Debug, Clone)]
+struct MetodoComOrigem {
+    metodo: MetodoClasse,
+    classe_origem: String,
+}
+
 pub struct GeradorCodigo<'ctx> {
     pub context: &'ctx Context,
-    pub module:  Module<'ctx>,
+    pub module: Module<'ctx>,
     pub builder: Builder<'ctx>,
-
-    escopos:       RefCell<Vec<HashMap<String, ValorAvaliado>>>,
-    classes:       RefCell<HashMap<String, DeclaracaoClasse>>,
-    funcoes:       RefCell<HashMap<String, DeclaracaoFuncao>>,
-    contador_loop: RefCell<u64>,
-    escopo_este:   RefCell<Option<ValorAvaliado>>,
+    escopos: RefCell<Vec<HashMap<String, ValorAvaliado>>>,
+    classes: RefCell<HashMap<String, DeclaracaoClasse>>,
+    funcoes: RefCell<HashMap<String, DeclaracaoFuncao>>,
+    contador_loop: RefCell<usize>,
+    escopo_este: RefCell<Option<ValorAvaliado>>,
 }
 
 impl<'ctx> GeradorCodigo<'ctx> {
     pub fn new(context: &'ctx Context) -> Self {
         let module = context.create_module("compilador_portugues");
         let builder = context.create_builder();
-
         Self {
             context,
             module,
@@ -41,7 +46,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
             classes: RefCell::new(HashMap::new()),
             funcoes: RefCell::new(HashMap::new()),
             contador_loop: RefCell::new(0),
-            escopo_este: RefCell::new(None), // ✅ NOVO
+            escopo_este: RefCell::new(None),
         }
     }
 
@@ -67,11 +72,9 @@ impl<'ctx> GeradorCodigo<'ctx> {
 
     fn processar_namespace(&self, namespace: &DeclaracaoNamespace) -> Result<(), String> {
         println!("Processando namespace: {}", namespace.nome);
-
         for declaracao in &namespace.declaracoes {
             self.processar_declaracao(declaracao)?;
         }
-
         Ok(())
     }
 
@@ -135,7 +138,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
             Comando::DeclaracaoVar(nome, expr) => {
                 let valor = self.avaliar_expressao(expr)?;
                 self.definir_variavel(nome.clone(), valor.clone());
-
                 let tipo_inferido = match valor {
                     ValorAvaliado::Inteiro(_) => "inteiro",
                     ValorAvaliado::Texto(_) => "texto",
@@ -150,21 +152,16 @@ impl<'ctx> GeradorCodigo<'ctx> {
 
             Comando::Atribuicao(nome, expr) => {
                 let valor = self.avaliar_expressao(expr)?;
-
                 if self.buscar_variavel(nome).is_none() {
                     return Err(format!("Variável '{}' não foi declarada", nome));
                 }
-
                 self.atualizar_variavel(nome, valor)?;
                 println!("Atribuído valor à variável '{}'", nome);
             }
 
-            // ✅ CORREÇÃO: Atribuição a propriedades (este.nome = valor)
             Comando::AtribuirPropriedade(objeto, propriedade, expr) => {
                 let valor = self.avaliar_expressao(expr)?;
-
                 if objeto == "este" {
-                    // ✅ Atribuição a este.propriedade
                     if let Some(mut este_obj) = self.escopo_este.borrow().clone() {
                         if let ValorAvaliado::Objeto { ref mut propriedades, .. } = este_obj {
                             propriedades.insert(propriedade.clone(), valor);
@@ -175,7 +172,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
                         println!("⚠️ Simulando atribuição este.{} = {}", propriedade, self.valor_para_string(&valor));
                     }
                 } else {
-                    // ✅ Atribuição a objeto.propriedade
                     if let Some(ValorAvaliado::Objeto {
                         propriedades,
                         classe,
@@ -183,12 +179,10 @@ impl<'ctx> GeradorCodigo<'ctx> {
                     {
                         let mut nova_propriedades = propriedades;
                         nova_propriedades.insert(propriedade.clone(), valor);
-
                         let novo_objeto = ValorAvaliado::Objeto {
                             classe,
                             propriedades: nova_propriedades,
                         };
-
                         self.atualizar_variavel(objeto, novo_objeto)?;
                         println!("Atribuído valor à propriedade '{}.{}'", objeto, propriedade);
                     } else {
@@ -212,7 +206,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
                     ValorAvaliado::Inteiro(i) => i != 0,
                     _ => false,
                 };
-
                 if eh_verdadeiro {
                     self.compilar_comando(bloco_then)?;
                 } else if let Some(bloco_senao) = bloco_else {
@@ -225,7 +218,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 *contador += 1;
                 let limite_iteracoes = 1000;
                 let mut iteracoes = 0;
-
                 loop {
                     iteracoes += 1;
                     if iteracoes > limite_iteracoes {
@@ -240,7 +232,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
                         ValorAvaliado::Inteiro(i) => i != 0,
                         _ => false,
                     };
-
                     if !continuar {
                         break;
                     }
@@ -251,16 +242,13 @@ impl<'ctx> GeradorCodigo<'ctx> {
 
             Comando::Para(inicializacao, condicao, incremento, corpo) => {
                 println!("Executando loop 'para'");
-
                 self.entrar_escopo();
-
                 if let Some(init) = inicializacao {
                     self.compilar_comando(init)?;
                 }
 
                 let limite_iteracoes = 1000;
                 let mut iteracoes = 0;
-
                 loop {
                     iteracoes += 1;
                     if iteracoes > limite_iteracoes {
@@ -275,19 +263,16 @@ impl<'ctx> GeradorCodigo<'ctx> {
                             ValorAvaliado::Inteiro(i) => i != 0,
                             _ => false,
                         };
-
                         if !continuar {
                             break;
                         }
                     }
 
                     self.compilar_comando(corpo)?;
-
                     if let Some(inc) = incremento {
                         self.compilar_comando(inc)?;
                     }
                 }
-
                 self.sair_escopo();
             }
 
@@ -308,7 +293,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 }
             }
 
-            // ✅ NOVA FUNCIONALIDADE: Executar métodos automaticamente
             Comando::Expressao(Expressao::ChamadaMetodo(obj_expr, metodo, argumentos)) => {
                 self.executar_metodo_objeto(obj_expr, metodo, argumentos)?;
             }
@@ -319,51 +303,24 @@ impl<'ctx> GeradorCodigo<'ctx> {
 
             Comando::CriarObjeto(var_nome, classe, argumentos) => {
                 println!("Criando objeto '{}' da classe '{}'", var_nome, classe);
-
-                let objeto = self.criar_instancia_objeto_csharp(classe, argumentos)?;
+                // ✅ MODIFICADO: Usar criação com herança
+                let objeto = self.criar_instancia_objeto_com_heranca(classe, argumentos)?;
                 self.definir_variavel(var_nome.clone(), objeto);
-
                 println!("Objeto '{}' criado com sucesso", var_nome);
             }
 
             Comando::ChamarMetodo(objeto_nome, metodo, argumentos) => {
                 println!("Chamando método '{}.{}'", objeto_nome, metodo);
-
                 if self.buscar_variavel(objeto_nome).is_none() {
                     return Err(format!("Objeto '{}' não encontrado", objeto_nome));
                 }
 
-                // Executar o método se for um método especial
-                match metodo.as_str() {
-                    "apresentar" => {
-                        if let Some(ValorAvaliado::Objeto { propriedades, .. }) = 
-                            self.buscar_variavel(objeto_nome) {
-                            
-                            // Verificar se tem parâmetros (como 'completo')
-                            let completo = if argumentos.is_empty() {
-                                true // padrão
-                            } else {
-                                let param = self.avaliar_expressao(&argumentos[0])?;
-                                self.valor_para_bool(&param)
-                            };
-
-                            self.executar_metodo_apresentar(&propriedades, completo)?;
-                        }
-                    }
-                    _ => {
-                        println!(
-                            "Método '{}.{}' executado com {} argumentos",
-                            objeto_nome,
-                            metodo,
-                            argumentos.len()
-                        );
-                    }
-                }
+                // ✅ MODIFICADO: Usar execução com polimorfismo
+                self.executar_metodo_polimorfismo(objeto_nome, metodo, argumentos)?;
             }
 
             Comando::AcessarCampo(objeto_nome, campo) => {
                 println!("Acessando campo '{}.{}'", objeto_nome, campo);
-
                 if let Some(ValorAvaliado::Objeto { propriedades, .. }) =
                     self.buscar_variavel(objeto_nome)
                 {
@@ -390,7 +347,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
 
             Comando::AtribuirCampo(objeto_expr, campo, valor_expr) => {
                 let valor = self.avaliar_expressao(valor_expr)?;
-
                 if let Expressao::Identificador(objeto_nome) = objeto_expr.as_ref() {
                     if let Some(ValorAvaliado::Objeto {
                         mut propriedades,
@@ -398,12 +354,10 @@ impl<'ctx> GeradorCodigo<'ctx> {
                     }) = self.buscar_variavel(objeto_nome)
                     {
                         propriedades.insert(campo.clone(), valor);
-
                         let novo_objeto = ValorAvaliado::Objeto {
                             classe,
                             propriedades,
                         };
-
                         self.atualizar_variavel(objeto_nome, novo_objeto)?;
                         println!("Campo '{}.{}' atualizado", objeto_nome, campo);
                     } else {
@@ -414,75 +368,72 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 }
             }
         }
-
         Ok(())
     }
 
-    // ✅ NOVO: Executar método de objeto
-    fn executar_metodo_objeto(
-        &self,
-        obj_expr: &Expressao,
-        metodo: &str,
-        argumentos: &[Expressao],
-    ) -> Result<(), String> {
-        if let Expressao::Identificador(objeto_nome) = obj_expr {
-            if let Some(ValorAvaliado::Objeto { propriedades, classe }) = 
-                self.buscar_variavel(objeto_nome) {
-                
-                match metodo {
-                    "apresentar" => {
-                        // ✅ Verificar parâmetro 'completo' se fornecido
-                        let completo = if argumentos.is_empty() {
-                            true // padrão
-                        } else {
-                            let param = self.avaliar_expressao(&argumentos[0])?;
-                            self.valor_para_bool(&param)
-                        };
-
-                        self.executar_metodo_apresentar(&propriedades, completo)?;
-                    }
-                    _ => {
-                        println!("Executando método '{}' do objeto '{}'", metodo, objeto_nome);
-                        
-                        // ✅ Buscar método na definição da classe
-                        if let Some(def_classe) = self.classes.borrow().get(&classe) {
-                            for metodo_classe in &def_classe.metodos {
-                                if metodo_classe.nome == metodo {
-                                    println!("✓ Encontrado método '{}' na classe '{}'", metodo, classe);
-                                    
-                                    // ✅ Configurar escopo 'este'
-                                    *self.escopo_este.borrow_mut() = Some(ValorAvaliado::Objeto { 
-                                        classe: classe.clone(), 
-                                        propriedades: propriedades.clone() 
-                                    });
-                                    
-                                    self.executar_corpo_metodo(&metodo_classe.corpo)?;
-                                    
-                                    // ✅ Limpar escopo 'este'
-                                    *self.escopo_este.borrow_mut() = None;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                return Err(format!("Objeto '{}' não encontrado", objeto_nome));
-            }
-        }
-        Ok(())
-    }
-
-    // ✅ Sistema de construtor igual ao C#
-    fn criar_instancia_objeto_csharp(
+    // ✅ NOVO: Criar instância com herança
+    fn criar_instancia_objeto_com_heranca(
         &self,
         classe: &str,
         argumentos: &[Expressao],
     ) -> Result<ValorAvaliado, String> {
         let mut propriedades = HashMap::new();
-
+        
+        // 1. Herdar propriedades da classe pai (recursivo)
+        self.herdar_propriedades_recursivo(classe, &mut propriedades)?;
+        
+        // 2. Encontrar e executar construtor
         if let Some(def_classe) = self.classes.borrow().get(classe) {
-            // ✅ 1. Inicializar propriedades com valores padrão
+            let construtor_encontrado = self.encontrar_construtor_compativel(
+                &def_classe.construtores,
+                argumentos.len()
+            );
+            
+            if let Some(construtor) = construtor_encontrado {
+                println!("✓ Usando construtor com {} parâmetros", construtor.parametros.len());
+                
+                let argumentos_resolvidos = self.resolver_argumentos_construtor_csharp(
+                    argumentos,
+                    &construtor.parametros
+                )?;
+                
+                self.executar_construtor_csharp(&argumentos_resolvidos, &mut propriedades)?;
+                
+                *self.escopo_este.borrow_mut() = Some(ValorAvaliado::Objeto {
+                    classe: classe.to_string(),
+                    propriedades: propriedades.clone(),
+                });
+                
+                self.executar_corpo_construtor(&construtor.corpo, &argumentos_resolvidos)?;
+                
+                if let Some(ValorAvaliado::Objeto { propriedades: props_atualizadas, .. }) =
+                    self.escopo_este.borrow().clone() {
+                    propriedades = props_atualizadas;
+                }
+                
+                *self.escopo_este.borrow_mut() = None;
+            }
+        }
+        
+        Ok(ValorAvaliado::Objeto {
+            classe: classe.to_string(),
+            propriedades,
+        })
+    }
+
+    // ✅ NOVO: Herdar propriedades recursivamente
+    fn herdar_propriedades_recursivo(
+        &self,
+        classe_nome: &str,
+        propriedades: &mut HashMap<String, ValorAvaliado>,
+    ) -> Result<(), String> {
+        if let Some(def_classe) = self.classes.borrow().get(classe_nome) {
+            // Primeiro herdar da classe pai (se existir)
+            if let Some(classe_pai) = &def_classe.classe_pai {
+                self.herdar_propriedades_recursivo(classe_pai, propriedades)?;
+            }
+            
+            // Depois adicionar propriedades desta classe
             for propriedade in &def_classe.propriedades {
                 let valor_inicial = if let Some(valor) = &propriedade.valor_inicial {
                     self.avaliar_expressao(valor)?
@@ -491,72 +442,134 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 };
                 propriedades.insert(propriedade.nome.clone(), valor_inicial);
             }
-
-            // ✅ 2. Encontrar construtor compatível (igual C#)
-            let construtor_encontrado = self.encontrar_construtor_compativel(
-                &def_classe.construtores,
-                argumentos.len()
-            );
-
-            if let Some(construtor) = construtor_encontrado {
-                println!("✓ Usando construtor com {} parâmetros", construtor.parametros.len());
-                
-                // ✅ 3. Resolver argumentos com parâmetros padrão
-                let argumentos_resolvidos = self.resolver_argumentos_construtor_csharp(
-                    argumentos,
-                    &construtor.parametros
-                )?;
-
-                // ✅ 4. Executar construtor
-                self.executar_construtor_csharp(&argumentos_resolvidos, &mut propriedades)?;
-                
-                // ✅ 5. Configurar 'este' para o construtor
-                *self.escopo_este.borrow_mut() = Some(ValorAvaliado::Objeto {
-                    classe: classe.to_string(),
-                    propriedades: propriedades.clone(),
-                });
-
-                // ✅ 6. Executar corpo do construtor
-                self.executar_corpo_construtor(&construtor.corpo, &argumentos_resolvidos)?;
-                
-                // ✅ 7. Obter propriedades atualizadas do 'este'
-                if let Some(ValorAvaliado::Objeto { propriedades: props_atualizadas, .. }) = 
-                    self.escopo_este.borrow().clone() {
-                    propriedades = props_atualizadas;
-                }
-
-                // ✅ 8. Limpar escopo 'este'
-                *self.escopo_este.borrow_mut() = None;
-                
-            } else if !def_classe.construtores.is_empty() {
-                return Err(format!(
-                    "Nenhum construtor compatível encontrado para classe '{}' com {} argumentos",
-                    classe, argumentos.len()
-                ));
-            }
         }
-
-        Ok(ValorAvaliado::Objeto {
-            classe: classe.to_string(),
-            propriedades,
-        })
+        Ok(())
     }
 
-    // ✅ Encontrar construtor compatível (lógica C#) - COM LIFETIME CORRETO
+    // ✅ NOVO: Executar método com polimorfismo
+    fn executar_metodo_polimorfismo(
+        &self,
+        objeto_nome: &str,
+        nome_metodo: &str,
+        argumentos: &[Expressao],
+    ) -> Result<(), String> {
+        if let Some(ValorAvaliado::Objeto { classe, propriedades }) = 
+            self.buscar_variavel(objeto_nome) {
+            
+            // Buscar método na hierarquia (método mais derivado primeiro)
+            if let Some(metodo_com_origem) = self.buscar_metodo_na_hierarquia(&classe, nome_metodo) {
+                println!("✓ Executando método '{}' da classe '{}'", nome_metodo, metodo_com_origem.classe_origem);
+                
+                // Configurar contexto 'este'
+                *self.escopo_este.borrow_mut() = Some(ValorAvaliado::Objeto {
+                    classe: classe.clone(),
+                    propriedades: propriedades.clone(),
+                });
+                
+                // Executar método
+                self.executar_corpo_metodo(&metodo_com_origem.metodo.corpo)?;
+                
+                // Atualizar objeto com mudanças do 'este'
+                if let Some(ValorAvaliado::Objeto { propriedades: props_atualizadas, .. }) =
+                    self.escopo_este.borrow().clone() {
+                    let objeto_atualizado = ValorAvaliado::Objeto {
+                        classe,
+                        propriedades: props_atualizadas,
+                    };
+                    self.atualizar_variavel(objeto_nome, objeto_atualizado)?;
+                }
+                
+                // Limpar contexto
+                *self.escopo_este.borrow_mut() = None;
+                
+                Ok(())
+            } else {
+                // Fallback para métodos especiais
+                match nome_metodo {
+                    "apresentar" => {
+                        let completo = if argumentos.is_empty() {
+                            true
+                        } else {
+                            let param = self.avaliar_expressao(&argumentos[0])?;
+                            self.valor_para_bool(&param)
+                        };
+                        self.executar_metodo_apresentar(&propriedades, completo)?;
+                        Ok(())
+                    }
+                    _ => {
+                        Err(format!("Método '{}' não encontrado na hierarquia de '{}'", 
+                            nome_metodo, classe))
+                    }
+                }
+            }
+        } else {
+            Err(format!("Objeto '{}' não encontrado", objeto_nome))
+        }
+    }
+
+    // ✅ NOVO: Buscar método na hierarquia de herança
+    fn buscar_metodo_na_hierarquia(
+        &self,
+        classe_nome: &str,
+        nome_metodo: &str,
+    ) -> Option<MetodoComOrigem> {
+        let mut classe_atual = Some(classe_nome.to_string());
+        
+        while let Some(classe) = classe_atual {
+            if let Some(def_classe) = self.classes.borrow().get(&classe) {
+                // Buscar método na classe atual
+                for metodo in &def_classe.metodos {
+                    if metodo.nome == nome_metodo {
+                        return Some(MetodoComOrigem {
+                            metodo: metodo.clone(),
+                            classe_origem: classe.clone(),
+                        });
+                    }
+                }
+                
+                // Ir para classe pai
+                classe_atual = def_classe.classe_pai.clone();
+            } else {
+                break;
+            }
+        }
+        
+        None
+    }
+
+    fn executar_metodo_objeto(
+        &self,
+        obj_expr: &Expressao,
+        metodo: &str,
+        argumentos: &[Expressao],
+    ) -> Result<(), String> {
+        if let Expressao::Identificador(objeto_nome) = obj_expr {
+            // ✅ MODIFICADO: Usar execução polimórfica
+            self.executar_metodo_polimorfismo(objeto_nome, metodo, argumentos)
+        } else {
+            Err("Chamada de método em expressão complexa não implementada".to_string())
+        }
+    }
+
+    fn criar_instancia_objeto_csharp(
+        &self,
+        classe: &str,
+        argumentos: &[Expressao],
+    ) -> Result<ValorAvaliado, String> {
+        // ✅ DELEGADO: Usar versão com herança
+        self.criar_instancia_objeto_com_heranca(classe, argumentos)
+    }
+
     fn encontrar_construtor_compativel<'a>(
         &self,
         construtores: &'a [ConstrutorClasse],
         num_argumentos: usize,
     ) -> Option<&'a ConstrutorClasse> {
-        // Prioridade: construtor exato -> construtor com padrões
         for construtor in construtores {
             let obrigatorios = construtor.parametros.iter()
                 .filter(|p| p.valor_padrao.is_none())
                 .count();
-            
             let total = construtor.parametros.len();
-            
-            // Compatível se: argumentos >= obrigatórios && argumentos <= total
             if num_argumentos >= obrigatorios && num_argumentos <= total {
                 return Some(construtor);
             }
@@ -564,25 +577,21 @@ impl<'ctx> GeradorCodigo<'ctx> {
         None
     }
 
-    // ✅ Resolver argumentos igual C#
     fn resolver_argumentos_construtor_csharp(
         &self,
         argumentos: &[Expressao],
         parametros: &[Parametro],
     ) -> Result<Vec<(String, ValorAvaliado)>, String> {
         let mut resultado = Vec::new();
-
-        // ✅ 1. Processar argumentos fornecidos
+        
         for (i, arg) in argumentos.iter().enumerate() {
             if i >= parametros.len() {
                 return Err("Muitos argumentos fornecidos".to_string());
             }
-            
             let valor = self.avaliar_expressao(arg)?;
             resultado.push((parametros[i].nome.clone(), valor));
         }
-
-        // ✅ 2. Usar valores padrão para parâmetros restantes
+        
         for i in argumentos.len()..parametros.len() {
             if let Some(valor_padrao) = &parametros[i].valor_padrao {
                 let valor = self.avaliar_expressao(valor_padrao)?;
@@ -594,56 +603,48 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 ));
             }
         }
-
+        
         Ok(resultado)
     }
 
-    // ✅ Executar construtor igual C#
     fn executar_construtor_csharp(
         &self,
         argumentos: &[(String, ValorAvaliado)],
         propriedades: &mut HashMap<String, ValorAvaliado>,
     ) -> Result<(), String> {
         for (nome_parametro, valor) in argumentos {
-            // ✅ Mapear parâmetro para propriedade (igual C#)
             if propriedades.contains_key(nome_parametro) {
                 propriedades.insert(nome_parametro.clone(), valor.clone());
-                println!("  ✓ {} = {}", nome_parametro, self.valor_para_string(valor));
+                println!(" ✓ {} = {}", nome_parametro, self.valor_para_string(valor));
             } else {
-                // ✅ Tentar capitalização automática (C# style)
                 let nome_capitalizado = self.capitalizar_primeira_letra(nome_parametro);
                 if propriedades.contains_key(&nome_capitalizado) {
                     propriedades.insert(nome_capitalizado.clone(), valor.clone());
-                    println!("  ✓ {} = {} (auto-capitalizado)", nome_capitalizado, self.valor_para_string(valor));
+                    println!(" ✓ {} = {} (auto-capitalizado)", nome_capitalizado, self.valor_para_string(valor));
                 }
             }
         }
         Ok(())
     }
 
-    // ✅ Executar corpo do construtor
     fn executar_corpo_construtor(
         &self,
         corpo: &[Comando],
         _argumentos: &[(String, ValorAvaliado)],
     ) -> Result<(), String> {
-        // ✅ Executar corpo do construtor com contexto 'este'
         for comando in corpo {
             self.compilar_comando(comando)?;
         }
         Ok(())
     }
 
-    // ✅ NOVO: Executar método apresentar com interpolação
     fn executar_metodo_apresentar(
         &self,
         propriedades: &HashMap<String, ValorAvaliado>,
         completo: bool,
     ) -> Result<(), String> {
         if completo {
-            // ✅ Apresentação completa com template
             let mut partes = Vec::new();
-            
             if let Some(nome) = propriedades.get("Nome") {
                 partes.push(format!("Nome: {}", self.valor_para_string(nome)));
             }
@@ -659,10 +660,8 @@ impl<'ctx> GeradorCodigo<'ctx> {
             if let Some(sobrenome) = propriedades.get("Sobrenome") {
                 partes.push(format!("Sobrenome: {}", self.valor_para_string(sobrenome)));
             }
-            
             println!("SAÍDA: {}", partes.join(", "));
         } else {
-            // ✅ Apresentação simples (só nome)
             if let Some(nome) = propriedades.get("Nome") {
                 println!("SAÍDA: Nome: {}", self.valor_para_string(nome));
             }
@@ -670,7 +669,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
         Ok(())
     }
 
-    // ✅ NOVO: Executar corpo do método
     fn executar_corpo_metodo(&self, corpo: &[Comando]) -> Result<(), String> {
         self.entrar_escopo();
         for comando in corpo {
@@ -680,7 +678,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
         Ok(())
     }
 
-    // ✅ HELPER: Obter valor padrão para tipo
     fn obter_valor_padrao_tipo(&self, tipo: &Tipo) -> ValorAvaliado {
         match tipo {
             Tipo::Inteiro => ValorAvaliado::Inteiro(0),
@@ -690,26 +687,22 @@ impl<'ctx> GeradorCodigo<'ctx> {
         }
     }
 
-    // ✅ HELPER: Capitalizar primeira letra
     fn capitalizar_primeira_letra(&self, texto: &str) -> String {
         if texto.is_empty() {
             return String::new();
         }
-
         let mut chars: Vec<char> = texto.chars().collect();
         chars[0] = chars[0].to_uppercase().next().unwrap_or(chars[0]);
         chars.iter().collect()
     }
-
+    
     pub fn avaliar_expressao(&self, expr: &Expressao) -> Result<ValorAvaliado, String> {
         match expr {
             Expressao::Inteiro(valor) => Ok(ValorAvaliado::Inteiro(*valor)),
             Expressao::Texto(valor) => Ok(ValorAvaliado::Texto(valor.clone())),
             Expressao::Booleano(valor) => Ok(ValorAvaliado::Booleano(*valor)),
-            
             Expressao::Identificador(nome) => {
                 if nome == "este" {
-                    // ✅ Retornar contexto 'este' se disponível
                     if let Some(este_obj) = self.escopo_este.borrow().clone() {
                         Ok(este_obj)
                     } else {
@@ -720,11 +713,10 @@ impl<'ctx> GeradorCodigo<'ctx> {
                         .ok_or_else(|| format!("Variável '{}' não encontrada", nome))
                 }
             }
-
+            
             Expressao::Aritmetica(op, esq, dir) => {
                 let val_esq = self.avaliar_expressao(esq)?;
                 let val_dir = self.avaliar_expressao(dir)?;
-
                 match (op, val_esq, val_dir) {
                     (
                         OperadorAritmetico::Soma,
@@ -785,7 +777,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
             Expressao::Comparacao(op, esq, dir) => {
                 let val_esq = self.avaliar_expressao(esq)?;
                 let val_dir = self.avaliar_expressao(dir)?;
-
                 let resultado = match (op, &val_esq, &val_dir) {
                     (
                         OperadorComparacao::Igual,
@@ -839,29 +830,23 @@ impl<'ctx> GeradorCodigo<'ctx> {
                     ) => a != b,
                     _ => return Err("Comparação inválida para estes tipos".to_string()),
                 };
-
                 Ok(ValorAvaliado::Booleano(resultado))
             }
 
             Expressao::Logica(op, esq, dir) => {
                 let val_esq = self.avaliar_expressao(esq)?;
                 let val_dir = self.avaliar_expressao(dir)?;
-
                 let bool_esq = self.valor_para_bool(&val_esq);
                 let bool_dir = self.valor_para_bool(&val_dir);
-
                 let resultado = match op {
                     OperadorLogico::E => bool_esq && bool_dir,
                     OperadorLogico::Ou => bool_esq || bool_dir,
                 };
-
                 Ok(ValorAvaliado::Booleano(resultado))
             }
 
-            // ✅ Operadores unários
             Expressao::Unario(op, expr) => {
                 let valor = self.avaliar_expressao(expr)?;
-                
                 match (op, valor) {
                     (OperadorUnario::NegacaoLogica, ValorAvaliado::Booleano(b)) => {
                         Ok(ValorAvaliado::Booleano(!b))
@@ -874,12 +859,11 @@ impl<'ctx> GeradorCodigo<'ctx> {
             }
 
             Expressao::NovoObjeto(classe, argumentos) => {
-                self.criar_instancia_objeto_csharp(classe, argumentos)
+                self.criar_instancia_objeto_com_heranca(classe, argumentos)
             }
 
             Expressao::StringInterpolada(partes) => {
                 let mut resultado = String::new();
-
                 for parte in partes {
                     match parte {
                         PartStringInterpolada::Texto(texto) => {
@@ -891,13 +875,11 @@ impl<'ctx> GeradorCodigo<'ctx> {
                         }
                     }
                 }
-
                 Ok(ValorAvaliado::Texto(resultado))
             }
 
             Expressao::AcessoMembro(obj_expr, membro) => {
                 let objeto = self.avaliar_expressao(obj_expr)?;
-
                 if let ValorAvaliado::Objeto { propriedades, .. } = objeto {
                     propriedades
                         .get(membro)
@@ -908,7 +890,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 }
             }
 
-            // ✅ CORREÇÃO: Variáveis prefixadas com underscore
             Expressao::ChamadaMetodo(_obj_expr, metodo, _argumentos) => {
                 match metodo.as_str() {
                     "apresentar" => Ok(ValorAvaliado::Texto(
@@ -932,7 +913,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
             }
 
             Expressao::Este => {
-                // ✅ Retornar contexto 'este' se disponível
                 if let Some(este_obj) = self.escopo_este.borrow().clone() {
                     Ok(este_obj)
                 } else {
@@ -944,8 +924,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
             }
         }
     }
-
-    // === MÉTODOS AUXILIARES ===
 
     fn definir_variavel(&self, nome: String, valor: ValorAvaliado) {
         if let Some(escopo_atual) = self.escopos.borrow_mut().last_mut() {
@@ -964,14 +942,12 @@ impl<'ctx> GeradorCodigo<'ctx> {
 
     fn atualizar_variavel(&self, nome: &str, valor: ValorAvaliado) -> Result<(), String> {
         let mut escopos = self.escopos.borrow_mut();
-
         for escopo in escopos.iter_mut().rev() {
             if escopo.contains_key(nome) {
                 escopo.insert(nome.to_string(), valor);
                 return Ok(());
             }
         }
-
         Err(format!(
             "Variável '{}' não encontrada para atualização",
             nome

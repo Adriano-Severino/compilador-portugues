@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
 
 /* ========================================================================== */
 /* TIPOS BÁSICOS                                                              */
 /* ========================================================================== */
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Tipo {
     Inteiro,
     Texto,
@@ -20,13 +20,13 @@ pub enum Tipo {
 /* ========================================================================== */
 /* PROGRAMA                                                                   */
 /* ========================================================================== */
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Programa {
     pub namespaces: Vec<DeclaracaoNamespace>,
     pub declaracoes: Vec<Declaracao>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ItemPrograma {
     Namespace(DeclaracaoNamespace),
     Declaracao(Declaracao),
@@ -35,7 +35,7 @@ pub enum ItemPrograma {
 /* ========================================================================== */
 /* NAMESPACES                                                                 */
 /* ========================================================================== */
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeclaracaoNamespace {
     pub nome: String,
     pub declaracoes: Vec<Declaracao>,
@@ -44,7 +44,7 @@ pub struct DeclaracaoNamespace {
 /* ========================================================================== */
 /* DECLARAÇÕES TOP-LEVEL                                                      */
 /* ========================================================================== */
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Declaracao {
     DeclaracaoClasse(DeclaracaoClasse),
     DeclaracaoFuncao(DeclaracaoFuncao),
@@ -58,19 +58,19 @@ pub enum Declaracao {
 }
 
 /* — módulos / interfaces / enums / type-alias — */
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeclaracaoModulo {
     pub nome: String,
     pub conteudo: Vec<Declaracao>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeclaracaoInterface {
     pub nome: String,
     pub metodos: Vec<AssinaturaMetodo>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssinaturaMetodo {
     pub nome: String,
     pub parametros: Vec<Parametro>,
@@ -78,25 +78,25 @@ pub struct AssinaturaMetodo {
     pub modificador: ModificadorAcesso,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeclaracaoEnum {
     pub nome: String,
     pub valores: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeclaracaoTipo {
     pub nome: String,
     pub tipo_base: Tipo,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Importacao {
     pub caminho: String,
     pub itens: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Exportacao {
     pub nome: String,
     pub publico: bool,
@@ -105,7 +105,7 @@ pub struct Exportacao {
 /* ========================================================================== */
 /* CLASSES                                                                    */
 /* ========================================================================== */
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeclaracaoClasse {
     pub nome: String,
     pub classe_pai: Option<String>,
@@ -117,7 +117,7 @@ pub struct DeclaracaoClasse {
     pub eh_abstrata: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MembroClasse {
     Campo(CampoClasse),
     Propriedade(PropriedadeClasse),
@@ -125,7 +125,7 @@ pub enum MembroClasse {
     Construtor(ConstrutorClasse),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CampoClasse {
     pub nome: String,
     pub tipo: Tipo,
@@ -134,7 +134,7 @@ pub struct CampoClasse {
     pub eh_estatico: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PropriedadeClasse {
     pub nome: String,
     pub tipo: Tipo,
@@ -144,13 +144,13 @@ pub struct PropriedadeClasse {
     pub valor_inicial: Option<Expressao>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcessorPropriedade {
     pub modificador: Option<ModificadorAcesso>,
     pub corpo: Option<Vec<Comando>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetodoClasse {
     pub nome: String,
     pub parametros: Vec<Parametro>,
@@ -163,7 +163,7 @@ pub struct MetodoClasse {
     pub eh_estatico: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConstrutorClasse {
     pub parametros: Vec<Parametro>,
     pub modificador: ModificadorAcesso,
@@ -174,7 +174,7 @@ pub struct ConstrutorClasse {
 /* ========================================================================== */
 /* FUNÇÕES                                                                    */
 /* ========================================================================== */
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeclaracaoFuncao {
     pub nome: String,
     pub parametros: Vec<Parametro>,
@@ -184,7 +184,7 @@ pub struct DeclaracaoFuncao {
 }
 
 /* — parâmetros com valor padrão (C#-style) — */
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Parametro {
     pub nome: String,
     pub tipo: Tipo,
@@ -206,7 +206,7 @@ impl Parametro {
 /* ========================================================================== */
 /* MODIFICADORES                                                              */
 /* ========================================================================== */
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ModificadorAcesso {
     Publico,
     Privado,
@@ -216,7 +216,7 @@ pub enum ModificadorAcesso {
 /* ========================================================================== */
 /* COMANDOS                                                                   */
 /* ========================================================================== */
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Comando {
     DeclaracaoVariavel(Tipo, String, Option<Expressao>),
     DeclaracaoVar(String, Expressao),
@@ -243,7 +243,7 @@ pub enum Comando {
 /* ========================================================================== */
 /* EXPRESSÕES                                                                 */
 /* ========================================================================== */
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Expressao {
     Inteiro(i64),
     Texto(String),
@@ -261,19 +261,19 @@ pub enum Expressao {
     Este,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OperadorUnario {
     NegacaoLogica,
     NegacaoNumerica,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PartStringInterpolada {
     Texto(String),
     Expressao(Expressao),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OperadorAritmetico {
     Soma,
     Subtracao,
@@ -282,7 +282,7 @@ pub enum OperadorAritmetico {
     Modulo,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OperadorComparacao {
     Igual,
     Diferente,
@@ -292,7 +292,7 @@ pub enum OperadorComparacao {
     MaiorIgual,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OperadorLogico {
     E,
     Ou,

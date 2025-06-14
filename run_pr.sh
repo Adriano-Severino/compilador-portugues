@@ -20,14 +20,14 @@ else
 fi
 
 # Caminho para o seu compilador (relativo à raiz do projeto)
-MEU_COMPILADOR_EXE="./target/debug/meu_compilador"
+MEU_COMPILADOR_EXE="./target/debug/compilador-portugues"
 
-echo "Compilando $INPUT_FILE com meu_compilador..."
+echo "Compilando $INPUT_FILE com compilador-portugues..."
 $MEU_COMPILADOR_EXE "$INPUT_FILE"
 
 # Verifica se a compilação do .pr para .ll foi bem-sucedida
 if [ $? -ne 0 ]; then
-  echo "Erro ao compilar $INPUT_FILE com meu_compilador."
+  echo "Erro ao compilar $INPUT_FILE com compilador-portugues."
   exit 1
 fi
 

@@ -208,6 +208,8 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
 // — MÉTODO DE INSTÂNCIA ----------------------------------------------------
 MetodoClasse: ast::MetodoClasse = {
     <m:ModificadorAcesso?>            // publico | privado | protegido
+    <redefinivel:("redefinível")?> 
+    <sobrescreve:("sobrescreve")?> 
     <ret:Tipo>                       // inteiro | texto | Classe ...
     <nome:IdentificadorSimples>      // apresentar
     "(" <p:InnerParamList>    // (...)
@@ -218,8 +220,8 @@ MetodoClasse: ast::MetodoClasse = {
             tipo_retorno: if ret == ast::Tipo::Vazio { None } else { Some(ret) }, // Handle 'vazio' for methods
             modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
             corpo: b,
-            eh_virtual: false,
-            eh_override: false,
+            eh_virtual: redefinivel.is_some(),
+            eh_override: sobrescreve.is_some(),
             eh_abstrato: false,
             eh_estatico: false,
         },
@@ -575,6 +577,8 @@ extern {
         "publico" => Token::TPublico,
         "privado" => Token::TPrivado,
         "protegido" => Token::TProtegido,
+        "redefinível" => Token::TRedefinivel,
+        "sobrescreve" => Token::TSobrescreve,
         "novo" => Token::TNovo,
         "este" => Token::TEste,
         "buscar" => Token::TBuscar,
