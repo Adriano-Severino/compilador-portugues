@@ -1,4 +1,3 @@
-// exemplo_teste.pr
 espaco Meu_Programa.Domain
 {
     publico classe Pessoa2
