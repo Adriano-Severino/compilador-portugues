@@ -25,10 +25,12 @@ pub enum Token {
     /* OOP */
     #[token("classe")]    TClasse,
     #[token("construtor")]TConstrutor,
-    #[token("herda")]     THerda,
     #[token("publico")]   TPublico,
     #[token("privado")]   TPrivado,
     #[token("protegido")] TProtegido,
+    #[token("virtual")] TVirtual,
+    #[token("override")] TOverride,
+    #[token("abstrato")] TAbstrato,
     #[token("novo")]      TNovo,
     #[token("este")]      TEste,
     #[token("buscar")]    TBuscar,
@@ -59,6 +61,7 @@ pub enum Token {
     #[token(";")] TPontoVirgula,
     #[token(",")] TVirgula,
     #[token(".")] TPonto,
+    #[token(":")] TDoisPontos,
     #[token("=>")]TSeta,
 
     /* literais */

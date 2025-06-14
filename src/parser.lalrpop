@@ -69,7 +69,7 @@ ModificadorAcesso: ast::ModificadorAcesso = {
 
 // === CLASSES ===
 DeclaracaoClasse: ast::DeclaracaoClasse = {
-    <modificador:ModificadorAcesso?> "classe" <nome:IdentificadorSimples> <heranca:("herda" <IdentificadorSimples>)?> "{" <membros:MembroClasse*> "}" => {
+    <modificador:ModificadorAcesso?> "classe" <nome:IdentificadorSimples> <heranca:(":" <IdentificadorSimples>)?> "{" <membros:MembroClasse*> "}" => {
         let mut campos = Vec::new();
         let mut propriedades = Vec::new();
         let mut metodos = Vec::new();
@@ -572,7 +572,6 @@ extern {
         "falso" => Token::TFalso,
         "classe" => Token::TClasse,
         "construtor" => Token::TConstrutor,
-        "herda" => Token::THerda,
         "publico" => Token::TPublico,
         "privado" => Token::TPrivado,
         "protegido" => Token::TProtegido,
@@ -607,11 +606,13 @@ extern {
         "," => Token::TVirgula,
         "=>" => Token::TSeta,
         "." => Token::TPonto,
+        ":" => Token::TDoisPontos,
         
         // Literais
         TString => Token::TString(<String>),
         TIdentificador => Token::TIdentificador(<String>),
         TInteiro => Token::TInteiro(<i64>),
+        TDoisPontos => Token::TDoisPontos,
         TStringInterpolada => Token::TStringInterpolada(<String>),
 
     }
