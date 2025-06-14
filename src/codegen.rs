@@ -3,7 +3,11 @@ use inkwell::{builder::Builder, context::Context, module::Module};
 use std::{
     cell::RefCell,
     collections::HashMap,
+    sync::atomic::{AtomicUsize, Ordering},
 };
+
+// ✅ NOVO: Contador global para nomes únicos de strings
+static CONTADOR_STRING: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug, Clone)]
 pub enum ValorAvaliado {
@@ -37,6 +41,10 @@ pub struct GeradorCodigo<'ctx> {
 impl<'ctx> GeradorCodigo<'ctx> {
     pub fn new(context: &'ctx Context) -> Self {
         let module = context.create_module("compilador_portugues");
+        
+        // ✅ NOVO: Adicionar target triple automaticamente
+        module.set_triple(&inkwell::targets::TargetMachine::get_default_triple());
+        
         let builder = context.create_builder();
         Self {
             context,
@@ -163,13 +171,21 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 let valor = self.avaliar_expressao(expr)?;
                 if objeto == "este" {
                     if let Some(mut este_obj) = self.escopo_este.borrow().clone() {
-                        if let ValorAvaliado::Objeto { ref mut propriedades, .. } = este_obj {
+                        if let ValorAvaliado::Objeto {
+                            ref mut propriedades,
+                            ..
+                        } = este_obj
+                        {
                             propriedades.insert(propriedade.clone(), valor);
                             *self.escopo_este.borrow_mut() = Some(este_obj);
                             println!("Atribuído valor à propriedade 'este.{}'", propriedade);
                         }
                     } else {
-                        println!("⚠️ Simulando atribuição este.{} = {}", propriedade, self.valor_para_string(&valor));
+                        println!(
+                            "⚠️ Simulando atribuição este.{} = {}",
+                            propriedade,
+                            self.valor_para_string(&valor)
+                        );
                     }
                 } else {
                     if let Some(ValorAvaliado::Objeto {
@@ -196,7 +212,11 @@ impl<'ctx> GeradorCodigo<'ctx> {
 
             Comando::Imprima(expr) => {
                 let valor = self.avaliar_expressao(expr)?;
-                println!("SAÍDA: {}", self.valor_para_string(&valor));
+                // ✅ NOVO: Gerar código LLVM real
+                let mensagem = self.valor_para_string(&valor);
+                self.gerar_printf(&mensagem)?;
+                // Debug opcional
+                println!("SAÍDA: {}", mensagem);
             }
 
             Comando::Se(condicao, bloco_then, bloco_else) => {
@@ -371,6 +391,51 @@ impl<'ctx> GeradorCodigo<'ctx> {
         Ok(())
     }
 
+    // ✅ NOVO: Função corrigida para gerar printf
+    fn gerar_printf(&self, mensagem: &str) -> Result<(), String> {
+        // Criar nome único para a string
+        let contador = CONTADOR_STRING.fetch_add(1, Ordering::SeqCst);
+        let nome_string = format!(".str{}", contador);
+        
+        // Criar string global com terminadores corretos
+        let string_with_newline = format!("{}\n\0", mensagem);
+        let format_str = self.context.const_string(string_with_newline.as_bytes(), false);
+        let global = self.module.add_global(format_str.get_type(), None, &nome_string);
+        global.set_initializer(&format_str);
+        global.set_linkage(inkwell::module::Linkage::Private);
+        global.set_unnamed_addr(true);
+        
+        // Declarar printf se não existir
+        let printf_type = self.context.i32_type().fn_type(
+            &[self.context.ptr_type(inkwell::AddressSpace::default()).into()],
+            true
+        );
+        let printf_func = self.module.get_function("printf")
+            .unwrap_or_else(|| self.module.add_function("printf", printf_type, None));
+        
+        // Criar getelementptr para acessar a string
+        let global_ptr = unsafe {
+            self.builder.build_gep(
+                format_str.get_type(),
+                global.as_pointer_value(),
+                &[
+                    self.context.i32_type().const_zero(),
+                    self.context.i32_type().const_zero()
+                ],
+                "str_ptr"
+            ).map_err(|e| format!("Erro ao criar getelementptr: {:?}", e))?
+        };
+        
+        // Chamar printf
+        self.builder.build_call(
+            printf_func, 
+            &[global_ptr.into()], 
+            "printf_call"
+        ).map_err(|e| format!("Erro ao gerar chamada printf: {:?}", e))?;
+        
+        Ok(())
+    }
+
     // ✅ NOVO: Criar instância com herança
     fn criar_instancia_objeto_com_heranca(
         &self,
@@ -537,6 +602,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
         None
     }
 
+    // ✅ EXISTENTE: Manter métodos originais
     fn executar_metodo_objeto(
         &self,
         obj_expr: &Expressao,
@@ -660,10 +726,15 @@ impl<'ctx> GeradorCodigo<'ctx> {
             if let Some(sobrenome) = propriedades.get("Sobrenome") {
                 partes.push(format!("Sobrenome: {}", self.valor_para_string(sobrenome)));
             }
-            println!("SAÍDA: {}", partes.join(", "));
+            // ✅ NOVO: Gerar código LLVM também para apresentar
+            let mensagem = partes.join(", ");
+            self.gerar_printf(&mensagem)?;
+            println!("SAÍDA: {}", mensagem);
         } else {
             if let Some(nome) = propriedades.get("Nome") {
-                println!("SAÍDA: Nome: {}", self.valor_para_string(nome));
+                let mensagem = format!("Nome: {}", self.valor_para_string(nome));
+                self.gerar_printf(&mensagem)?;
+                println!("SAÍDA: {}", mensagem);
             }
         }
         Ok(())
@@ -695,7 +766,8 @@ impl<'ctx> GeradorCodigo<'ctx> {
         chars[0] = chars[0].to_uppercase().next().unwrap_or(chars[0]);
         chars.iter().collect()
     }
-    
+
+    // ✅ EXISTENTE: Manter todos os métodos auxiliares originais
     pub fn avaliar_expressao(&self, expr: &Expressao) -> Result<ValorAvaliado, String> {
         match expr {
             Expressao::Inteiro(valor) => Ok(ValorAvaliado::Inteiro(*valor)),
