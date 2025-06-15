@@ -227,25 +227,25 @@ MetodoClasse: ast::MetodoClasse = {
         },
 };
 
-// — CONSTRUTOR DE CLASSE ---------------------------------------------------
+/* ------------------------------------------------------------------
+   CONSTRUTOR DE CLASSE
+   ------------------------------------------------------------------ */
 ConstrutorDecl: ast::ConstrutorClasse = {
-    // sintaxe “C#” — contrutor nome da classe
-    <m:ModificadorAcesso?> <nome:IdentificadorSimples>
-        "(" <p:InnerParamList> <b:BlocoComando>
-        => ast::ConstrutorClasse {
-            parametros: p, // InnerParamList directly returns Vec
-            modificador: m.unwrap_or(ast::ModificadorAcesso::Publico), // Construtores são geralmente públicos por padrão se não especificado
+    <m:ModificadorAcesso?>               // publico | privado | protegido
+    <nome:IdentificadorSimples>          // nome da classe
+    "(" <p:InnerParamList>               // ❶ abre parêntese e delega
+    // ❷ opcional  : base(arg1, arg2 …)
+    ( ":" "base" "(" <InnerArgList> )?   // ‘InnerArgList’ já fecha ‘)’
+    <b:BlocoComando>                     // ❸ corpo { … }
+    => {
+        ast::ConstrutorClasse {
+            parametros: p,
+            modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
             corpo: b,
             nome_escrito: Some(nome),
-        },
-
+        }
+    },
 };
-
-// === PARÂMETROS ===
-// InnerParamList defines the content *between* parentheses for parameters.
-//InnerParamList: Vec<ast::Parametro> = {
-    //<params:ListaParametros?> => params.unwrap_or_default(),
-//};
 
 #[inline]                     // argumentos de chamada
 ListaArgumentos: Vec<ast::Expressao> = {
@@ -585,7 +585,8 @@ extern {
         "imprima" => Token::TImprima,
         "var" => Token::TVar,
         "espaco" => Token::TEspaco,
-        
+        "base" => Token::TBase,
+
         // Tipos
         "inteiro" => Token::TTipoInteiro,
         "texto" => Token::TTipoTexto,

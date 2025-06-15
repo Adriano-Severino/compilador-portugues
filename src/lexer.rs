@@ -25,9 +25,10 @@ pub enum Token {
     /* OOP */
     #[token("classe")]    TClasse,
     #[token("construtor")]TConstrutor,
-    #[token("publico")]   TPublico,
+    #[token("publico")]   TPublico, 
     #[token("privado")]   TPrivado,
     #[token("protegido")] TProtegido,
+    #[token("base")]      TBase,
     #[token("redefinível")] TRedefinivel,
     #[token("sobrescreve")] TSobrescreve,
     #[token("abstrato")] TAbstrato,
