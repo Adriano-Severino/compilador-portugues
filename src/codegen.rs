@@ -6,7 +6,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-// ✅ NOVO: Contador global para nomes únicos de strings
+// ✅ Contador global para nomes únicos de strings
 static CONTADOR_STRING: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug, Clone)]
@@ -20,7 +20,7 @@ pub enum ValorAvaliado {
     },
 }
 
-// ✅ NOVO: Estrutura para método com origem (para polimorfismo)
+// ✅ Estrutura para método com origem (para polimorfismo)
 #[derive(Debug, Clone)]
 struct MetodoComOrigem {
     metodo: MetodoClasse,
@@ -42,7 +42,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
     pub fn new(context: &'ctx Context) -> Self {
         let module = context.create_module("compilador_portugues");
         
-        // ✅ NOVO: Adicionar target triple automaticamente
+        // ✅ Adicionar target triple automaticamente
         module.set_triple(&inkwell::targets::TargetMachine::get_default_triple());
         
         let builder = context.create_builder();
@@ -59,7 +59,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
     }
 
     pub fn compilar_programa(&self, programa: &Programa) -> Result<(), String> {
-        // Registrar classes e funções primeiro
+        // 1. Registrar classes e funções primeiro
         for namespace in &programa.namespaces {
             self.processar_namespace(namespace)?;
         }
@@ -68,13 +68,54 @@ impl<'ctx> GeradorCodigo<'ctx> {
             self.processar_declaracao(declaracao)?;
         }
 
-        // Compilar código principal
+        // 2. Compilar comandos diretos
         for declaracao in &programa.declaracoes {
             if let Declaracao::Comando(comando) = declaracao {
                 self.compilar_comando(comando)?;
             }
         }
 
+        // ✅ 3. NOVO: Executar função principal
+        self.executar_funcao_principal(programa)?;
+
+        Ok(())
+    }
+
+    // ✅ NOVA FUNÇÃO: Encontrar e executar função principal
+    fn executar_funcao_principal(&self, programa: &Programa) -> Result<(), String> {
+        println!("🔍 Procurando função principal...");
+        
+        // Buscar função principal em declarações diretas
+        for declaracao in &programa.declaracoes {
+            if let Declaracao::DeclaracaoFuncao(funcao) = declaracao {
+                if funcao.nome == "principal" || funcao.nome == "Principal" {
+                    println!("🎯 Executando função principal: {}", funcao.nome);
+                    for comando in &funcao.corpo {
+                        self.compilar_comando(comando)?;
+                    }
+                    return Ok(());
+                }
+            }
+        }
+        
+        // Buscar função principal em namespaces
+        for namespace in &programa.namespaces {
+            println!("🔍 Verificando namespace: {}", namespace.nome);
+            for declaracao in &namespace.declaracoes {
+                if let Declaracao::DeclaracaoFuncao(funcao) = declaracao {
+                    if funcao.nome == "principal" || funcao.nome == "Principal" {
+                        println!("🎯 Executando função principal do namespace {}: {}", 
+                            namespace.nome, funcao.nome);
+                        for comando in &funcao.corpo {
+                            self.compilar_comando(comando)?;
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        
+        println!("⚠️ Nenhuma função principal encontrada");
         Ok(())
     }
 
@@ -123,6 +164,39 @@ impl<'ctx> GeradorCodigo<'ctx> {
             }
         }
         Ok(())
+    }
+
+    // ✅ NOVO: Executar corpo de função
+    fn executar_funcao(&self, nome_funcao: &str, argumentos: &[Expressao]) -> Result<(), String> {
+        if let Some(funcao) = self.funcoes.borrow().get(nome_funcao) {
+            println!("🎯 Executando função: {}", nome_funcao);
+            
+            // Entrar em novo escopo para a função
+            self.entrar_escopo();
+            
+            // Definir parâmetros como variáveis locais
+            for (i, parametro) in funcao.parametros.iter().enumerate() {
+                if i < argumentos.len() {
+                    let valor = self.avaliar_expressao(&argumentos[i])?;
+                    self.definir_variavel(parametro.nome.clone(), valor);
+                } else if let Some(valor_padrao) = &parametro.valor_padrao {
+                    let valor = self.avaliar_expressao(valor_padrao)?;
+                    self.definir_variavel(parametro.nome.clone(), valor);
+                }
+            }
+            
+            // Executar corpo da função
+            for comando in &funcao.corpo {
+                self.compilar_comando(comando)?;
+            }
+            
+            // Sair do escopo da função
+            self.sair_escopo();
+            
+            Ok(())
+        } else {
+            Err(format!("Função '{}' não encontrada", nome_funcao))
+        }
     }
 
     pub fn compilar_comando(&self, comando: &Comando) -> Result<(), String> {
@@ -212,7 +286,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
 
             Comando::Imprima(expr) => {
                 let valor = self.avaliar_expressao(expr)?;
-                // ✅ NOVO: Gerar código LLVM real
+                // ✅ Gerar código LLVM real
                 let mensagem = self.valor_para_string(&valor);
                 self.gerar_printf(&mensagem)?;
                 // Debug opcional
@@ -317,13 +391,17 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 self.executar_metodo_objeto(obj_expr, metodo, argumentos)?;
             }
 
+            // ✅ NOVO: Tratar chamadas de função
+            Comando::Expressao(Expressao::Chamada(nome_funcao, argumentos)) => {
+                self.executar_funcao(nome_funcao, argumentos)?;
+            }
+
             Comando::Expressao(expr) => {
                 self.avaliar_expressao(expr)?;
             }
 
             Comando::CriarObjeto(var_nome, classe, argumentos) => {
                 println!("Criando objeto '{}' da classe '{}'", var_nome, classe);
-                // ✅ MODIFICADO: Usar criação com herança
                 let objeto = self.criar_instancia_objeto_com_heranca(classe, argumentos)?;
                 self.definir_variavel(var_nome.clone(), objeto);
                 println!("Objeto '{}' criado com sucesso", var_nome);
@@ -335,7 +413,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
                     return Err(format!("Objeto '{}' não encontrado", objeto_nome));
                 }
 
-                // ✅ MODIFICADO: Usar execução com polimorfismo
                 self.executar_metodo_polimorfismo(objeto_nome, metodo, argumentos)?;
             }
 
@@ -391,7 +468,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
         Ok(())
     }
 
-    // ✅ NOVO: Função corrigida para gerar printf
+    // ✅ Função corrigida para gerar printf
     fn gerar_printf(&self, mensagem: &str) -> Result<(), String> {
         // Criar nome único para a string
         let contador = CONTADOR_STRING.fetch_add(1, Ordering::SeqCst);
@@ -407,7 +484,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
         
         // Declarar printf se não existir
         let printf_type = self.context.i32_type().fn_type(
-            &[self.context.ptr_type(inkwell::AddressSpace::default()).into()],
+            &[self.context.ptr_type(inkwell::AddressSpace::default()).into()], 
             true
         );
         let printf_func = self.module.get_function("printf")
@@ -436,7 +513,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
         Ok(())
     }
 
-    // ✅ NOVO: Criar instância com herança
+    // ✅ Criar instância com herança
     fn criar_instancia_objeto_com_heranca(
         &self,
         classe: &str,
@@ -486,7 +563,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
         })
     }
 
-    // ✅ NOVO: Herdar propriedades recursivamente
+    // ✅ Herdar propriedades recursivamente
     fn herdar_propriedades_recursivo(
         &self,
         classe_nome: &str,
@@ -511,7 +588,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
         Ok(())
     }
 
-    // ✅ NOVO: Executar método com polimorfismo
+    // ✅ Executar método com polimorfismo
     fn executar_metodo_polimorfismo(
         &self,
         objeto_nome: &str,
@@ -572,7 +649,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
         }
     }
 
-    // ✅ NOVO: Buscar método na hierarquia de herança
+    // ✅ Buscar método na hierarquia de herança
     fn buscar_metodo_na_hierarquia(
         &self,
         classe_nome: &str,
@@ -602,7 +679,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
         None
     }
 
-    // ✅ EXISTENTE: Manter métodos originais
+    // ✅ Executar método objeto
     fn executar_metodo_objeto(
         &self,
         obj_expr: &Expressao,
@@ -610,7 +687,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
         argumentos: &[Expressao],
     ) -> Result<(), String> {
         if let Expressao::Identificador(objeto_nome) = obj_expr {
-            // ✅ MODIFICADO: Usar execução polimórfica
             self.executar_metodo_polimorfismo(objeto_nome, metodo, argumentos)
         } else {
             Err("Chamada de método em expressão complexa não implementada".to_string())
@@ -622,7 +698,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
         classe: &str,
         argumentos: &[Expressao],
     ) -> Result<ValorAvaliado, String> {
-        // ✅ DELEGADO: Usar versão com herança
         self.criar_instancia_objeto_com_heranca(classe, argumentos)
     }
 
@@ -726,7 +801,6 @@ impl<'ctx> GeradorCodigo<'ctx> {
             if let Some(sobrenome) = propriedades.get("Sobrenome") {
                 partes.push(format!("Sobrenome: {}", self.valor_para_string(sobrenome)));
             }
-            // ✅ NOVO: Gerar código LLVM também para apresentar
             let mensagem = partes.join(", ");
             self.gerar_printf(&mensagem)?;
             println!("SAÍDA: {}", mensagem);
@@ -767,7 +841,7 @@ impl<'ctx> GeradorCodigo<'ctx> {
         chars.iter().collect()
     }
 
-    // ✅ EXISTENTE: Manter todos os métodos auxiliares originais
+    // ✅ Avaliar expressões (incluindo chamadas de função)
     pub fn avaliar_expressao(&self, expr: &Expressao) -> Result<ValorAvaliado, String> {
         match expr {
             Expressao::Inteiro(valor) => Ok(ValorAvaliado::Inteiro(*valor)),
@@ -974,13 +1048,16 @@ impl<'ctx> GeradorCodigo<'ctx> {
                 }
             }
 
-            Expressao::Chamada(nome, _argumentos) => {
+            // ✅ NOVO: Tratar chamadas de função em expressões
+            Expressao::Chamada(nome, argumentos) => {
+                // Por enquanto, simular resultado
                 match nome.as_str() {
                     "tamanho" => Ok(ValorAvaliado::Inteiro(10)),
-                    _ => Ok(ValorAvaliado::Texto(format!(
-                        "Resultado da função {}",
-                        nome
-                    ))),
+                    _ => {
+                        // Executar função e retornar valor padrão
+                        self.executar_funcao(nome, argumentos)?;
+                        Ok(ValorAvaliado::Texto(format!("Resultado da função {}", nome)))
+                    }
                 }
             }
 
