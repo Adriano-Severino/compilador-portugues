@@ -55,6 +55,7 @@ pub enum Declaracao {
     Importacao(Importacao),
     Exportacao(Exportacao),
     Comando(Comando),
+    DeclaracaoNamespace(DeclaracaoNamespace), // ✅ ADICIONE ESTA VARIANTE
 }
 
 /* — módulos / interfaces / enums / type-alias — */

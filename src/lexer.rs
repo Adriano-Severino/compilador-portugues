@@ -84,4 +84,47 @@ pub enum Token {
     ComentarioLinha,
     #[regex(r"[ \t\r\n]+", logos::skip)]
     Whitespace,
+    
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use logos::Logos;
+
+    #[test]
+    fn test_palavras_chave() {
+        let codigo = "se então senão enquanto para classe publico";
+        let mut lex = Token::lexer(codigo);
+        
+        assert_eq!(lex.next(), Some(Ok(Token::TSe)));
+        assert_eq!(lex.next(), Some(Ok(Token::TEntao)));
+        assert_eq!(lex.next(), Some(Ok(Token::TSenao)));
+        assert_eq!(lex.next(), Some(Ok(Token::TEnquanto)));
+        assert_eq!(lex.next(), Some(Ok(Token::TPara)));
+        assert_eq!(lex.next(), Some(Ok(Token::TClasse)));
+        assert_eq!(lex.next(), Some(Ok(Token::TPublico)));
+    }
+     #[test]
+    fn test_literais() {
+        let codigo = r#"123 "hello" verdadeiro falso"#;
+        let mut lex = Token::lexer(codigo);
+        
+        assert_eq!(lex.next(), Some(Ok(Token::TInteiro(123))));
+        assert_eq!(lex.next(), Some(Ok(Token::TString("hello".to_string()))));
+        assert_eq!(lex.next(), Some(Ok(Token::TVerdadeiro)));
+        assert_eq!(lex.next(), Some(Ok(Token::TFalso)));
+    }
+
+    #[test]
+    fn test_string_interpolada() {
+        let codigo = r#"$"Olá {nome}, você tem {idade} anos""#;
+        let mut lex = Token::lexer(codigo);
+        
+        if let Some(Ok(Token::TStringInterpolada(conteudo))) = lex.next() {
+            assert_eq!(conteudo, "Olá {nome}, você tem {idade} anos");
+        } else {
+            panic!("String interpolada não reconhecida");
+        }
+    }
 }

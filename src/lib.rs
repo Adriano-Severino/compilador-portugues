@@ -11,6 +11,7 @@
 // ✅ EXISTENTE: Módulos básicos
 pub mod lexer;
 pub mod ast;
+pub mod runtime;    
 pub mod codegen;
 pub mod type_checker;
 pub mod ownership;
