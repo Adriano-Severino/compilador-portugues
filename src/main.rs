@@ -49,6 +49,10 @@ use logos::Logos;
 //cargo run --bin compilador -- teste.pr --target=bytecode
 //cargo run --bin interpretador -- teste.pbc
 
+//help
+//cargo run --bin compilador
+//cargo run --bin compilador -- --help
+
 // Struct de erro customizada
 #[derive(Debug)]
 struct CompilerError(String);
