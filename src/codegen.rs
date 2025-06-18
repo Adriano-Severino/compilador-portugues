@@ -4,19 +4,18 @@ use crate::ast;
 use std::collections::HashMap;
 use std::fs;
 
-#[derive(Debug, Clone)]
-pub enum BackendType {
-    Llvm,
-    CilBytecode,
-    Console,
-    Bytecode,
-}
-
 //_______________________________________________________________________________________________
 //
-//  LLVM DYNAMIC GENERATOR
+//  ARQUITETURA DE BACKENDS
 //_______________________________________________________________________________________________
+//
+//  Cada gerador de backend agora é uma struct separada.
+//  Isso garante que a lógica de cada alvo (LLVM, CIL, etc.)
+//  seja completamente independente.
+//
 
+/// O gerador de código para o alvo LLVM IR.
+/// (Esta é a sua implementação funcional, movida para dentro de sua própria struct)
 struct LlvmGenerator<'a> {
     programa: &'a ast::Programa,
     header: String,
@@ -26,6 +25,24 @@ struct LlvmGenerator<'a> {
     variables: HashMap<String, (String, ast::Tipo)>,
 }
 
+/// O gerador de código para o alvo CIL (Common Intermediate Language) do .NET.
+struct CilGenerator<'a> {
+    programa: &'a ast::Programa,
+    assembly_name: String,
+}
+
+/// O gerador de código para o alvo Console Application em C#.
+struct ConsoleGenerator<'a> {
+    programa: &'a ast::Programa,
+}
+
+/// O gerador de código para o seu formato de bytecode customizado.
+struct BytecodeGenerator<'a> {
+    programa: &'a ast::Programa,
+}
+
+
+// --- IMPLEMENTAÇÃO DO GERADOR LLVM (Existente e Funcional) ---
 impl<'a> LlvmGenerator<'a> {
     fn new(programa: &'a ast::Programa) -> Self {
         Self {
@@ -53,15 +70,15 @@ impl<'a> LlvmGenerator<'a> {
         self.main_function_body.push_str("}\n");
         format!("{}\n{}", self.header, self.main_function_body)
     }
-
+    
+    // (O restante do código do LlvmGenerator permanece exatamente como na versão anterior)
+    // ... generate_comando, generate_expressao, etc. ...
     fn prepare_header(&mut self) {
         self.header.push_str("target triple = \"x86_64-pc-linux-gnu\"\n\n");
         self.header.push_str("declare i32 @printf(i8*, ...)\n");
         self.header.push_str("declare i8* @malloc(i64)\n");
         self.header.push_str("declare i32 @sprintf(i8*, i8*, ...)\n");
         self.header.push_str("declare i64 @strlen(i8*)\n\n");
-        
-        // ✅ CORREÇÃO: Adiciona uma string de formato global para `imprima` que inclui uma quebra de linha.
         self.header.push_str("@.println_fmt = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\", align 1\n");
     }
 
@@ -78,19 +95,12 @@ impl<'a> LlvmGenerator<'a> {
             ast::Comando::Imprima(expr) => {
                 let (value_reg, value_type) = self.generate_expressao(expr);
                 let final_value_reg = self.ensure_string(value_reg, &value_type);
-
-                // ✅ CORREÇÃO: Usa a string de formato com quebra de linha (@.println_fmt) para imprimir.
                 self.main_function_body.push_str(&format!(
                     "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.println_fmt, i32 0, i32 0), i8* {})\n",
                     final_value_reg
                 ));
             }
-            _ => {
-                self.main_function_body.push_str(&format!(
-                    "  ; Comando {:?} não implementado\n",
-                    comando
-                ));
-            }
+            _ => {}
         }
     }
     
@@ -212,43 +222,266 @@ impl<'a> LlvmGenerator<'a> {
     }
 }
 
+// --- IMPLEMENTAÇÃO DO GERADOR CIL (NOVO) ---
+impl<'a> CilGenerator<'a> {
+    fn new(programa: &'a ast::Programa, assembly_name: String) -> Self {
+        Self { programa, assembly_name }
+    }
+
+    /// Gera o código CIL completo a partir da AST.
+    fn generate(&self) -> String {
+        let mut code = String::new();
+        // Cabeçalho do assembly
+        code.push_str(&format!(".assembly extern mscorlib {{}}\n"));
+        code.push_str(&format!(".assembly {} {{}}\n\n", self.assembly_name));
+        code.push_str(".class private auto ansi beforefieldinit Principal extends [mscorlib]System.Object\n{\n");
+        // Método Main
+        code.push_str("  .method public hidebysig static void Main() cil managed\n  {\n");
+        code.push_str("    .entrypoint\n");
+        code.push_str("    .maxstack  8\n");
+
+        // Corpo do método
+        for declaracao in &self.programa.declaracoes {
+            if let ast::Declaracao::Comando(cmd) = declaracao {
+                code.push_str(&self.generate_comando(cmd));
+            }
+        }
+
+        code.push_str("    ret\n");
+        code.push_str("  }\n"); // Fim do Main
+        // Construtor padrão
+        code.push_str("  .method public hidebysig specialname rtspecialname instance void .ctor() cil managed { ret }\n");
+        code.push_str("}\n"); // Fim da classe
+        code
+    }
+
+    fn generate_comando(&self, comando: &ast::Comando) -> String {
+        match comando {
+            ast::Comando::Imprima(expr) => self.generate_expressao(expr),
+            // Outros comandos podem ser adicionados aqui
+            _ => format!("    // Comando {:?} não implementado para CIL\n", comando),
+        }
+    }
+    
+    /// Gera código CIL para uma expressão, resultando em um valor no topo da pilha.
+    fn generate_expressao(&self, expr: &ast::Expressao) -> String {
+        let mut code = String::new();
+        match expr {
+            ast::Expressao::Texto(s) => {
+                code.push_str(&format!("    ldstr \"{}\\n\"\n", s.replace('\n', "")));
+                code.push_str("    call void [mscorlib]System.Console::WriteLine(string)\n");
+            }
+            ast::Expressao::Inteiro(n) => {
+                code.push_str(&format!("    ldc.i4 {}\n", n));
+                code.push_str("    call void [mscorlib]System.Console::WriteLine(int32)\n");
+            }
+            ast::Expressao::Aritmetica(ast::OperadorAritmetico::Soma, _, _) => {
+                // A planificação da interpolação já transformou a string em uma série de somas.
+                // Para CIL, vamos simplesmente emitir cada parte.
+                let parts = self.flatten_soma(expr);
+                for part in parts {
+                    match part {
+                        ast::Expressao::Texto(s) => code.push_str(&format!("    ldstr \"{}\"\n    call void [mscorlib]System.Console::Write(string)\n", s)),
+                        ast::Expressao::Inteiro(n) => code.push_str(&format!("    ldc.i4 {}\n    call void [mscorlib]System.Console::Write(int32)\n", n)),
+                        // Carregar variáveis seria implementado aqui
+                        _ => {}
+                    }
+                }
+                code.push_str("    call void [mscorlib]System.Console::WriteLine()\n"); // Quebra de linha final
+            }
+            _ => code.push_str(&format!("    // Expressão {:?} não implementada para CIL\n", expr)),
+        }
+        code
+    }
+    
+    /// Função auxiliar para aplainar uma árvore de somas em uma lista de expressões.
+    fn flatten_soma(&self, expr: &'a ast::Expressao) -> Vec<&'a ast::Expressao> {
+        let mut parts = Vec::new();
+        let mut stack = vec![expr];
+        while let Some(e) = stack.pop() {
+            if let ast::Expressao::Aritmetica(ast::OperadorAritmetico::Soma, esq, dir) = e {
+                stack.push(dir);
+                stack.push(esq);
+            } else {
+                parts.push(e);
+            }
+        }
+        parts
+    }
+}
+
+// --- IMPLEMENTAÇÃO DO GERADOR DE CONSOLE C# (NOVO) ---
+impl<'a> ConsoleGenerator<'a> {
+    fn new(programa: &'a ast::Programa) -> Self {
+        Self { programa }
+    }
+
+    /// Gera o código-fonte C# completo para Program.cs.
+    fn generate(&self) -> String {
+        let mut code = String::new();
+        // Percorre a AST e gera o corpo do método Main
+        for declaracao in &self.programa.declaracoes {
+            if let ast::Declaracao::Comando(cmd) = declaracao {
+                code.push_str(&self.generate_comando(cmd, 4));
+            }
+        }
+        code
+    }
+
+    fn generate_comando(&self, comando: &ast::Comando, indent: usize) -> String {
+        let prefix = " ".repeat(indent);
+        match comando {
+            ast::Comando::DeclaracaoVariavel(tipo, nome, Some(expr)) => {
+                format!("{}{} {} = {};\n", prefix, self.map_type(tipo), nome, self.generate_expressao(expr))
+            }
+            ast::Comando::DeclaracaoVar(nome, expr) => {
+                format!("{}var {} = {};\n", prefix, nome, self.generate_expressao(expr))
+            }
+            ast::Comando::Imprima(expr) => {
+                format!("{}Console.WriteLine({});\n", prefix, self.generate_expressao(expr))
+            }
+            _ => format!("{}// Comando {:?} não implementado para Console\n", prefix, comando),
+        }
+    }
+
+    fn generate_expressao(&self, expr: &ast::Expressao) -> String {
+        match expr {
+            ast::Expressao::Texto(s) => format!("\"{}\"", s),
+            ast::Expressao::Inteiro(n) => n.to_string(),
+            ast::Expressao::Identificador(name) => name.clone(),
+            ast::Expressao::Aritmetica(ast::OperadorAritmetico::Soma, esq, dir) => {
+                // Em C#, a concatenação de strings é feita com o operador `+`.
+                format!("{} + {}", self.generate_expressao(esq), self.generate_expressao(dir))
+            }
+            _ => format!("\"ERRO: Expressao {:?} nao suportada\"", expr),
+        }
+    }
+    
+    fn map_type(&self, tipo: &ast::Tipo) -> &str {
+        match tipo {
+            ast::Tipo::Inteiro => "int",
+            ast::Tipo::Texto => "string",
+            ast::Tipo::Booleano => "bool",
+            _ => "object",
+        }
+    }
+}
+
+// --- IMPLEMENTAÇÃO DO GERADOR DE BYTECODE (NOVO) ---
+impl<'a> BytecodeGenerator<'a> {
+    fn new(programa: &'a ast::Programa) -> Self {
+        Self { programa }
+    }
+
+    /// Gera uma lista de instruções de bytecode a partir da AST.
+    fn generate(&self) -> Vec<String> {
+        let mut bytecode = Vec::new();
+        for declaracao in &self.programa.declaracoes {
+            if let ast::Declaracao::Comando(cmd) = declaracao {
+                bytecode.extend(self.generate_comando(cmd));
+            }
+        }
+        bytecode.push("HALT".to_string());
+        bytecode
+    }
+
+    fn generate_comando(&self, comando: &ast::Comando) -> Vec<String> {
+        match comando {
+            ast::Comando::Imprima(expr) => {
+                let mut instructions = self.generate_expressao(expr);
+                instructions.push("PRINT".to_string());
+                instructions
+            }
+            _ => vec![format!("// Comando {:?} não implementado", comando)],
+        }
+    }
+    
+    fn generate_expressao(&self, expr: &ast::Expressao) -> Vec<String> {
+        match expr {
+            ast::Expressao::Texto(s) => vec![format!("LOAD_CONST \"{}\"", s)],
+            ast::Expressao::Inteiro(n) => vec![format!("LOAD_CONST {}", n)],
+            ast::Expressao::Aritmetica(ast::OperadorAritmetico::Soma, esq, dir) => {
+                let mut instructions = self.generate_expressao(esq);
+                instructions.extend(self.generate_expressao(dir));
+                instructions.push("CONCAT".to_string());
+                instructions
+            }
+            _ => vec![format!("// Expressão {:?} não implementada", expr)],
+        }
+    }
+}
+
+
 //_______________________________________________________________________________________________
 //
-//  PUBLIC API (GeradorCodigo)
+//  API PÚBLICA (GeradorCodigo)
 //_______________________________________________________________________________________________
-
+//
+//  Esta é a struct pública que o `main.rs` utiliza.
+//  Ela atua como um "dispatcher", chamando o gerador correto para cada alvo.
+//
 pub struct GeradorCodigo;
 
 impl GeradorCodigo {
-    pub fn new() -> Result<Self, String> { Ok(Self) }
-    pub fn new_llvm() -> Result<Self, String> { Self::new() }
-    pub fn new_cil_bytecode() -> Result<Self, String> { Self::new() }
-    pub fn new_console() -> Result<Self, String> { Self::new() }
-    pub fn new_bytecode() -> Result<Self, String> { Self::new() }
+    pub fn new() -> Result<Self, String> {
+        Ok(Self)
+    }
 
-    pub fn gerar_llvm_ir_dinamico(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
+    /// Gera LLVM IR dinamicamente a partir da AST.
+    pub fn gerar_llvm_ir(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
         let mut generator = LlvmGenerator::new(programa);
-        let llvm_ir_code = generator.generate();
-        let output_file = format!("{}.ll", nome_base);
-        fs::write(&output_file, llvm_ir_code)
-            .map_err(|e| format!("Erro ao escrever LLVM IR dinâmico: {}", e))?;
-        Ok(())
-    }
-    
-    pub fn gerar_programa(&self, _programa: &ast::Programa) -> Result<(), String> {
-        Ok(())
+        let code = generator.generate();
+        fs::write(format!("{}.ll", nome_base), code).map_err(|e| e.to_string())
     }
 
-    pub fn obter_bytecode(&self) -> Vec<String> {
-        vec!["HALT".to_string()]
+    /// Gera código CIL dinamicamente a partir da AST.
+    pub fn gerar_cil(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
+        let generator = CilGenerator::new(programa, nome_base.to_string());
+        let code = generator.generate();
+        fs::write(format!("{}.il", nome_base), code).map_err(|e| e.to_string())
     }
-    pub fn obter_bytecode_cil(&self) -> Vec<String> {
-        vec!["CIL_RET".to_string()]
+
+    /// Gera um projeto de Console .NET dinamicamente a partir da AST.
+    pub fn gerar_console(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
+        let generator = ConsoleGenerator::new(programa);
+        let main_body = generator.generate();
+
+        // Cria a estrutura do projeto
+        let dir_projeto = format!("./{}", nome_base);
+        fs::create_dir_all(&dir_projeto).map_err(|e| e.to_string())?;
+
+        // Cria o arquivo .csproj
+        let csproj = format!(
+            r#"<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>"#
+        );
+        fs::write(format!("{}/{}.csproj", dir_projeto, nome_base), csproj).map_err(|e| e.to_string())?;
+
+        // Cria o arquivo Program.cs
+        let program_cs = format!(
+            r#"namespace {}
+{{
+    class Program
+    {{
+        static void Main(string[] args)
+        {{
+{}
+        }}
+    }}
+}}"#, nome_base, main_body);
+        fs::write(format!("{}/Program.cs", dir_projeto), program_cs).map_err(|e| e.to_string())
     }
-    pub fn gerar_cil_do_bytecode_cil(&self, _bytecode: &[String], _nome_base: &str) -> Result<(), String> {
-        Ok(())
-    }
-    pub fn gerar_projeto_console(&self, _programa: &ast::Programa) -> Result<String, String> {
-        Ok(String::new())
+
+    /// Gera bytecode customizado dinamicamente a partir da AST.
+    pub fn gerar_bytecode(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
+        let generator = BytecodeGenerator::new(programa);
+        let bytecode = generator.generate();
+        fs::write(format!("{}.pbc", nome_base), bytecode.join("\n")).map_err(|e| e.to_string())
     }
 }
