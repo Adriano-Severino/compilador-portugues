@@ -1,0 +1,15 @@
+# Testes unitários
+cargo test
+
+# Testes específicos
+cargo test test_palavras_chave
+cargo test test_compilacao_simples
+
+# Testes com output detalhado
+cargo test -- --nocapture
+
+# Testes de integração apenas
+cargo test --test integration_tests
+
+# Executar testes e depois testar targets
+cargo test && ./testar_targets.sh

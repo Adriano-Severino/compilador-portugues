@@ -1,0 +1,27 @@
+//LLVM (Já funcional):
+//cargo run -- teste.pr --target=llvm-ir
+//clang teste.ll -o teste
+//./teste
+
+//CIL Bytecode:
+//cargo run -- teste.pr --target=cil-bytecode
+//# Se tiver o 'ilasm' (parte do .NET Framework ou Mono)
+//ilasm teste.il /exe /output:teste-cil.exe
+//# Para executar (no Windows)
+//./teste-cil.exe
+//# Ou com Mono
+//mono teste-cil.exe
+
+//Console .NET:
+//cargo run -- teste.pr --target=console
+//cd teste # Entra no diretório do projeto gerado
+//dotnet run
+
+//Bytecode Customizado:
+//cargo run -- teste.pr --target=bytecode
+//cat teste.pbc # Para ver o bytecode gerado
+
+//para executar o bytecode:
+//Gere o Bytecode:
+//cargo run --bin compilador -- teste.pr --target=bytecode
+//cargo run --bin interpretador -- teste.pbc
