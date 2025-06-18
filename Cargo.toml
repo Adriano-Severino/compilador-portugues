@@ -2,57 +2,34 @@
 name = "compilador-portugues"
 version = "0.1.0"
 edition = "2021"
-build = "build.rs"
-authors = ["Adriano Severino <seu.email@exemplo.com>"]
-description = "Compilador para linguagem de programação em português com múltiplos targets"
+authors = ["Adriano Severino"]
+description = "Compilador para linguagem de programação em português com múltiplos backends (LLVM, CIL, Console, Bytecode)"
 license = "MIT"
 
+# Dependências necessárias para o compilador e interpretador
+[dependencies]
+logos = "0.15.0"
+lalrpop-util = { version = "0.22.2", features = ["lexer"] }
+# ✅ CORREÇÃO: Adicionada a dependência do `serde` que estava faltando.
+# A feature "derive" é necessária para usar `#[derive(Serialize, Deserialize)]`.
+serde = { version = "1.0", features = ["derive"] }
+
+# Dependência necessária para o processo de build do parser
 [build-dependencies]
 lalrpop = "0.22.2"
 
-[dependencies]
-# Parser e Lexer
-lalrpop-util = "0.22.2"
-logos = "0.15.0"
-
-# Serialização (para bytecode universal)
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-
-# Tratamento de erros
-anyhow = "1.0"
-
-# ✅ LLVM (corrigido - usando feature compatível com 0.6.0)
-inkwell = { version = "0.6.0", features = ["llvm18-1"], optional = true }
-
-# Chrono para timestamps no bytecode (opcional)
-chrono = { version = "0.4", features = ["serde"], optional = true }
-
-[features]
-default = ["timestamps"]
-llvm = ["inkwell"]
-timestamps = ["chrono"]
-all = ["llvm", "timestamps"]
-
-# Configurações de compilação
-[profile.dev]
-opt-level = 0
-debug = true
-overflow-checks = true
-
-[profile.release]
-opt-level = 3
-debug = false
-lto = true
-codegen-units = 1
-panic = "abort"
-
-# Binário principal
+# Definição explícita dos dois programas (binários) do pacote
 [[bin]]
 name = "compilador"
 path = "src/main.rs"
 
-# Metadados adicionais
-[package.metadata.docs.rs]
-features = ["all"]
-targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc", "x86_64-apple-darwin"]
+[[bin]]
+name = "interpretador"
+path = "src/bin/interpretador.rs"
+
+# Perfis de compilação para a versão de release
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
