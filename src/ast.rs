@@ -7,6 +7,7 @@ use serde::{Serialize, Deserialize};
 pub enum Tipo {
     Inteiro,
     Texto,
+    Decimal,    
     Booleano,
     Vazio,
     Lista(Box<Tipo>),
