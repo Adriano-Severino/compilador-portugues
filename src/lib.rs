@@ -1,3 +1,5 @@
+// src/lib.rs
+
 //! Compilador de Linguagem de Programação em Português
 //!
 //! Este projeto implementa um compilador completo para uma linguagem de programação
@@ -11,7 +13,7 @@
 // Declarar módulos principais
 pub mod lexer;
 pub mod ast;
-pub mod runtime;
+// pub mod runtime; // Comentado se não estiver em uso
 pub mod codegen;
 pub mod type_checker;
 pub mod ownership;
@@ -24,21 +26,21 @@ pub mod interpolacao;
 use lalrpop_util::lalrpop_mod;
 lalrpop_mod!(pub parser);
 
-// Re-exportações básicas (remover as problemáticas)
+// Re-exportações básicas
 pub use ast::{Programa, Declaracao, DeclaracaoClasse, MetodoClasse, Comando, Expressao, Tipo};
 pub use lexer::Token;
 pub use type_checker::VerificadorTipos;
 pub use ownership::AnalisadorOwnership;
 pub use inferencia_tipos::InferenciaTipos;
 
-// Re-exportações do codegen (funcionais)
-pub use codegen::{GeradorCodigo, BackendType};
-pub use runtime::{
-    executar_programa_otimizado,
-    executar_programa_debug,
-    interpretar_com_classes,
-    validar_programa
-};
+// ✅ CORREÇÃO: Removida a importação do `BackendType`, que não é mais público.
+pub use codegen::GeradorCodigo;
+// pub use runtime::{
+//     executar_programa_otimizado,
+//     executar_programa_debug,
+//     interpretar_com_classes,
+//     validar_programa
+// };
 
 // Estrutura principal do compilador
 pub struct CompiladorPortugues {
@@ -68,7 +70,6 @@ impl CompiladorPortugues {
                 }
             })
             .collect();
-
         if tokens.is_empty() {
             return Err("Nenhum token válido encontrado".to_string());
         }
@@ -77,7 +78,7 @@ impl CompiladorPortugues {
         let parser = parser::ArquivoParser::new();
         let mut ast = parser.parse(tokens.iter().cloned())
             .map_err(|e| format!("Erro sintático: {:?}", e))?;
-
+        
         // Interpolação de strings
         interpolacao::walk_programa(&mut ast, |e| {
             *e = interpolacao::planificar_interpolada(e.clone());
