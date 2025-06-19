@@ -202,7 +202,7 @@ fn compilar_para_console(ast: &ast::Programa, nome_base: &str) -> Result<(), Box
 
 fn compilar_para_bytecode(ast: &ast::Programa, nome_base: &str) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Gerando Bytecode Customizado...");
-    let gerador = codegen::GeradorCodigo::new()?;
+    let mut gerador = codegen::GeradorCodigo::new()?;
     gerador.gerar_bytecode(ast, nome_base).map_err(|e| Box::new(CompilerError(e)))?;
     println!("  ✓ {}.pbc gerado.", nome_base);
     Ok(())

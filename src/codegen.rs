@@ -34,12 +34,6 @@ struct ConsoleGenerator<'a> {
     programa: &'a ast::Programa,
 }
 
-/// O gerador de código para o seu formato de bytecode customizado.
-struct BytecodeGenerator<'a> {
-    programa: &'a ast::Programa,
-}
-
-
 // --- IMPLEMENTAÇÃO DO GERADOR LLVM (Existente e Funcional) ---
 impl<'a> LlvmGenerator<'a> {
     fn new(programa: &'a ast::Programa) -> Self {
@@ -350,59 +344,178 @@ impl<'a> ConsoleGenerator<'a> {
 }
 
 // --- IMPLEMENTAÇÃO DO GERADOR DE BYTECODE ---
+struct BytecodeGenerator<'a> {
+    programa: &'a ast::Programa,
+    bytecode_instructions: Vec<String>, //Armazena as instruções geradas
+}
+
 impl<'a> BytecodeGenerator<'a> {
     fn new(programa: &'a ast::Programa) -> Self {
-        Self { programa }
+        Self {
+            programa,
+            bytecode_instructions: Vec::new(), // Inicializa a lista de instruções
+        }
     }
 
-    fn generate(&self) -> Vec<String> {
-        let mut bytecode = Vec::new();
+    fn is_string_expr(expr: &ast::Expressao) -> bool {
+         use ast::{Expressao as E, OperadorAritmetico as OA};
+          match expr {
+             E::Texto(_) | E::StringInterpolada(_) => true,
+             E::Aritmetica(OA::Soma, l, r) => Self::is_string_expr(l) || Self::is_string_expr(r),
+             _ => false,
+            }
+        }
+
+    // Altera a assinatura para `&mut self`
+    fn generate(&mut self) -> Vec<String> {
         for declaracao in &self.programa.declaracoes {
             if let ast::Declaracao::Comando(cmd) = declaracao {
-                bytecode.extend(self.generate_comando(cmd));
+                self.generate_comando(cmd); // Chama o método mutável
             }
         }
-        bytecode.push("HALT".to_string());
-        bytecode
+        self.bytecode_instructions.push("HALT".to_string());
+        // Move o conteúdo do vetor e limpa o campo, devolvendo o bytecode completo
+        std::mem::take(&mut self.bytecode_instructions)
     }
 
-    fn generate_comando(&self, comando: &ast::Comando) -> Vec<String> {
+    // Altera a assinatura para `&mut self` e remove o retorno Vec<String>
+    fn generate_comando(&mut self, comando: &ast::Comando) {
         match comando {
             ast::Comando::DeclaracaoVar(nome, expr) => {
-                let mut instructions = self.generate_expressao(expr);
-                instructions.push(format!("STORE_VAR {}", nome));
-                instructions
+                self.generate_expressao(expr); // Gera expressão e adiciona à lista interna
+                self.bytecode_instructions.push(format!("STORE_VAR {}", nome));
             }
             ast::Comando::DeclaracaoVariavel(_, nome, Some(expr)) => {
-                let mut instructions = self.generate_expressao(expr);
-                instructions.push(format!("STORE_VAR {}", nome));
-                instructions
+                self.generate_expressao(expr);
+                self.bytecode_instructions.push(format!("STORE_VAR {}", nome));
+            }
+            ast::Comando::Atribuicao(nome, expr) => { // Adicionado: Atribuição
+                self.generate_expressao(expr);
+                self.bytecode_instructions.push(format!("STORE_VAR {}", nome));
             }
             ast::Comando::Imprima(expr) => {
-                let mut instructions = self.generate_expressao(expr);
-                instructions.push("PRINT".to_string());
-                instructions
+                self.generate_expressao(expr);
+                self.bytecode_instructions.push("PRINT".to_string());
             }
-            _ => vec![format!("; Comando {:?} não implementado para bytecode", comando)],
+            ast::Comando::Bloco(comandos) => { // Adicionado: Bloco de comandos
+                for cmd in comandos {
+                    self.generate_comando(cmd);
+                }
+            }
+
+            // Adicionado: Comando 'enquanto'
+            ast::Comando::Enquanto(condicao, corpo) => {
+                let loop_start_ip = self.bytecode_instructions.len(); // Ponto de início do loop
+
+                self.generate_expressao(condicao); // Gera código para a condição
+                let jump_if_false_placeholder_ip = self.bytecode_instructions.len();
+                self.bytecode_instructions.push("JUMP_IF_FALSE 0".to_string()); // Placeholder para o salto para o final do loop
+
+                self.generate_comando(corpo); // Gera código para o corpo do loop
+
+                self.bytecode_instructions.push(format!("JUMP {}", loop_start_ip)); // Salta de volta para o início da condição
+
+                let loop_end_ip = self.bytecode_instructions.len(); // Ponto final do loop
+                // Patching: Atualiza a instrução JUMP_IF_FALSE com o endereço real
+                self.bytecode_instructions[jump_if_false_placeholder_ip] =
+                    format!("JUMP_IF_FALSE {}", loop_end_ip);
+            }
+
+            // Adicionado: Comando 'se'
+            ast::Comando::Se(condicao, bloco_if, bloco_else) => {
+                self.generate_expressao(condicao); // Gera código para a condição
+
+                let jump_if_false_placeholder_ip = self.bytecode_instructions.len();
+                self.bytecode_instructions.push("JUMP_IF_FALSE 0".to_string()); // Placeholder para o salto
+
+                self.generate_comando(bloco_if); // Gera código para o bloco 'se'
+
+                if let Some(bloco_else) = bloco_else {
+                    let jump_to_end_placeholder_ip = self.bytecode_instructions.len();
+                    self.bytecode_instructions.push("JUMP 0".to_string()); // Salta sobre o bloco 'senão'
+
+                    let else_start_ip = self.bytecode_instructions.len();
+                    // Patching: Se houver 'senão', o JUMP_IF_FALSE salta para o início do bloco 'senão'
+                    self.bytecode_instructions[jump_if_false_placeholder_ip] =
+                        format!("JUMP_IF_FALSE {}", else_start_ip);
+
+                    self.generate_comando(bloco_else); // Gera código para o bloco 'senão'
+
+                    let end_if_else_ip = self.bytecode_instructions.len();
+                    // Patching: O JUMP sobre o bloco 'senão' salta para o final de tudo
+                    self.bytecode_instructions[jump_to_end_placeholder_ip] =
+                        format!("JUMP {}", end_if_else_ip);
+                } else {
+                    let end_if_ip = self.bytecode_instructions.len();
+                    // Patching: Se não houver 'senão', o JUMP_IF_FALSE salta para o final do comando 'se'
+                    self.bytecode_instructions[jump_if_false_placeholder_ip] =
+                        format!("JUMP_IF_FALSE {}", end_if_ip);
+                }
+            }
+
+            // Para outros comandos não implementados, remova a linha de comentário e implemente se necessário
+            _ => { /* Fazer nada ou adicionar tratamento para outros comandos */ }
         }
     }
-    
-    fn generate_expressao(&self, expr: &ast::Expressao) -> Vec<String> {
+
+    // Altera a assinatura para `&mut self` e remove o retorno Vec<String>
+    fn generate_expressao(&mut self, expr: &ast::Expressao) {
         match expr {
-            ast::Expressao::Texto(s) => vec![format!("LOAD_CONST_STR \"{}\"", s)],
-            ast::Expressao::Inteiro(n) => vec![format!("LOAD_CONST_INT {}", n)],
-            ast::Expressao::Identificador(nome) => vec![format!("LOAD_VAR {}", nome)],
-            ast::Expressao::Aritmetica(ast::OperadorAritmetico::Soma, esq, dir) => {
-                let mut instructions = self.generate_expressao(esq);
-                instructions.extend(self.generate_expressao(dir));
-                instructions.push("CONCAT 2".to_string());
-                instructions
+            ast::Expressao::Texto(s) => self.bytecode_instructions.push(format!("LOAD_CONST_STR \"{}\"", s)),
+            ast::Expressao::Inteiro(n) => self.bytecode_instructions.push(format!("LOAD_CONST_INT {}", n)),
+            ast::Expressao::Booleano(b) => self.bytecode_instructions.push(format!("LOAD_CONST_BOOL {}", b)), // Adicionado
+            ast::Expressao::Identificador(nome) => self.bytecode_instructions.push(format!("LOAD_VAR {}", nome)),
+
+            // Modificado: Operadores Aritméticos - Distinguir concatenação de soma numérica
+            ast::Expressao::Aritmetica(op, esq, dir) => {
+                self.generate_expressao(esq);
+                self.generate_expressao(dir);
+                match op {
+                    ast::OperadorAritmetico::Soma => {
+                        // Idealmente, haveria verificação de tipo aqui, ou um operador polimórfico.
+                       
+                        
+                        if Self::is_string_expr(esq) || Self::is_string_expr(dir) {
+                            self.bytecode_instructions.push("CONCAT 2".to_string());
+                        } else {
+                            self.bytecode_instructions.push("ADD".to_string());
+                        }
+                    }
+                    ast::OperadorAritmetico::Subtracao => self.bytecode_instructions.push("SUB".to_string()),
+                    ast::OperadorAritmetico::Multiplicacao => self.bytecode_instructions.push("MUL".to_string()),
+                    ast::OperadorAritmetico::Divisao => self.bytecode_instructions.push("DIV".to_string()),
+                    ast::OperadorAritmetico::Modulo => self.bytecode_instructions.push("MOD".to_string()),
+                }
             }
-            _ => vec![format!("; Expressão {:?} não implementada para bytecode", expr)],
+
+            // Adicionado: Operadores de Comparação
+            ast::Expressao::Comparacao(op, esq, dir) => {
+                self.generate_expressao(esq);
+                self.generate_expressao(dir);
+                match op {
+                    ast::OperadorComparacao::Igual => self.bytecode_instructions.push("COMPARE_EQ".to_string()),
+                    ast::OperadorComparacao::Diferente => self.bytecode_instructions.push("COMPARE_NE".to_string()),
+                    ast::OperadorComparacao::Menor => self.bytecode_instructions.push("COMPARE_LT".to_string()),
+                    ast::OperadorComparacao::MaiorQue => self.bytecode_instructions.push("COMPARE_GT".to_string()),
+                    ast::OperadorComparacao::MenorIgual => self.bytecode_instructions.push("COMPARE_LE".to_string()),
+                    ast::OperadorComparacao::MaiorIgual => self.bytecode_instructions.push("COMPARE_GE".to_string()),
+                }
+            }
+
+            // Adicionado: Operadores Unários
+            ast::Expressao::Unario(op, expr) => {
+                self.generate_expressao(expr);
+                match op {
+                    ast::OperadorUnario::NegacaoLogica => self.bytecode_instructions.push("NEGATE_BOOL".to_string()),
+                    ast::OperadorUnario::NegacaoNumerica => self.bytecode_instructions.push("NEGATE_INT".to_string()),
+                }
+            }
+
+            // Para outras expressões não implementadas, remova a linha de comentário e implemente se necessário
+            _ => { /* Fazer nada ou adicionar tratamento para outras expressões */ }
         }
     }
 }
-
 
 //_______________________________________________________________________________________________
 //
@@ -460,9 +573,9 @@ impl GeradorCodigo {
         fs::write(format!("{}/Program.cs", dir_projeto), program_cs).map_err(|e| e.to_string())
     }
 
-    pub fn gerar_bytecode(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
-        let generator = BytecodeGenerator::new(programa);
-        let bytecode = generator.generate();
+   pub fn gerar_bytecode(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
+    let mut generator = BytecodeGenerator::new(programa);
+    let bytecode = generator.generate();
         fs::write(format!("{}.pbc", nome_base), bytecode.join("\n")).map_err(|e| e.to_string())
     }
 }

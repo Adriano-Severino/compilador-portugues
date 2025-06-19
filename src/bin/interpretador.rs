@@ -12,6 +12,7 @@ use std::io::{self, Read};
 enum Valor {
     Inteiro(i64),
     Texto(String),
+    Booleano(bool),
     Nulo,
 }
 
@@ -21,6 +22,7 @@ impl fmt::Display for Valor {
         match self {
             Valor::Inteiro(n) => write!(f, "{}", n),
             Valor::Texto(s) => write!(f, "{}", s),
+            Valor::Booleano(b) => write!(f, "{}", if *b { "verdadeiro" } else { "falso" }),
             Valor::Nulo => write!(f, "nulo"),
         }
     }
@@ -58,9 +60,13 @@ impl VM {
             let op = partes.get(0).ok_or("Instrução vazia encontrada")?;
 
             // Avança o ponteiro de instrução ANTES de executar, para evitar laços infinitos.
-            self.ip += 1;
+            // Apenas para JUMP e JUMP_IF_FALSE o IP é ajustado explicitamente.
+            if !matches!(*op, "JUMP" | "JUMP_IF_FALSE") {
+                self.ip += 1;
+            }
 
             match *op {
+                 // ... (instruções LOAD_CONST_INT, LOAD_CONST_STR, LOAD_VAR, STORE_VAR, PRINT, CONCAT, HALT)
                 "LOAD_CONST_INT" => {
                     let valor = partes
                         .get(1)
@@ -115,9 +121,157 @@ impl VM {
                     // Para a execução da VM.
                     break;
                 }
+
+                "LOAD_CONST_BOOL" => {
+                    let valor = partes
+                        .get(1)
+                        .ok_or("LOAD_CONST_BOOL requer um argumento")?
+                        .parse::<bool>()
+                        .map_err(|e| format!("Valor inválido para LOAD_CONST_BOOL: {}", e))?;
+                    self.pilha.push(Valor::Booleano(valor));
+                }
+
+            
+                "ADD" => {
+                    let dir = self.pilha.pop().ok_or("Pilha vazia para ADD")?;
+                    let esq = self.pilha.pop().ok_or("Pilha vazia para ADD")?;
+                    match (esq, dir) {
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => self.pilha.push(Valor::Inteiro(a + b)),
+                        _ => return Err("Tipos incompatíveis para ADD".to_string()),
+                    }
+                }
+                "SUB" => {
+                    let dir = self.pilha.pop().ok_or("Pilha vazia para SUB")?;
+                    let esq = self.pilha.pop().ok_or("Pilha vazia para SUB")?;
+                    match (esq, dir) {
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => self.pilha.push(Valor::Inteiro(a - b)),
+                        _ => return Err("Tipos incompatíveis para SUB".to_string()),
+                    }
+                }
+                "MUL" => {
+                    let dir = self.pilha.pop().ok_or("Pilha vazia para MUL")?;
+                    let esq = self.pilha.pop().ok_or("Pilha vazia para MUL")?;
+                    match (esq, dir) {
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => self.pilha.push(Valor::Inteiro(a * b)),
+                        _ => return Err("Tipos incompatíveis para MUL".to_string()),
+                    }
+                }
+                "DIV" => {
+                    let dir = self.pilha.pop().ok_or("Pilha vazia para DIV")?;
+                    let esq = self.pilha.pop().ok_or("Pilha vazia para DIV")?;
+                    match (esq, dir) {
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => {
+                            if b == 0 {
+                                return Err("Divisão por zero".to_string());
+                            }
+                            self.pilha.push(Valor::Inteiro(a / b));
+                        }
+                        _ => return Err("Tipos incompatíveis para DIV".to_string()),
+                    }
+                }
+                "MOD" => {
+                    let dir = self.pilha.pop().ok_or("Pilha vazia para MOD")?;
+                    let esq = self.pilha.pop().ok_or("Pilha vazia para MOD")?;
+                    match (esq, dir) {
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => {
+                            if b == 0 {
+                                return Err("Módulo por zero".to_string());
+                            }
+                            self.pilha.push(Valor::Inteiro(a % b));
+                        }
+                        _ => return Err("Tipos incompatíveis para MOD".to_string()),
+                    }
+                }
+                "NEGATE_INT" => { //Negação numérica
+                    let val = self.pilha.pop().ok_or("Pilha vazia para NEGATE_INT")?;
+                    match val {
+                        Valor::Inteiro(n) => self.pilha.push(Valor::Inteiro(-n)),
+                        _ => return Err("Tipo incompatível para NEGATE_INT".to_string()),
+                    }
+                }
+                "NEGATE_BOOL" => { //Negação lógica
+                    let val = self.pilha.pop().ok_or("Pilha vazia para NEGATE_BOOL")?;
+                    match val {
+                        Valor::Booleano(b) => self.pilha.push(Valor::Booleano(!b)),
+                        _ => return Err("Tipo incompatível para NEGATE_BOOL".to_string()),
+                    }
+                }
+
+                // Operações de Comparação (para inteiros e booleanos)
+                "COMPARE_EQ" => {
+                    let dir = self.pilha.pop().ok_or("Pilha vazia para COMPARE_EQ")?;
+                    let esq = self.pilha.pop().ok_or("Pilha vazia para COMPARE_EQ")?;
+                    self.pilha.push(Valor::Booleano(esq == dir));
+                }
+                "COMPARE_NE" => {
+                    let dir = self.pilha.pop().ok_or("Pilha vazia para COMPARE_NE")?;
+                    let esq = self.pilha.pop().ok_or("Pilha vazia para COMPARE_NE")?;
+                    self.pilha.push(Valor::Booleano(esq != dir));
+                }
+                "COMPARE_LT" => {
+                    let dir = self.pilha.pop().ok_or("Pilha vazia para COMPARE_LT")?;
+                    let esq = self.pilha.pop().ok_or("Pilha vazia para COMPARE_LT")?;
+                    match (esq, dir) {
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => self.pilha.push(Valor::Booleano(a < b)),
+                        _ => return Err("Tipos incompatíveis para COMPARE_LT".to_string()),
+                    }
+                }
+                "COMPARE_GT" => {
+                    let dir = self.pilha.pop().ok_or("Pilha vazia para COMPARE_GT")?;
+                    let esq = self.pilha.pop().ok_or("Pilha vazia para COMPARE_GT")?;
+                    match (esq, dir) {
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => self.pilha.push(Valor::Booleano(a > b)),
+                        _ => return Err("Tipos incompatíveis para COMPARE_GT".to_string()),
+                    }
+                }
+                "COMPARE_LE" => {
+                    let dir = self.pilha.pop().ok_or("Pilha vazia para COMPARE_LE")?;
+                    let esq = self.pilha.pop().ok_or("Pilha vazia para COMPARE_LE")?;
+                    match (esq, dir) {
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => self.pilha.push(Valor::Booleano(a <= b)),
+                        _ => return Err("Tipos incompatíveis para COMPARE_LE".to_string()),
+                    }
+                }
+
+                "COMPARE_GE" => {
+                    let dir = self.pilha.pop().ok_or("Pilha vazia para COMPARE_GE")?;
+                    let esq = self.pilha.pop().ok_or("Pilha vazia para COMPARE_GE")?;
+                    match (esq, dir) {
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => self.pilha.push(Valor::Booleano(a >= b)),
+                        _ => return Err("Tipos incompatíveis para COMPARE_GE".to_string()),
+                    }
+                }
+                // Instruções de Salto
+                "JUMP" => { // Salto incondicional
+                    let target_ip: usize = partes
+                        .get(1)
+                        .ok_or("JUMP requer um endereço de destino")?
+                        .parse()
+                        .map_err(|e| format!("Endereço inválido para JUMP: {}", e))?;
+                    self.ip = target_ip;
+                }
+                "JUMP_IF_FALSE" => { // Salto condicional
+                    let target_ip: usize = partes
+                        .get(1)
+                        .ok_or("JUMP_IF_FALSE requer um endereço de destino")?
+                        .parse()
+                        .map_err(|e| format!("Endereço inválido para JUMP_IF_FALSE: {}", e))?;
+                    let condicao = self.pilha.pop().ok_or("Pilha vazia para JUMP_IF_FALSE")?;
+                    match condicao {
+                        Valor::Booleano(b) => {
+                            if !b {
+                                self.ip = target_ip;
+                            } else {
+                                self.ip += 1; // Se a condição for verdadeira, avança normalmente
+                            }
+                        }
+                        _ => return Err("JUMP_IF_FALSE requer um valor booleano".to_string()),
+                    }
+                }
+
                 // Ignora comentários ou linhas vazias
                 op if op.starts_with(';') || op.is_empty() => {}
-                _ => {
+                 _ => {
                     return Err(format!("Instrução desconhecida: {}", op));
                 }
             }
