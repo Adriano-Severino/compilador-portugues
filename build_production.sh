@@ -18,7 +18,7 @@ echo "=== Compilando $PROGRAMA.pr ==="
 
 # 1. Compilar com seu compilador
 echo "1. Gerando LLVM IR..."
-cargo run --release --bin -- $PROGRAMA.pr
+cargo run --release --bin compilador -- $PROGRAMA.pr
 if [ $? -ne 0 ]; then
     echo "Erro: Falha na compilação do arquivo .pr"
     exit 1
