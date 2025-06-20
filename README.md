@@ -248,7 +248,7 @@ espaco Meu_Programa.Domain
         }
     }
 
-    publico funcao teste_pessoa() 
+    publico função teste_pessoa() 
     {
         Pessoa p1 = novo Pessoa("Joana", "Rua de exemplo", "123456789");
         Pessoa p2 = novo Pessoa("Maria", "Rua B", "987654321", 30);
@@ -266,62 +266,62 @@ Código (`funcoes.pr`):
 ```por do sol
 espaco Meu_Programa.funcoes
 {
-    publico funcao bemvindo() 
+    publico função bemvindo() 
     { 
         imprima("Olá mundo"); 
     }
-    publico funcao configurar(texto nome) 
+    publico função configurar(texto nome) 
     { 
         imprima("Configurando: " + nome); 
     }
-    publico funcao calcular() => inteiro 
+    publico função calcular() => inteiro 
     { 
         retorne 42; 
     }
 
-    publico funcao multiplicar(inteiro a, inteiro b) => inteiro { retorne a * b; }
+    publico função multiplicar(inteiro a, inteiro b) => inteiro { retorne a * b; }
 
-    privado funcao inteiro somar(inteiro a, inteiro b) 
+    privado função inteiro somar(inteiro a, inteiro b) 
     { 
      retorne a + b; 
     }
-    publico funcao
+    publico função
     { 
         retorne a + b; 
     }
-    publico funcao texto obter_nome() 
+    publico função texto obter_nome() 
     { 
         retorne "João"; 
     }
 
-    publico funcao booleano eh_par(inteiro numero) 
+    publico função booleano eh_par(inteiro numero) 
     { 
         retorne numero % 2 == 0; 
     }
 
-    publico funcao vazio imprimir_linha() 
+    publico função vazio imprimir_linha() 
     { 
         imprima("================"); 
     }
 
-    publico funcao Pessoa criar_pessoa(texto nome, inteiro idade) 
+    publico função Pessoa criar_pessoa(texto nome, inteiro idade) 
     { 
      retorne novo Pessoa(nome, idade); 
     }
 
-    publico funcao processar_dados(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) 
+    publico função processar_dados(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) 
     { 
         imprima("Processando dados completos"); 
     }
 
-    publico funcao texto gerar_relatorio(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) 
+    publico função texto gerar_relatorio(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) 
     { 
         retorne "Relatório gerado"; 
     }
 
-    publico funcao processar_completo(texto nome, inteiro idade, booleano ativo, texto endereco, texto
+    publico função processar_completo(texto nome, inteiro idade, booleano ativo, texto endereco, texto
     telefone) => texto { retorne "Processamento completo"; }
-    publico funcao testar_funcoes() 
+    publico função testar_funcoes() 
     {
         processar_dados("João", 30, verdadeiro, "Rua A", "123456789");
         texto resultado = gerar_relatorio("Joana", 25, falso, "Rua B", "987654321");
@@ -558,7 +558,7 @@ publico classe Biblioteca
 // ------------------------------------------------------------------
 // DEMONSTRAÇÃO DO SISTEMA
 // ------------------------------------------------------------------
-publico funcao demonstrarSistema() 
+publico função demonstrarSistema() 
 {
 
     imprima("🎯 ===== SISTEMA DE BIBLIOTECA DIGITAL =====");
@@ -663,7 +663,7 @@ publico funcao demonstrarSistema()
     imprima("🏁 ===== FIM DA DEMONSTRAÇÃO =====");
 }
 
-publico funcao principal() 
+publico função principal() 
 {
     demonstrarSistema();
 }
@@ -672,7 +672,7 @@ publico funcao principal()
 
 // Executando o sistema
 espaco principal {
-    funcao inicio() {
+    função inicio() {
         BibliotecaDigital.Sistema.demonstrarSistema();
         inteiro totalOperacoes = 0;
         imprima("🧮 CONTABILIZANDO OPERAÇÕES DO SISTEMA:");
