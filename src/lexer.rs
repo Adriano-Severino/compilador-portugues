@@ -3,67 +3,120 @@ use logos::Logos;
 #[derive(Logos, Debug, PartialEq, Clone)]
 pub enum Token {
     /* palavras-chave básicas */
-    #[token("se")]        TSe,
-    #[token("então")]     TEntao,
-    #[token("senão")]     TSenao,
-    #[token("enquanto")]  TEnquanto,
-    #[token("para")]      TPara,
-    #[token("funcao")]    TFuncao,
-    #[token("retorne")]   TRetorne,
-    #[token("imprima")]   TImprima,
-    #[token("var")]       TVar,
-    #[token("espaco")]    TEspaco,
+    #[token("se")]
+    TSe,
+    #[token("então")]
+    TEntao,
+    #[token("senão")]
+    TSenao,
+    #[token("enquanto")]
+    TEnquanto,
+    #[token("para")]
+    TPara,
+    #[token("função")]
+    TFuncao,
+    #[token("retorne")]
+    TRetorne,
+    #[token("imprima")]
+    TImprima,
+    #[token("var")]
+    TVar,
+    #[token("espaco")]
+    TEspaco,
 
     /* tipos */
-    #[token("inteiro")]   TTipoInteiro,
-    #[token("texto")]     TTipoTexto,
-    #[token("booleano")]  TTipoBooleano,
-    #[token("vazio")]     TTipoVazio,
-    #[token("verdadeiro")]TVerdadeiro,
-    #[token("falso")]     TFalso,
+    #[token("inteiro")]
+    TTipoInteiro,
+    #[token("texto")]
+    TTipoTexto,
+    #[token("booleano")]
+    TTipoBooleano,
+    #[token("vazio")]
+    TTipoVazio,
+    #[token("verdadeiro")]
+    TVerdadeiro,
+    #[token("falso")]
+    TFalso,
 
     /* OOP */
-    #[token("classe")]    TClasse,
-    #[token("construtor")]TConstrutor,
-    #[token("publico")]   TPublico, 
-    #[token("privado")]   TPrivado,
-    #[token("protegido")] TProtegido,
-    #[token("base")]      TBase,
-    #[token("redefinível")] TRedefinivel,
-    #[token("sobrescreve")] TSobrescreve,
-    #[token("abstrato")] TAbstrato,
-    #[token("novo")]      TNovo,
-    #[token("este")]      TEste,
-    #[token("buscar")]    TBuscar,
-    #[token("definir")]   TDefinir,
+    #[token("classe")]
+    TClasse,
+    #[token("construtor")]
+    TConstrutor,
+    #[token("publico")]
+    TPublico,
+    #[token("privado")]
+    TPrivado,
+    #[token("protegido")]
+    TProtegido,
+    #[token("base")]
+    TBase,
+    #[token("redefinível")]
+    TRedefinivel,
+    #[token("sobrescreve")]
+    TSobrescreve,
+    #[token("abstrato")]
+    TAbstrato,
+    #[token("novo")]
+    TNovo,
+    #[token("este")]
+    TEste,
+    #[token("buscar")]
+    TBuscar,
+    #[token("definir")]
+    TDefinir,
 
     /* operadores */
-    #[token("==")] TIgual,
-    #[token("!=")] TDiferente,
-    #[token(">=")] TMaiorIgual,
-    #[token("<=")] TMenorIgual,
-    #[token(">")]  TMaiorQue,
-    #[token("<")]  TMenor,
-    #[token("+")]  TMais,
-    #[token("-")]  TMenos,
-    #[token("*")]  TMultiplicacao,
-    #[token("/")]  TDivisao,
-    #[token("%")]  TModulo,
-    #[token("&&")] TE,
-    #[token("||")] TOu,
-    #[token("!")]  TNao,
-    #[token("=")]  TAtribuicao,
+    #[token("==")]
+    TIgual,
+    #[token("!=")]
+    TDiferente,
+    #[token(">=")]
+    TMaiorIgual,
+    #[token("<=")]
+    TMenorIgual,
+    #[token(">")]
+    TMaiorQue,
+    #[token("<")]
+    TMenor,
+    #[token("+")]
+    TMais,
+    #[token("-")]
+    TMenos,
+    #[token("*")]
+    TMultiplicacao,
+    #[token("/")]
+    TDivisao,
+    #[token("%")]
+    TModulo,
+    #[token("&&")]
+    TE,
+    #[token("||")]
+    TOu,
+    #[token("!")]
+    TNao,
+    #[token("=")]
+    TAtribuicao,
 
     /* delimitadores */
-    #[token("(")] TParenEsq,
-    #[token(")")] TParenDir,
-    #[token("{")] TChaveEsq,
-    #[token("}")] TChaveDir,
-    #[token(";")] TPontoVirgula,
-    #[token(",")] TVirgula,
-    #[token(".")] TPonto,
-    #[token(":")] TDoisPontos,
-    #[token("=>")]TSeta,
+    #[token("(")]
+    TParenEsq,
+    #[token(")")]
+    TParenDir,
+    #[token("{")]
+    TChaveEsq,
+    #[token("}")]
+    TChaveDir,
+    #[token(";")]
+    TPontoVirgula,
+    #[token(",")]
+    TVirgula,
+    #[token(".")]
+    TPonto,
+    #[token(":")]
+    TDoisPontos,
+    #[token("=>")]
+    TSeta,
 
     /* literais */
     #[regex(r#"\$\"([^"\\]|\\.)*\""#, |lex| {
@@ -84,7 +137,6 @@ pub enum Token {
     ComentarioLinha,
     #[regex(r"[ \t\r\n]+", logos::skip)]
     Whitespace,
-    
 }
 
 #[cfg(test)]
@@ -96,7 +148,7 @@ mod tests {
     fn test_palavras_chave() {
         let codigo = "se então senão enquanto para classe publico";
         let mut lex = Token::lexer(codigo);
-        
+
         assert_eq!(lex.next(), Some(Ok(Token::TSe)));
         assert_eq!(lex.next(), Some(Ok(Token::TEntao)));
         assert_eq!(lex.next(), Some(Ok(Token::TSenao)));
@@ -105,11 +157,11 @@ mod tests {
         assert_eq!(lex.next(), Some(Ok(Token::TClasse)));
         assert_eq!(lex.next(), Some(Ok(Token::TPublico)));
     }
-     #[test]
+    #[test]
     fn test_literais() {
         let codigo = r#"123 "hello" verdadeiro falso"#;
         let mut lex = Token::lexer(codigo);
-        
+
         assert_eq!(lex.next(), Some(Ok(Token::TInteiro(123))));
         assert_eq!(lex.next(), Some(Ok(Token::TString("hello".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::TVerdadeiro)));
@@ -120,7 +172,7 @@ mod tests {
     fn test_string_interpolada() {
         let codigo = r#"$"Olá {nome}, você tem {idade} anos""#;
         let mut lex = Token::lexer(codigo);
-        
+
         if let Some(Ok(Token::TStringInterpolada(conteudo))) = lex.next() {
             assert_eq!(conteudo, "Olá {nome}, você tem {idade} anos");
         } else {

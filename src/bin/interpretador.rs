@@ -114,28 +114,36 @@ impl VM {
                 propriedades,
                 metodos,
             } => {
-                match nome_metodo {
-                    // Métodos especiais integrados
-                    "apresentar" => {
-                        if let Some(nome) = propriedades.get("Nome") {
-                            println!("Olá, meu nome é {}", nome);
-                        } else {
-                            println!("Olá, sou um objeto da classe {}", classe);
-                        }
-                        Ok(Valor::Nulo)
-                    }
-                    "paraTexto" => {
-                        if let Some(nome) = propriedades.get("Nome") {
-                            Ok(nome.clone())
-                        } else {
-                            Ok(Valor::Texto(format!("Objeto<{}>", classe)))
-                        }
-                    }
-                    _ => {
-                        // Para métodos customizados, você pode executar bytecode do método
-                        // Por enquanto, retorna nulo para métodos não implementados
-                        Ok(Valor::Nulo)
-                    }
+                if let Some(corpo) = metodos.get(nome_metodo) {
+                    // --- prepara o ambiente do método ---------------------------
+                    // 1. variáveis locais contendo o objeto como "este"
+                    let mut vars = HashMap::new();
+                    vars.insert(
+                        "este".to_string(),
+                        Valor::Objeto {
+                            classe: classe.clone(),
+                            propriedades: propriedades.clone(),
+                            metodos: metodos.clone(),
+                        },
+                    );
+
+                    // 2. mini-VM que executará o corpo do método
+                    let mut vm = VM {
+                        pilha: Vec::new(), // pilha inicia vazia
+                        variaveis: vars,   // "este" resolvido por LOAD_VAR
+                        bytecode: corpo.clone(),
+                        ip: 0,
+                        classes: self.classes.clone(),
+                    };
+
+                    vm.run()?; // executa método
+                               // valor de retorno ou nulo
+                    Ok(vm.pilha.pop().unwrap_or(Valor::Nulo))
+                } else {
+                    Err(format!(
+                        "Método '{}.{}' não encontrado",
+                        classe, nome_metodo
+                    ))
                 }
             }
             _ => Err("Tentativa de chamar método em não-objeto".to_string()),
@@ -506,6 +514,24 @@ impl VM {
                     // O uso de .ok_or previne um pânico se a pilha estiver vazia,
                     // transformando-o em um erro controlado.
                     self.pilha.pop().ok_or("Pilha vazia em POP")?;
+                }
+
+                "DEFINE_METHOD" => {
+                    let classe = partes.get(1).ok_or("DEFINE_METHOD requer classe")?;
+                    let nome = partes.get(2).ok_or("DEFINE_METHOD requer nome")?;
+                    let n = partes
+                        .get(3)
+                        .ok_or("DEFINE_METHOD requer tamanho")?
+                        .parse::<usize>()
+                        .map_err(|_| "Tamanho inválido")?;
+                    // pega as N linhas imediatamente após o cabeçalho
+                    let corpo = self.bytecode[self.ip..self.ip + n].to_vec();
+                    self.ip += n; // pula o corpo no bytecode principal
+                    if let Some(info) = self.classes.get_mut(*classe) {
+                        info.metodos.insert((*nome).to_string(), corpo);
+                    } else {
+                        return Err(format!("Classe '{}' não definida", classe));
+                    }
                 }
 
                 // Ignora comentários ou linhas vazias

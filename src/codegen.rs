@@ -404,13 +404,15 @@ impl<'a> ConsoleGenerator<'a> {
 struct BytecodeGenerator<'a> {
     programa: &'a ast::Programa,
     bytecode_instructions: Vec<String>, //Armazena as instruções geradas
+    em_metodo: bool,
 }
 
 impl<'a> BytecodeGenerator<'a> {
-    fn new(programa: &'a ast::Programa) -> Self {
+    fn new(programa: &'a ast::Programa, em_metodo: bool) -> Self {
         Self {
             programa,
-            bytecode_instructions: Vec::new(), // Inicializa a lista de instruções
+            bytecode_instructions: Vec::new(),
+            em_metodo,
         }
     }
 
@@ -425,23 +427,45 @@ impl<'a> BytecodeGenerator<'a> {
     // ADICIONE ESTA NOVA FUNÇÃO:
     fn generate_declaracao(&mut self, declaracao: &ast::Declaracao) {
         match declaracao {
-            // ✅ CORREÇÃO PRINCIPAL: Reconhece e processa a declaração de classe
+            // ✅ Reconhece e processa a declaração de classe
             ast::Declaracao::DeclaracaoClasse(classe_def) => {
-                // Coleta os nomes de todas as propriedades e campos
+                // ------------- 1. coleta as propriedades (campos + props) -------------
                 let propriedades: Vec<String> = classe_def
                     .propriedades
                     .iter()
                     .map(|p| p.nome.clone())
                     .chain(classe_def.campos.iter().map(|c| c.nome.clone()))
                     .collect();
-
                 let props_str = propriedades.join(" ");
 
-                // Emite a instrução DEFINE_CLASS com o nome da classe e suas propriedades
+                // ------------- 2. DEFINE_CLASS vem PRIMEIRO ---------------------------
                 self.bytecode_instructions
                     .push(format!("DEFINE_CLASS {} {}", classe_def.nome, props_str));
 
-                // Futuramente, aqui você pode gerar o bytecode para os métodos da classe
+                // ------------- 3. gera cada método como bloco independente ------------
+                for metodo in &classe_def.metodos {
+                    // a) AST temporário que vive até o fim do loop
+                    let sub_programa = ast::Programa {
+                        namespaces: vec![],
+                        declaracoes: vec![ast::Declaracao::Comando(ast::Comando::Bloco(
+                            metodo.corpo.clone(),
+                        ))],
+                    };
+
+                    // b) gera bytecode do corpo do método
+                    let mut sub = BytecodeGenerator::new(&sub_programa, true);
+                    let mut corpo = sub.generate(); // inclui HALT
+                    corpo.pop(); // remove HALT final
+
+                    // c) cabeçalho + corpo
+                    self.bytecode_instructions.push(format!(
+                        "DEFINE_METHOD {} {} {}",
+                        classe_def.nome,
+                        metodo.nome,
+                        corpo.len()
+                    ));
+                    self.bytecode_instructions.extend(corpo);
+                }
             }
 
             // Mantém o comportamento para comandos
@@ -630,12 +654,20 @@ impl<'a> BytecodeGenerator<'a> {
                 .push(format!("LOAD_CONST_INT {}", n)),
             ast::Expressao::Booleano(b) => self
                 .bytecode_instructions
-                .push(format!("LOAD_CONST_BOOL {}", b)), // Adicionado
-            ast::Expressao::Identificador(nome) => self
-                .bytecode_instructions
-                .push(format!("LOAD_VAR {}", nome)),
+                .push(format!("LOAD_CONST_BOOL {}", b)),
+            ast::Expressao::Identificador(nome) => {
+                if self.em_metodo {
+                    // dentro de método ⇒ equivalente a “este.<nome>”
+                    self.bytecode_instructions.push("LOAD_VAR este".to_string());
+                    self.bytecode_instructions
+                        .push(format!("GET_PROPERTY {}", nome));
+                } else {
+                    self.bytecode_instructions
+                        .push(format!("LOAD_VAR {}", nome));
+                }
+            }
 
-            // ✅ ADICIONE ESTE BLOCO PARA TRATAR A CRIAÇÃO DE OBJETOS
+            // Expressão para criar um novo objeto
             ast::Expressao::NovoObjeto(classe_nome, argumentos) => {
                 // Primeiro, gera o bytecode para cada argumento, colocando-os na pilha
                 for arg in argumentos {
@@ -717,6 +749,24 @@ impl<'a> BytecodeGenerator<'a> {
                 }
             }
 
+            ast::Expressao::StringInterpolada(partes) => {
+                // Empilha cada pedaço (texto ou expressão)
+                for parte in partes {
+                    match parte {
+                        ast::PartStringInterpolada::Texto(s) => {
+                            self.bytecode_instructions
+                                .push(format!("LOAD_CONST_STR \"{}\"", s));
+                        }
+                        ast::PartStringInterpolada::Expressao(e) => {
+                            self.generate_expressao(e);
+                        }
+                    }
+                }
+                // Concatena tudo; resultado fica no topo da pilha
+                self.bytecode_instructions
+                    .push(format!("CONCAT {}", partes.len()));
+            }
+
             // Para outras expressões não implementadas, remova a linha de comentário e implemente se necessário
             _ => { /* Fazer nada ou adicionar tratamento para outras expressões */ }
         }
@@ -783,7 +833,7 @@ impl GeradorCodigo {
     }
 
     pub fn gerar_bytecode(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
-        let mut generator = BytecodeGenerator::new(programa);
+        let mut generator = BytecodeGenerator::new(programa, false);
         let bytecode = generator.generate();
         fs::write(format!("{}.pbc", nome_base), bytecode.join("\n")).map_err(|e| e.to_string())
     }

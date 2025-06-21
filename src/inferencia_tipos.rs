@@ -89,7 +89,7 @@ impl InferenciaTipos {
                         // Métodos especiais genéricos
                         match metodo.as_str() {
                             "apresentar" => Ok(Tipo::Vazio),
-                            "toString" => Ok(Tipo::Texto),
+                            "paraTexto" => Ok(Tipo::Texto),
                             _ => Ok(Tipo::Vazio), // Fallback para métodos desconhecidos
                         }
                     }
@@ -177,7 +177,7 @@ impl InferenciaTipos {
         // Métodos especiais
         match metodo {
             "apresentar" => Ok(Tipo::Vazio),
-            "toString" => Ok(Tipo::Texto),
+            "paraTexto" => Ok(Tipo::Texto),
             "clone" => Ok(Tipo::Classe(classe.to_string())),
             _ => Ok(Tipo::Vazio), // Fallback
         }
@@ -341,7 +341,7 @@ impl InferenciaTipos {
                     .map(|p| self.tipo_para_string(p))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("funcao({}) -> {}", params_str, self.tipo_para_string(ret))
+                format!("função({}) -> {}", params_str, self.tipo_para_string(ret))
             }
             Tipo::Generico(nome) => format!("generico<{}>", nome),
             Tipo::Opcional(tipo_interno) => {
