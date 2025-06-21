@@ -1,0 +1,25 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debugar Compilador (compilador-portugues)",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=compilador-portugues",
+                    "--package=compilador-portugues"
+                ],
+                "filter": {
+                    "name": "compilador-portugues",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "./função.pr"
+            ],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

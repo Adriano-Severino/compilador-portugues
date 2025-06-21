@@ -1,0 +1,19 @@
+classe Animal {
+    publico texto nome;
+    
+    publico redefinível vazio som() {
+        imprima("Animal faz som");
+    }
+}
+
+classe Cachorro : Animal {
+    publico sobrescreve vazio som() {
+        imprima("Au au!");
+    }
+}
+
+função principal() {
+    var dog = novo Cachorro();
+    dog.nome = "Rex";
+    dog.som();
+}

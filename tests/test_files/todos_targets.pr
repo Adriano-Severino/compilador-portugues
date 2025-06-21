@@ -1,0 +1,6 @@
+
+publico classe Teste {
+    publico vazio Main() {
+        imprima("Teste de todos os targets");
+    }
+}

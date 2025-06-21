@@ -1,0 +1,5 @@
+publico classe Principal {
+    publico vazio Main() {
+        imprima("Hello, World!");
+    }
+}

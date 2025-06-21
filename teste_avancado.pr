@@ -1,0 +1,45 @@
+espaco ConsoleApp {
+    publico classe Animal {
+        publico texto Nome;
+        
+        publico Animal(texto nome) {
+            este.Nome = nome;
+        }
+        
+        publico redefinível vazio som() {
+            imprima(este.Nome + " faz um som");
+        }
+    }
+    
+    publico classe Cachorro : Animal {
+        publico Cachorro(texto nome) : base(nome) {
+        }
+        
+        publico sobrescreve vazio som() {
+            imprima(este.Nome + " faz: Au au!");
+        }
+    }
+    
+    publico classe Gato : Animal {
+        publico Gato(texto nome) : base(nome) {
+        }
+        
+        publico sobrescreve vazio som() {
+            imprima(este.Nome + " faz: Miau!");
+        }
+    }
+    
+    publico classe Principal {
+        publico estatico vazio Main() {
+            imprima("=== Teste de Herança e Polimorfismo ===");
+            
+            var rex = novo Cachorro("Rex");
+            var mimi = novo Gato("Mimi");
+            
+            rex.som();
+            mimi.som();
+            
+            imprima("Teste concluído com sucesso!");
+        }
+    }
+}

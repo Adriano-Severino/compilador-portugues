@@ -6,10 +6,15 @@ if [ -z "$PROGRAMA" ]; then
     exit 1
 fi
 
+if [ ! -f "$PROGRAMA.pr" ]; then
+    echo "Erro: Arquivo $PROGRAMA.pr não encontrado"
+    exit 1
+fi
+
 echo "Compilando $PROGRAMA.pr..."
 
 # Usar o compilador já construído
-./target/release/meu_compilador $PROGRAMA.pr
+./target/release/compilador-portugues $PROGRAMA.pr
 
 # Gerar executável diretamente
 clang -O3 $PROGRAMA.ll -o $PROGRAMA

@@ -1,0 +1,37 @@
+publico classe Animal {
+    publico texto Nome;
+    publico inteiro Idade;
+    
+    publico construtor(texto nome, inteiro idade) {
+        este.Nome = nome;
+        este.Idade = idade;
+    }
+    
+    publico redefinível vazio emitirSom() {
+        imprima($"{este.Nome} faz um som genérico");
+    }
+}
+
+publico classe Cachorro : Animal {
+    publico texto Raca;
+    
+    publico construtor(texto nome, inteiro idade, texto raca) : base(nome, idade) {
+        este.Raca = raca;
+    }
+    
+    publico sobrescreve vazio emitirSom() {
+        imprima($"{este.Nome} late: Au au!");
+    }
+}
+
+publico vazio Principal() {
+    imprima("=== TESTE DE HERANÇA ===");
+    
+    var animal = novo Animal("Rex", 5);
+    var cachorro = novo Cachorro("Max", 3, "Golden");
+    
+    animal.emitirSom();
+    cachorro.emitirSom();
+    
+    imprima("=== TESTE CONCLUÍDO ===");
+}

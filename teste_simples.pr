@@ -1,0 +1,29 @@
+espaco Principal {
+    classe Pessoa {
+        publico Nome: texto;
+        publico Idade: inteiro;
+        
+        publico construtor(nome: texto, idade: inteiro) {
+            este.Nome = nome;
+            este.Idade = idade;
+        }
+        
+        publico apresentar() {
+            imprima("Olá! Meu nome é " + este.Nome);
+            imprima("Eu tenho " + este.Idade + " anos");
+        }
+        
+        publico aniversario() {
+            este.Idade = este.Idade + 1;
+            imprima("Feliz aniversário! Agora tenho " + este.Idade + " anos");
+        }
+    }
+    
+    classe Principal {
+        publico Main() {
+            var joao = novo Pessoa("João Silva", 25);
+            joao.apresentar();
+            joao.aniversario();
+        }
+    }
+}
