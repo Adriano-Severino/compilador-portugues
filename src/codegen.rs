@@ -13,6 +13,7 @@ use std::fs;
 //  Isso garante que a lógica de cada alvo seja independente.
 //
 
+// --- IMPLEMENTAÇÃO DO GERADOR LLVM (Existente e Funcional) ---
 /// O gerador de código para o alvo LLVM IR.
 struct LlvmGenerator<'a> {
     programa: &'a ast::Programa,
@@ -23,18 +24,6 @@ struct LlvmGenerator<'a> {
     variables: HashMap<String, (String, ast::Tipo)>,
 }
 
-/// O gerador de código para o alvo CIL (Common Intermediate Language) do .NET.
-struct CilGenerator<'a> {
-    programa: &'a ast::Programa,
-    assembly_name: String,
-}
-
-/// O gerador de código para o alvo Console Application em C#.
-struct ConsoleGenerator<'a> {
-    programa: &'a ast::Programa,
-}
-
-// --- IMPLEMENTAÇÃO DO GERADOR LLVM (Existente e Funcional) ---
 impl<'a> LlvmGenerator<'a> {
     fn new(programa: &'a ast::Programa) -> Self {
         Self {
@@ -62,14 +51,18 @@ impl<'a> LlvmGenerator<'a> {
         self.main_function_body.push_str("}\n");
         format!("{}\n{}", self.header, self.main_function_body)
     }
-    
+
     fn prepare_header(&mut self) {
-        self.header.push_str("target triple = \"x86_64-pc-linux-gnu\"\n\n");
+        self.header
+            .push_str("target triple = \"x86_64-pc-linux-gnu\"\n\n");
         self.header.push_str("declare i32 @printf(i8*, ...)\n");
         self.header.push_str("declare i8* @malloc(i64)\n");
-        self.header.push_str("declare i32 @sprintf(i8*, i8*, ...)\n");
+        self.header
+            .push_str("declare i32 @sprintf(i8*, i8*, ...)\n");
         self.header.push_str("declare i64 @strlen(i8*)\n\n");
-        self.header.push_str("@.println_fmt = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\", align 1\n");
+        self.header.push_str(
+            "@.println_fmt = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\", align 1\n",
+        );
     }
 
     fn generate_comando(&mut self, comando: &ast::Comando) {
@@ -93,17 +86,21 @@ impl<'a> LlvmGenerator<'a> {
             _ => {}
         }
     }
-    
+
     fn declare_and_store_variable(&mut self, name: &str, var_type: ast::Tipo, value_reg: String) {
         let ptr_reg = format!("%var.{}", name);
         match var_type {
             ast::Tipo::Inteiro => {
-                self.main_function_body.push_str(&format!("  {} = alloca i32, align 4\n", ptr_reg));
-                self.main_function_body.push_str(&format!("  store i32 {}, i32* {}\n", value_reg, ptr_reg));
+                self.main_function_body
+                    .push_str(&format!("  {} = alloca i32, align 4\n", ptr_reg));
+                self.main_function_body
+                    .push_str(&format!("  store i32 {}, i32* {}\n", value_reg, ptr_reg));
             }
             ast::Tipo::Texto => {
-                self.main_function_body.push_str(&format!("  {} = alloca i8*, align 8\n", ptr_reg));
-                self.main_function_body.push_str(&format!("  store i8* {}, i8** {}\n", value_reg, ptr_reg));
+                self.main_function_body
+                    .push_str(&format!("  {} = alloca i8*, align 8\n", ptr_reg));
+                self.main_function_body
+                    .push_str(&format!("  store i8* {}, i8** {}\n", value_reg, ptr_reg));
             }
             _ => panic!("Tipo de variável não suportado: {:?}", var_type),
         }
@@ -133,15 +130,17 @@ impl<'a> LlvmGenerator<'a> {
         } else {
             panic!("Variável não declarada: {}", name);
         };
-        
+
         let loaded_reg = self.get_unique_temp_name();
-        
+
         match var_type {
             ast::Tipo::Inteiro => {
-                self.main_function_body.push_str(&format!("  {} = load i32, i32* {}\n", loaded_reg, &ptr_reg));
+                self.main_function_body
+                    .push_str(&format!("  {} = load i32, i32* {}\n", loaded_reg, &ptr_reg));
             }
             ast::Tipo::Texto => {
-                self.main_function_body.push_str(&format!("  {} = load i8*, i8** {}\n", loaded_reg, &ptr_reg));
+                self.main_function_body
+                    .push_str(&format!("  {} = load i8*, i8** {}\n", loaded_reg, &ptr_reg));
             }
             _ => {}
         }
@@ -159,9 +158,13 @@ impl<'a> LlvmGenerator<'a> {
     fn convert_int_to_string(&mut self, int_reg: String) -> String {
         let format_specifier = self.create_global_string("%d");
         let buffer = self.get_unique_temp_name();
-        self.main_function_body.push_str(&format!("  {} = alloca [21 x i8], align 1\n", buffer));
+        self.main_function_body
+            .push_str(&format!("  {} = alloca [21 x i8], align 1\n", buffer));
         let buffer_ptr = self.get_unique_temp_name();
-        self.main_function_body.push_str(&format!("  {} = getelementptr inbounds [21 x i8], [21 x i8]* {}, i32 0, i32 0\n", buffer_ptr, buffer));
+        self.main_function_body.push_str(&format!(
+            "  {} = getelementptr inbounds [21 x i8], [21 x i8]* {}, i32 0, i32 0\n",
+            buffer_ptr, buffer
+        ));
         self.main_function_body.push_str(&format!(
             "  call i32 (i8*, i8*, ...) @sprintf(i8* {}, i8* {}, i32 {})\n",
             buffer_ptr, format_specifier, int_reg
@@ -172,15 +175,30 @@ impl<'a> LlvmGenerator<'a> {
     fn concatenate_strings(&mut self, str1_reg: String, str2_reg: String) -> String {
         let format_specifier = self.create_global_string("%s%s");
         let len1_reg = self.get_unique_temp_name();
-        self.main_function_body.push_str(&format!("  {} = call i64 @strlen(i8* {})\n", len1_reg, &str1_reg));
+        self.main_function_body.push_str(&format!(
+            "  {} = call i64 @strlen(i8* {})\n",
+            len1_reg, &str1_reg
+        ));
         let len2_reg = self.get_unique_temp_name();
-        self.main_function_body.push_str(&format!("  {} = call i64 @strlen(i8* {})\n", len2_reg, &str2_reg));
+        self.main_function_body.push_str(&format!(
+            "  {} = call i64 @strlen(i8* {})\n",
+            len2_reg, &str2_reg
+        ));
         let total_len_reg = self.get_unique_temp_name();
-        self.main_function_body.push_str(&format!("  {} = add i64 {}, {}\n", total_len_reg, len1_reg, len2_reg));
+        self.main_function_body.push_str(&format!(
+            "  {} = add i64 {}, {}\n",
+            total_len_reg, len1_reg, len2_reg
+        ));
         let alloc_size_reg = self.get_unique_temp_name();
-        self.main_function_body.push_str(&format!("  {} = add i64 {}, 1\n", alloc_size_reg, total_len_reg));
+        self.main_function_body.push_str(&format!(
+            "  {} = add i64 {}, 1\n",
+            alloc_size_reg, total_len_reg
+        ));
         let buffer_reg = self.get_unique_temp_name();
-        self.main_function_body.push_str(&format!("  {} = call i8* @malloc(i64 {})\n", buffer_reg, alloc_size_reg));
+        self.main_function_body.push_str(&format!(
+            "  {} = call i8* @malloc(i64 {})\n",
+            buffer_reg, alloc_size_reg
+        ));
         self.main_function_body.push_str(&format!(
             "  call i32 (i8*, i8*, ...) @sprintf(i8* {}, i8* {}, i8* {}, i8* {})\n",
             buffer_reg, format_specifier, &str1_reg, &str2_reg
@@ -213,9 +231,18 @@ impl<'a> LlvmGenerator<'a> {
 }
 
 // --- IMPLEMENTAÇÃO DO GERADOR CIL ---
+/// O gerador de código para o alvo CIL (Common Intermediate Language) do .NET.
+struct CilGenerator<'a> {
+    programa: &'a ast::Programa,
+    assembly_name: String,
+}
+
 impl<'a> CilGenerator<'a> {
     fn new(programa: &'a ast::Programa, assembly_name: String) -> Self {
-        Self { programa, assembly_name }
+        Self {
+            programa,
+            assembly_name,
+        }
     }
 
     fn generate(&self) -> String {
@@ -246,7 +273,7 @@ impl<'a> CilGenerator<'a> {
             _ => format!("    // Comando {:?} não implementado para CIL\n", comando),
         }
     }
-    
+
     fn generate_expressao(&self, expr: &ast::Expressao) -> String {
         let mut code = String::new();
         match expr {
@@ -269,11 +296,14 @@ impl<'a> CilGenerator<'a> {
                 }
                 code.push_str("    call void [mscorlib]System.Console::WriteLine()\n");
             }
-            _ => code.push_str(&format!("    // Expressão {:?} não implementada para CIL\n", expr)),
+            _ => code.push_str(&format!(
+                "    // Expressão {:?} não implementada para CIL\n",
+                expr
+            )),
         }
         code
     }
-    
+
     fn flatten_soma(&self, expr: &'a ast::Expressao) -> Vec<&'a ast::Expressao> {
         let mut parts = Vec::new();
         let mut stack = vec![expr];
@@ -290,6 +320,11 @@ impl<'a> CilGenerator<'a> {
 }
 
 // --- IMPLEMENTAÇÃO DO GERADOR DE CONSOLE C# ---
+/// O gerador de código para o alvo Console Application em C#.
+struct ConsoleGenerator<'a> {
+    programa: &'a ast::Programa,
+}
+
 impl<'a> ConsoleGenerator<'a> {
     fn new(programa: &'a ast::Programa) -> Self {
         Self { programa }
@@ -309,15 +344,33 @@ impl<'a> ConsoleGenerator<'a> {
         let prefix = " ".repeat(indent);
         match comando {
             ast::Comando::DeclaracaoVariavel(tipo, nome, Some(expr)) => {
-                format!("{}{} {} = {};\n", prefix, self.map_type(tipo), nome, self.generate_expressao(expr))
+                format!(
+                    "{}{} {} = {};\n",
+                    prefix,
+                    self.map_type(tipo),
+                    nome,
+                    self.generate_expressao(expr)
+                )
             }
             ast::Comando::DeclaracaoVar(nome, expr) => {
-                format!("{}var {} = {};\n", prefix, nome, self.generate_expressao(expr))
+                format!(
+                    "{}var {} = {};\n",
+                    prefix,
+                    nome,
+                    self.generate_expressao(expr)
+                )
             }
             ast::Comando::Imprima(expr) => {
-                format!("{}Console.WriteLine({});\n", prefix, self.generate_expressao(expr))
+                format!(
+                    "{}Console.WriteLine({});\n",
+                    prefix,
+                    self.generate_expressao(expr)
+                )
             }
-            _ => format!("{}// Comando {:?} não implementado para Console\n", prefix, comando),
+            _ => format!(
+                "{}// Comando {:?} não implementado para Console\n",
+                prefix, comando
+            ),
         }
     }
 
@@ -327,12 +380,16 @@ impl<'a> ConsoleGenerator<'a> {
             ast::Expressao::Inteiro(n) => n.to_string(),
             ast::Expressao::Identificador(name) => name.clone(),
             ast::Expressao::Aritmetica(ast::OperadorAritmetico::Soma, esq, dir) => {
-                format!("{} + {}", self.generate_expressao(esq), self.generate_expressao(dir))
+                format!(
+                    "{} + {}",
+                    self.generate_expressao(esq),
+                    self.generate_expressao(dir)
+                )
             }
             _ => format!("\"ERRO: Expressao {:?} nao suportada\"", expr),
         }
     }
-    
+
     fn map_type(&self, tipo: &ast::Tipo) -> &str {
         match tipo {
             ast::Tipo::Inteiro => "int",
@@ -358,46 +415,86 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn is_string_expr(expr: &ast::Expressao) -> bool {
-         use ast::{Expressao as E, OperadorAritmetico as OA};
-          match expr {
-             E::Texto(_) | E::StringInterpolada(_) => true,
-             E::Aritmetica(OA::Soma, l, r) => Self::is_string_expr(l) || Self::is_string_expr(r),
-             _ => false,
-            }
+        use ast::{Expressao as E, OperadorAritmetico as OA};
+        match expr {
+            E::Texto(_) | E::StringInterpolada(_) => true,
+            E::Aritmetica(OA::Soma, l, r) => Self::is_string_expr(l) || Self::is_string_expr(r),
+            _ => false,
         }
+    }
+    // ADICIONE ESTA NOVA FUNÇÃO:
+    fn generate_declaracao(&mut self, declaracao: &ast::Declaracao) {
+        match declaracao {
+            // ✅ CORREÇÃO PRINCIPAL: Reconhece e processa a declaração de classe
+            ast::Declaracao::DeclaracaoClasse(classe_def) => {
+                // Coleta os nomes de todas as propriedades e campos
+                let propriedades: Vec<String> = classe_def
+                    .propriedades
+                    .iter()
+                    .map(|p| p.nome.clone())
+                    .chain(classe_def.campos.iter().map(|c| c.nome.clone()))
+                    .collect();
 
-    // Altera a assinatura para `&mut self`
-    fn generate(&mut self) -> Vec<String> {
-        for declaracao in &self.programa.declaracoes {
-            if let ast::Declaracao::Comando(cmd) = declaracao {
-                self.generate_comando(cmd); // Chama o método mutável
+                let props_str = propriedades.join(" ");
+
+                // Emite a instrução DEFINE_CLASS com o nome da classe e suas propriedades
+                self.bytecode_instructions
+                    .push(format!("DEFINE_CLASS {} {}", classe_def.nome, props_str));
+
+                // Futuramente, aqui você pode gerar o bytecode para os métodos da classe
             }
+
+            // Mantém o comportamento para comandos
+            ast::Declaracao::Comando(cmd) => {
+                self.generate_comando(cmd);
+            }
+
+            // Ignora outras declarações por enquanto
+            _ => { /* Não faz nada para funções, módulos, etc. ainda */ }
         }
-        self.bytecode_instructions.push("HALT".to_string());
-        // Move o conteúdo do vetor e limpa o campo, devolvendo o bytecode completo
-        std::mem::take(&mut self.bytecode_instructions)
     }
 
+    fn generate(&mut self) -> Vec<String> {
+        // Itera sobre as declarações no nível raiz do programa
+        for declaracao in &self.programa.declaracoes {
+            self.generate_declaracao(declaracao);
+        }
+
+        // ✅ CORREÇÃO: Adicione este loop para iterar sobre os namespaces
+        for namespace in &self.programa.namespaces {
+            for declaracao in &namespace.declaracoes {
+                self.generate_declaracao(declaracao);
+            }
+        }
+
+        self.bytecode_instructions.push("HALT".to_string());
+        std::mem::take(&mut self.bytecode_instructions)
+    }
     // Altera a assinatura para `&mut self` e remove o retorno Vec<String>
     fn generate_comando(&mut self, comando: &ast::Comando) {
         match comando {
             ast::Comando::DeclaracaoVar(nome, expr) => {
                 self.generate_expressao(expr); // Gera expressão e adiciona à lista interna
-                self.bytecode_instructions.push(format!("STORE_VAR {}", nome));
+                self.bytecode_instructions
+                    .push(format!("STORE_VAR {}", nome));
             }
             ast::Comando::DeclaracaoVariavel(_, nome, Some(expr)) => {
                 self.generate_expressao(expr);
-                self.bytecode_instructions.push(format!("STORE_VAR {}", nome));
+                self.bytecode_instructions
+                    .push(format!("STORE_VAR {}", nome));
             }
-            ast::Comando::Atribuicao(nome, expr) => { // Adicionado: Atribuição
+            ast::Comando::Atribuicao(nome, expr) => {
+                // Adicionado: Atribuição
                 self.generate_expressao(expr);
-                self.bytecode_instructions.push(format!("STORE_VAR {}", nome));
+                self.bytecode_instructions
+                    .push(format!("STORE_VAR {}", nome));
             }
             ast::Comando::Imprima(expr) => {
                 self.generate_expressao(expr);
                 self.bytecode_instructions.push("PRINT".to_string());
             }
-            ast::Comando::Bloco(comandos) => { // Adicionado: Bloco de comandos
+            ast::Comando::Bloco(comandos) => {
+                // Adicionado: Bloco de comandos
                 for cmd in comandos {
                     self.generate_comando(cmd);
                 }
@@ -409,14 +506,16 @@ impl<'a> BytecodeGenerator<'a> {
 
                 self.generate_expressao(condicao); // Gera código para a condição
                 let jump_if_false_placeholder_ip = self.bytecode_instructions.len();
-                self.bytecode_instructions.push("JUMP_IF_FALSE 0".to_string()); // Placeholder para o salto para o final do loop
+                self.bytecode_instructions
+                    .push("JUMP_IF_FALSE 0".to_string()); // Placeholder para o salto para o final do loop
 
                 self.generate_comando(corpo); // Gera código para o corpo do loop
 
-                self.bytecode_instructions.push(format!("JUMP {}", loop_start_ip)); // Salta de volta para o início da condição
+                self.bytecode_instructions
+                    .push(format!("JUMP {}", loop_start_ip)); // Salta de volta para o início da condição
 
                 let loop_end_ip = self.bytecode_instructions.len(); // Ponto final do loop
-                // Patching: Atualiza a instrução JUMP_IF_FALSE com o endereço real
+                                                                    // Patching: Atualiza a instrução JUMP_IF_FALSE com o endereço real
                 self.bytecode_instructions[jump_if_false_placeholder_ip] =
                     format!("JUMP_IF_FALSE {}", loop_end_ip);
             }
@@ -426,7 +525,8 @@ impl<'a> BytecodeGenerator<'a> {
                 self.generate_expressao(condicao); // Gera código para a condição
 
                 let jump_if_false_placeholder_ip = self.bytecode_instructions.len();
-                self.bytecode_instructions.push("JUMP_IF_FALSE 0".to_string()); // Placeholder para o salto
+                self.bytecode_instructions
+                    .push("JUMP_IF_FALSE 0".to_string()); // Placeholder para o salto
 
                 self.generate_comando(bloco_if); // Gera código para o bloco 'se'
 
@@ -453,6 +553,67 @@ impl<'a> BytecodeGenerator<'a> {
                 }
             }
 
+            ast::Comando::CriarObjeto(var_nome, classe, argumentos) => {
+                // Gerar argumentos
+                for arg in argumentos {
+                    self.generate_expressao(arg);
+                }
+
+                // Criar objeto
+                self.bytecode_instructions.push(format!(
+                    "NEW_OBJECT {} {}",
+                    classe,
+                    argumentos.len()
+                ));
+                self.bytecode_instructions
+                    .push(format!("STORE_VAR {}", var_nome));
+            }
+
+            ast::Comando::AtribuirPropriedade(objeto_nome, prop_nome, expr) => {
+                // 1. Gera o valor a ser atribuído e o coloca na pilha.
+                self.generate_expressao(expr);
+                // 2. Carrega a instância do objeto na pilha.
+                self.bytecode_instructions
+                    .push(format!("LOAD_VAR {}", objeto_nome));
+                // 3. Emite a nova instrução para definir a propriedade.
+                self.bytecode_instructions
+                    .push(format!("SET_PROPERTY {}", prop_nome));
+
+                self.bytecode_instructions
+                    .push(format!("STORE_VAR {}", objeto_nome));
+            }
+
+            ast::Comando::ChamarMetodo(objeto_nome, metodo, argumentos) => {
+                self.bytecode_instructions
+                    .push(format!("LOAD_VAR {}", objeto_nome));
+
+                for arg in argumentos {
+                    self.generate_expressao(arg);
+                }
+
+                self.bytecode_instructions.push(format!(
+                    "CALL_METHOD {} {}",
+                    metodo,
+                    argumentos.len()
+                ));
+                self.bytecode_instructions.push("POP".to_string()); // Descartar resultado se não usado
+            }
+
+            // dentro de generate_comando
+            ast::Comando::AtribuirPropriedade(objeto_nome, prop_nome, expr) => {
+                // 1. empilha o valor
+                self.generate_expressao(expr);
+                // 2. empilha o objeto
+                self.bytecode_instructions
+                    .push(format!("LOAD_VAR {}", objeto_nome));
+                // 3. altera a propriedade
+                self.bytecode_instructions
+                    .push(format!("SET_PROPERTY {}", prop_nome));
+                // 4. grava o objeto atualizado na variável
+                self.bytecode_instructions
+                    .push(format!("STORE_VAR {}", objeto_nome)); //  <<< ADICIONE ESTA LINHA
+            }
+
             // Para outros comandos não implementados, remova a linha de comentário e implemente se necessário
             _ => { /* Fazer nada ou adicionar tratamento para outros comandos */ }
         }
@@ -461,10 +622,32 @@ impl<'a> BytecodeGenerator<'a> {
     // Altera a assinatura para `&mut self` e remove o retorno Vec<String>
     fn generate_expressao(&mut self, expr: &ast::Expressao) {
         match expr {
-            ast::Expressao::Texto(s) => self.bytecode_instructions.push(format!("LOAD_CONST_STR \"{}\"", s)),
-            ast::Expressao::Inteiro(n) => self.bytecode_instructions.push(format!("LOAD_CONST_INT {}", n)),
-            ast::Expressao::Booleano(b) => self.bytecode_instructions.push(format!("LOAD_CONST_BOOL {}", b)), // Adicionado
-            ast::Expressao::Identificador(nome) => self.bytecode_instructions.push(format!("LOAD_VAR {}", nome)),
+            ast::Expressao::Texto(s) => self
+                .bytecode_instructions
+                .push(format!("LOAD_CONST_STR \"{}\"", s)),
+            ast::Expressao::Inteiro(n) => self
+                .bytecode_instructions
+                .push(format!("LOAD_CONST_INT {}", n)),
+            ast::Expressao::Booleano(b) => self
+                .bytecode_instructions
+                .push(format!("LOAD_CONST_BOOL {}", b)), // Adicionado
+            ast::Expressao::Identificador(nome) => self
+                .bytecode_instructions
+                .push(format!("LOAD_VAR {}", nome)),
+
+            // ✅ ADICIONE ESTE BLOCO PARA TRATAR A CRIAÇÃO DE OBJETOS
+            ast::Expressao::NovoObjeto(classe_nome, argumentos) => {
+                // Primeiro, gera o bytecode para cada argumento, colocando-os na pilha
+                for arg in argumentos {
+                    self.generate_expressao(arg);
+                }
+                // Em seguida, emite a instrução para criar um novo objeto
+                self.bytecode_instructions.push(format!(
+                    "NEW_OBJECT {} {}",
+                    classe_nome,
+                    argumentos.len()
+                ));
+            }
 
             // Modificado: Operadores Aritméticos - Distinguir concatenação de soma numérica
             ast::Expressao::Aritmetica(op, esq, dir) => {
@@ -473,18 +656,25 @@ impl<'a> BytecodeGenerator<'a> {
                 match op {
                     ast::OperadorAritmetico::Soma => {
                         // Idealmente, haveria verificação de tipo aqui, ou um operador polimórfico.
-                       
-                        
+
                         if Self::is_string_expr(esq) || Self::is_string_expr(dir) {
                             self.bytecode_instructions.push("CONCAT 2".to_string());
                         } else {
                             self.bytecode_instructions.push("ADD".to_string());
                         }
                     }
-                    ast::OperadorAritmetico::Subtracao => self.bytecode_instructions.push("SUB".to_string()),
-                    ast::OperadorAritmetico::Multiplicacao => self.bytecode_instructions.push("MUL".to_string()),
-                    ast::OperadorAritmetico::Divisao => self.bytecode_instructions.push("DIV".to_string()),
-                    ast::OperadorAritmetico::Modulo => self.bytecode_instructions.push("MOD".to_string()),
+                    ast::OperadorAritmetico::Subtracao => {
+                        self.bytecode_instructions.push("SUB".to_string())
+                    }
+                    ast::OperadorAritmetico::Multiplicacao => {
+                        self.bytecode_instructions.push("MUL".to_string())
+                    }
+                    ast::OperadorAritmetico::Divisao => {
+                        self.bytecode_instructions.push("DIV".to_string())
+                    }
+                    ast::OperadorAritmetico::Modulo => {
+                        self.bytecode_instructions.push("MOD".to_string())
+                    }
                 }
             }
 
@@ -493,12 +683,24 @@ impl<'a> BytecodeGenerator<'a> {
                 self.generate_expressao(esq);
                 self.generate_expressao(dir);
                 match op {
-                    ast::OperadorComparacao::Igual => self.bytecode_instructions.push("COMPARE_EQ".to_string()),
-                    ast::OperadorComparacao::Diferente => self.bytecode_instructions.push("COMPARE_NE".to_string()),
-                    ast::OperadorComparacao::Menor => self.bytecode_instructions.push("COMPARE_LT".to_string()),
-                    ast::OperadorComparacao::MaiorQue => self.bytecode_instructions.push("COMPARE_GT".to_string()),
-                    ast::OperadorComparacao::MenorIgual => self.bytecode_instructions.push("COMPARE_LE".to_string()),
-                    ast::OperadorComparacao::MaiorIgual => self.bytecode_instructions.push("COMPARE_GE".to_string()),
+                    ast::OperadorComparacao::Igual => {
+                        self.bytecode_instructions.push("COMPARE_EQ".to_string())
+                    }
+                    ast::OperadorComparacao::Diferente => {
+                        self.bytecode_instructions.push("COMPARE_NE".to_string())
+                    }
+                    ast::OperadorComparacao::Menor => {
+                        self.bytecode_instructions.push("COMPARE_LT".to_string())
+                    }
+                    ast::OperadorComparacao::MaiorQue => {
+                        self.bytecode_instructions.push("COMPARE_GT".to_string())
+                    }
+                    ast::OperadorComparacao::MenorIgual => {
+                        self.bytecode_instructions.push("COMPARE_LE".to_string())
+                    }
+                    ast::OperadorComparacao::MaiorIgual => {
+                        self.bytecode_instructions.push("COMPARE_GE".to_string())
+                    }
                 }
             }
 
@@ -506,8 +708,12 @@ impl<'a> BytecodeGenerator<'a> {
             ast::Expressao::Unario(op, expr) => {
                 self.generate_expressao(expr);
                 match op {
-                    ast::OperadorUnario::NegacaoLogica => self.bytecode_instructions.push("NEGATE_BOOL".to_string()),
-                    ast::OperadorUnario::NegacaoNumerica => self.bytecode_instructions.push("NEGATE_INT".to_string()),
+                    ast::OperadorUnario::NegacaoLogica => {
+                        self.bytecode_instructions.push("NEGATE_BOOL".to_string())
+                    }
+                    ast::OperadorUnario::NegacaoNumerica => {
+                        self.bytecode_instructions.push("NEGATE_INT".to_string())
+                    }
                 }
             }
 
@@ -557,7 +763,8 @@ impl GeradorCodigo {
   </PropertyGroup>
 </Project>"#
         );
-        fs::write(format!("{}/{}.csproj", dir_projeto, nome_base), csproj).map_err(|e| e.to_string())?;
+        fs::write(format!("{}/{}.csproj", dir_projeto, nome_base), csproj)
+            .map_err(|e| e.to_string())?;
 
         let program_cs = format!(
             r#"namespace {}
@@ -569,13 +776,15 @@ impl GeradorCodigo {
 {}
         }}
     }}
-}}"#, nome_base, main_body);
+}}"#,
+            nome_base, main_body
+        );
         fs::write(format!("{}/Program.cs", dir_projeto), program_cs).map_err(|e| e.to_string())
     }
 
-   pub fn gerar_bytecode(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
-    let mut generator = BytecodeGenerator::new(programa);
-    let bytecode = generator.generate();
+    pub fn gerar_bytecode(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
+        let mut generator = BytecodeGenerator::new(programa);
+        let bytecode = generator.generate();
         fs::write(format!("{}.pbc", nome_base), bytecode.join("\n")).map_err(|e| e.to_string())
     }
 }

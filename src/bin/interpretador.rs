@@ -14,6 +14,20 @@ enum Valor {
     Texto(String),
     Booleano(bool),
     Nulo,
+    Objeto {
+        classe: String,
+        propriedades: HashMap<String, Valor>,
+        metodos: HashMap<String, Vec<String>>,
+    },
+}
+
+// ✅ NOVO: Informações da classe
+#[derive(Clone, Debug)]
+struct ClasseInfo {
+    nome: String,
+    propriedades: Vec<String>,
+    metodos: HashMap<String, Vec<String>>, // nome -> bytecode
+    construtor: Option<Vec<String>>,       // bytecode do construtor
 }
 
 // Implementa como um `Valor` deve ser exibido para o usuário (usado no `PRINT`).
@@ -24,6 +38,19 @@ impl fmt::Display for Valor {
             Valor::Texto(s) => write!(f, "{}", s),
             Valor::Booleano(b) => write!(f, "{}", if *b { "verdadeiro" } else { "falso" }),
             Valor::Nulo => write!(f, "nulo"),
+
+            // ✅ NOVO: Display para objetos
+            Valor::Objeto {
+                classe,
+                propriedades,
+                ..
+            } => {
+                if let Some(nome) = propriedades.get("Nome") {
+                    write!(f, "{}", nome)
+                } else {
+                    write!(f, "Objeto<{}>", classe)
+                }
+            }
         }
     }
 }
@@ -38,6 +65,8 @@ struct VM {
     bytecode: Vec<String>,
     // Ponteiro da instrução atual (Instruction Pointer).
     ip: usize,
+    // ✅ NOVO: Registro de classes
+    classes: HashMap<String, ClasseInfo>,
 }
 
 impl VM {
@@ -48,13 +77,75 @@ impl VM {
             variaveis: HashMap::new(),
             bytecode,
             ip: 0,
+            classes: HashMap::new(), // ✅ NOVO
+        }
+    }
+
+    fn criar_objeto(&self, nome_classe: &str, argumentos: Vec<Valor>) -> Result<Valor, String> {
+        let classe = self
+            .classes
+            .get(nome_classe)
+            .ok_or_else(|| format!("Classe '{}' não encontrada", nome_classe))?;
+
+        let mut propriedades = HashMap::new();
+
+        // Inicializar propriedades com valores padrão
+        for (i, prop_nome) in classe.propriedades.iter().enumerate() {
+            let valor = argumentos.get(i).cloned().unwrap_or(Valor::Nulo);
+            propriedades.insert(prop_nome.clone(), valor);
+        }
+
+        Ok(Valor::Objeto {
+            classe: nome_classe.to_string(),
+            propriedades,
+            metodos: classe.metodos.clone(),
+        })
+    }
+
+    fn chamar_metodo(
+        &mut self,
+        objeto: Valor,
+        nome_metodo: &str,
+        _argumentos: Vec<Valor>,
+    ) -> Result<Valor, String> {
+        match objeto {
+            Valor::Objeto {
+                classe,
+                propriedades,
+                metodos,
+            } => {
+                match nome_metodo {
+                    // Métodos especiais integrados
+                    "apresentar" => {
+                        if let Some(nome) = propriedades.get("Nome") {
+                            println!("Olá, meu nome é {}", nome);
+                        } else {
+                            println!("Olá, sou um objeto da classe {}", classe);
+                        }
+                        Ok(Valor::Nulo)
+                    }
+                    "paraTexto" => {
+                        if let Some(nome) = propriedades.get("Nome") {
+                            Ok(nome.clone())
+                        } else {
+                            Ok(Valor::Texto(format!("Objeto<{}>", classe)))
+                        }
+                    }
+                    _ => {
+                        // Para métodos customizados, você pode executar bytecode do método
+                        // Por enquanto, retorna nulo para métodos não implementados
+                        Ok(Valor::Nulo)
+                    }
+                }
+            }
+            _ => Err("Tentativa de chamar método em não-objeto".to_string()),
         }
     }
 
     // O laço principal de execução da VM.
     fn run(&mut self) -> Result<(), String> {
         while self.ip < self.bytecode.len() {
-            let instrucao_str = &self.bytecode[self.ip];
+            let instrucao_str = self.bytecode[self.ip].clone();
             // Divide a instrução em partes (ex: "LOAD_CONST_INT", "42")
             let partes: Vec<&str> = instrucao_str.split_whitespace().collect();
             let op = partes.get(0).ok_or("Instrução vazia encontrada")?;
@@ -66,7 +157,7 @@ impl VM {
             }
 
             match *op {
-                 // ... (instruções LOAD_CONST_INT, LOAD_CONST_STR, LOAD_VAR, STORE_VAR, PRINT, CONCAT, HALT)
+                // ... (instruções LOAD_CONST_INT, LOAD_CONST_STR, LOAD_VAR, STORE_VAR, PRINT, CONCAT, HALT)
                 "LOAD_CONST_INT" => {
                     let valor = partes
                         .get(1)
@@ -78,7 +169,8 @@ impl VM {
                 "LOAD_CONST_STR" => {
                     // Junta as partes da string, removendo as aspas.
                     let valor = partes[1..].join(" ");
-                    self.pilha.push(Valor::Texto(valor.trim_matches('"').to_string()));
+                    self.pilha
+                        .push(Valor::Texto(valor.trim_matches('"').to_string()));
                 }
                 "LOAD_VAR" => {
                     let nome_var = partes.get(1).ok_or("LOAD_VAR requer um nome de variável")?;
@@ -90,7 +182,9 @@ impl VM {
                     self.pilha.push(valor);
                 }
                 "STORE_VAR" => {
-                    let nome_var = partes.get(1).ok_or("STORE_VAR requer um nome de variável")?;
+                    let nome_var = partes
+                        .get(1)
+                        .ok_or("STORE_VAR requer um nome de variável")?;
                     let valor = self.pilha.pop().ok_or("Pilha vazia em STORE_VAR")?;
                     self.variaveis.insert(nome_var.to_string(), valor);
                 }
@@ -108,7 +202,7 @@ impl VM {
                     if self.pilha.len() < num_operandos {
                         return Err(format!("Pilha insuficiente para CONCAT {}", num_operandos));
                     }
-                    
+
                     let mut resultado = String::new();
                     // Pega os operandos do topo da pilha.
                     let operandos = self.pilha.split_off(self.pilha.len() - num_operandos);
@@ -131,12 +225,13 @@ impl VM {
                     self.pilha.push(Valor::Booleano(valor));
                 }
 
-            
                 "ADD" => {
                     let dir = self.pilha.pop().ok_or("Pilha vazia para ADD")?;
                     let esq = self.pilha.pop().ok_or("Pilha vazia para ADD")?;
                     match (esq, dir) {
-                        (Valor::Inteiro(a), Valor::Inteiro(b)) => self.pilha.push(Valor::Inteiro(a + b)),
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Inteiro(a + b))
+                        }
                         _ => return Err("Tipos incompatíveis para ADD".to_string()),
                     }
                 }
@@ -144,7 +239,9 @@ impl VM {
                     let dir = self.pilha.pop().ok_or("Pilha vazia para SUB")?;
                     let esq = self.pilha.pop().ok_or("Pilha vazia para SUB")?;
                     match (esq, dir) {
-                        (Valor::Inteiro(a), Valor::Inteiro(b)) => self.pilha.push(Valor::Inteiro(a - b)),
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Inteiro(a - b))
+                        }
                         _ => return Err("Tipos incompatíveis para SUB".to_string()),
                     }
                 }
@@ -152,7 +249,9 @@ impl VM {
                     let dir = self.pilha.pop().ok_or("Pilha vazia para MUL")?;
                     let esq = self.pilha.pop().ok_or("Pilha vazia para MUL")?;
                     match (esq, dir) {
-                        (Valor::Inteiro(a), Valor::Inteiro(b)) => self.pilha.push(Valor::Inteiro(a * b)),
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Inteiro(a * b))
+                        }
                         _ => return Err("Tipos incompatíveis para MUL".to_string()),
                     }
                 }
@@ -182,14 +281,16 @@ impl VM {
                         _ => return Err("Tipos incompatíveis para MOD".to_string()),
                     }
                 }
-                "NEGATE_INT" => { //Negação numérica
+                "NEGATE_INT" => {
+                    //Negação numérica
                     let val = self.pilha.pop().ok_or("Pilha vazia para NEGATE_INT")?;
                     match val {
                         Valor::Inteiro(n) => self.pilha.push(Valor::Inteiro(-n)),
                         _ => return Err("Tipo incompatível para NEGATE_INT".to_string()),
                     }
                 }
-                "NEGATE_BOOL" => { //Negação lógica
+                "NEGATE_BOOL" => {
+                    //Negação lógica
                     let val = self.pilha.pop().ok_or("Pilha vazia para NEGATE_BOOL")?;
                     match val {
                         Valor::Booleano(b) => self.pilha.push(Valor::Booleano(!b)),
@@ -212,7 +313,9 @@ impl VM {
                     let dir = self.pilha.pop().ok_or("Pilha vazia para COMPARE_LT")?;
                     let esq = self.pilha.pop().ok_or("Pilha vazia para COMPARE_LT")?;
                     match (esq, dir) {
-                        (Valor::Inteiro(a), Valor::Inteiro(b)) => self.pilha.push(Valor::Booleano(a < b)),
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Booleano(a < b))
+                        }
                         _ => return Err("Tipos incompatíveis para COMPARE_LT".to_string()),
                     }
                 }
@@ -220,7 +323,9 @@ impl VM {
                     let dir = self.pilha.pop().ok_or("Pilha vazia para COMPARE_GT")?;
                     let esq = self.pilha.pop().ok_or("Pilha vazia para COMPARE_GT")?;
                     match (esq, dir) {
-                        (Valor::Inteiro(a), Valor::Inteiro(b)) => self.pilha.push(Valor::Booleano(a > b)),
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Booleano(a > b))
+                        }
                         _ => return Err("Tipos incompatíveis para COMPARE_GT".to_string()),
                     }
                 }
@@ -228,7 +333,9 @@ impl VM {
                     let dir = self.pilha.pop().ok_or("Pilha vazia para COMPARE_LE")?;
                     let esq = self.pilha.pop().ok_or("Pilha vazia para COMPARE_LE")?;
                     match (esq, dir) {
-                        (Valor::Inteiro(a), Valor::Inteiro(b)) => self.pilha.push(Valor::Booleano(a <= b)),
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Booleano(a <= b))
+                        }
                         _ => return Err("Tipos incompatíveis para COMPARE_LE".to_string()),
                     }
                 }
@@ -237,12 +344,15 @@ impl VM {
                     let dir = self.pilha.pop().ok_or("Pilha vazia para COMPARE_GE")?;
                     let esq = self.pilha.pop().ok_or("Pilha vazia para COMPARE_GE")?;
                     match (esq, dir) {
-                        (Valor::Inteiro(a), Valor::Inteiro(b)) => self.pilha.push(Valor::Booleano(a >= b)),
+                        (Valor::Inteiro(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Booleano(a >= b))
+                        }
                         _ => return Err("Tipos incompatíveis para COMPARE_GE".to_string()),
                     }
                 }
                 // Instruções de Salto
-                "JUMP" => { // Salto incondicional
+                "JUMP" => {
+                    // Salto incondicional
                     let target_ip: usize = partes
                         .get(1)
                         .ok_or("JUMP requer um endereço de destino")?
@@ -250,7 +360,8 @@ impl VM {
                         .map_err(|e| format!("Endereço inválido para JUMP: {}", e))?;
                     self.ip = target_ip;
                 }
-                "JUMP_IF_FALSE" => { // Salto condicional
+                "JUMP_IF_FALSE" => {
+                    // Salto condicional
                     let target_ip: usize = partes
                         .get(1)
                         .ok_or("JUMP_IF_FALSE requer um endereço de destino")?
@@ -268,10 +379,138 @@ impl VM {
                         _ => return Err("JUMP_IF_FALSE requer um valor booleano".to_string()),
                     }
                 }
+                // ✅ NOVO: Instruções para classes
+                "DEFINE_CLASS" => {
+                    let nome_classe = partes.get(1).ok_or("DEFINE_CLASS requer nome da classe")?;
+                    let propriedades: Vec<String> = if partes.len() > 2 {
+                        partes[2..].iter().map(|s| s.to_string()).collect()
+                    } else {
+                        Vec::new()
+                    };
+
+                    self.classes.insert(
+                        nome_classe.to_string(),
+                        ClasseInfo {
+                            nome: nome_classe.to_string(),
+                            propriedades,
+                            metodos: HashMap::new(),
+                            construtor: None,
+                        },
+                    );
+                }
+                "NEW_OBJECT" => {
+                    let nome_classe = partes.get(1).ok_or("NEW_OBJECT requer nome da classe")?;
+                    let num_args = partes
+                        .get(2)
+                        .ok_or("NEW_OBJECT requer número de argumentos")?
+                        .parse::<usize>()
+                        .map_err(|e| format!("Número inválido de argumentos: {}", e))?;
+
+                    // Pegar argumentos da pilha
+                    if self.pilha.len() < num_args {
+                        return Err(format!("Pilha insuficiente para NEW_OBJECT"));
+                    }
+                    let argumentos = self.pilha.split_off(self.pilha.len() - num_args);
+
+                    // Criar objeto
+                    let objeto = self.criar_objeto(nome_classe, argumentos)?;
+                    self.pilha.push(objeto);
+                }
+
+                "GET_PROPERTY" => {
+                    let nome_propriedade = partes
+                        .get(1)
+                        .ok_or("GET_PROPERTY requer nome da propriedade")?;
+                    let objeto = self.pilha.pop().ok_or("Pilha vazia para GET_PROPERTY")?;
+
+                    match objeto {
+                        Valor::Objeto { propriedades, .. } => {
+                            let valor = propriedades
+                                .get(*nome_propriedade)
+                                .cloned()
+                                .unwrap_or(Valor::Nulo);
+                            self.pilha.push(valor);
+                        }
+                        _ => return Err("GET_PROPERTY requer um objeto".to_string()),
+                    }
+                }
+
+                "SET_PROPERTY" => {
+                    let nome_propriedade = partes
+                        .get(1)
+                        .ok_or("SET_PROPERTY requer nome da propriedade")?;
+
+                    // ✅ CORREÇÃO: A ordem dos 'pop' foi invertida.
+
+                    // 1. Desempilha o OBJETO (que está no topo da pilha).
+                    let mut objeto = self
+                        .pilha
+                        .pop()
+                        .ok_or("Pilha vazia para objeto em SET_PROPERTY")?;
+
+                    // 2. Desempilha o VALOR (que está abaixo do objeto).
+                    let valor = self
+                        .pilha
+                        .pop()
+                        .ok_or("Pilha vazia para valor em SET_PROPERTY")?;
+
+                    // Agora 'objeto' contém o objeto e 'valor' contém o valor, como esperado.
+                    match &mut objeto {
+                        Valor::Objeto { propriedades, .. } => {
+                            // Modifica as propriedades do objeto diretamente.
+                            propriedades.insert(nome_propriedade.to_string(), valor);
+                        }
+                        _ => {
+                            // Este erro agora será acionado corretamente se a pilha não contiver um objeto no topo.
+                            return Err(
+                                "SET_PROPERTY requer um objeto no topo da pilha".to_string()
+                            );
+                        }
+                    }
+
+                    // Devolve o objeto modificado para a pilha.
+                    // Isso mantém a VM em um estado consistente e permite futuras atribuições encadeadas.
+                    self.pilha.push(objeto);
+                }
+
+                "CALL_METHOD" => {
+                    let nome_metodo = partes.get(1).ok_or("CALL_METHOD requer nome do método")?;
+                    let num_args = partes
+                        .get(2)
+                        .ok_or("CALL_METHOD requer número de argumentos")?
+                        .parse::<usize>()
+                        .map_err(|e| format!("Número inválido de argumentos: {}", e))?;
+
+                    // Pegar argumentos da pilha
+                    if self.pilha.len() < num_args + 1 {
+                        // +1 para o objeto
+                        return Err(format!("Pilha insuficiente para CALL_METHOD"));
+                    }
+
+                    let argumentos = if num_args > 0 {
+                        self.pilha.split_off(self.pilha.len() - num_args)
+                    } else {
+                        Vec::new()
+                    };
+                    let objeto = self
+                        .pilha
+                        .pop()
+                        .ok_or("Objeto não encontrado para CALL_METHOD")?;
+
+                    let resultado = self.chamar_metodo(objeto, nome_metodo, argumentos)?;
+                    self.pilha.push(resultado);
+                }
+
+                "POP" => {
+                    // Remove o valor do topo da pilha.
+                    // O uso de .ok_or previne um pânico se a pilha estiver vazia,
+                    // transformando-o em um erro controlado.
+                    self.pilha.pop().ok_or("Pilha vazia em POP")?;
+                }
 
                 // Ignora comentários ou linhas vazias
                 op if op.starts_with(';') || op.is_empty() => {}
-                 _ => {
+                _ => {
                     return Err(format!("Instrução desconhecida: {}", op));
                 }
             }
@@ -294,7 +533,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     arquivo.read_to_string(&mut conteudo)?;
 
     // Converte o conteúdo do arquivo em uma lista de instruções, ignorando linhas vazias.
-    let bytecode: Vec<String> = conteudo.lines().filter(|l| !l.trim().is_empty()).map(String::from).collect();
+    let bytecode: Vec<String> = conteudo
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(String::from)
+        .collect();
 
     println!("--- Iniciando Interpretador de Bytecode ---");
     let mut vm = VM::new(bytecode);
