@@ -1,0 +1,22 @@
+publico classe Animal 
+{
+    publico redefinível vazio som() 
+    {
+        imprima("Animal faz som");
+    }
+}
+
+publico classe Cachorro : Animal 
+{
+    publico sobrescreve vazio som() 
+    {
+        imprima("Au au!");
+    }
+}
+
+// Uso
+var animal = novo Animal();
+var cachorro = novo Cachorro();
+
+animal.som();    // "Animal faz som"
+cachorro.som();  // "Au au!" (polimorfismo)

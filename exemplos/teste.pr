@@ -18,7 +18,7 @@ espaco MeuPrograma.Domain
         }
     }
     
-    publico funcao texto testar() 
+    publico função texto testar() 
     {
         Pessoa p = novo Pessoa("João", 30);
         retorne p.apresentar();

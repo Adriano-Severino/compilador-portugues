@@ -1,67 +1,67 @@
 espaco Meu_Programa.funcoes
 {
 // Sintaxe 1: Sem tipo de retorno (implícito vazio)
-publico funcao bemvindo() {
+publico função bemvindo() {
     imprima("Olá mundo");
 }
 
 // Sintaxe 2: Com parâmetros, sem tipo de retorno
-publico funcao configurar(texto nome) {
+publico função configurar(texto nome) {
     imprima("Configurando: " + nome);
 }
 
 // Sintaxe 3: Tipo de retorno no final (original)
-publico funcao calcular() => inteiro {
+publico função calcular() => inteiro {
     retorne 42;
 }
 
 // Sintaxe 4: Com parâmetros e tipo no final
-publico funcao multiplicar(inteiro a, inteiro b) => inteiro {
+publico função multiplicar(inteiro a, inteiro b) => inteiro {
     retorne a * b;
 }
 
-privado funcao multiplicar2(inteiro a, inteiro b) => inteiro {
+privado função multiplicar2(inteiro a, inteiro b) => inteiro {
     retorne a * b;
 }
 // Sintaxe 5: NOVA - Tipo no início (sua preferência)
-privado funcao inteiro somar(inteiro a, inteiro b) {
+privado função inteiro somar(inteiro a, inteiro b) {
     retorne a + b;
 }
 
 // Sintaxe 6: NOVA - Outros tipos no início
-publico funcao texto obter_nome() {
+publico função texto obter_nome() {
     retorne "João";
 }
 
-publico funcao booleano eh_par(inteiro numero) {
+publico função booleano eh_par(inteiro numero) {
     retorne numero % 2 == 0;
 }
 
-publico funcao vazio imprimir_linha() {
+publico função vazio imprimir_linha() {
     imprima("================");
 }
 
 // Para classes personalizadas
-publico funcao Pessoa criar_pessoa(texto nome, inteiro idade) {
+publico função Pessoa criar_pessoa(texto nome, inteiro idade) {
     retorne novo Pessoa(nome, idade);
 }
 
 // Sintaxe sem tipo de retorno
-publico funcao processar_dados(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) {
+publico função processar_dados(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) {
     imprima("Processando dados completos");
 }
 
 // Sintaxe com tipo no início
-publico funcao texto gerar_relatorio(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) {
+publico função texto gerar_relatorio(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) {
     retorne "Relatório gerado";
 }
 
 // Sintaxe com seta
-publico funcao processar_completo(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) => texto {
+publico função processar_completo(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) => texto {
     retorne "Processamento completo";
 }
 
-publico funcao testar_funcoes() {
+publico função testar_funcoes() {
     processar_dados("João", 30, verdadeiro, "Rua A", "123456789");
     texto resultado = gerar_relatorio("Joana", 25, falso, "Rua B", "987654321");
     var processo = processar_completo("Mario", 35, verdadeiro, "Rua C", "123456789");

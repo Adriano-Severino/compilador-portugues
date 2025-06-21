@@ -1,0 +1,9 @@
+[env]
+LLVM_SYS_160_PREFIX = "C:\\LLVM"
+LIBCLANG_PATH = "C:\\LLVM\\bin"
+
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+    "-C", "link-arg=/LIBPATH:C:\\LLVM\\lib",
+    "-C", "link-arg=psapi.lib"
+]

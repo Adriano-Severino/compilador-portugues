@@ -1,0 +1,285 @@
+// ===== CLASSE BASE =====
+espaco Meu_Programa {
+
+    publico classe Animal 
+    {
+        publico texto Nome { buscar; definir; }
+        publico inteiro Idade { buscar; definir; }
+        publico texto Habitat { buscar; definir; }
+
+    publico Animal(texto nome, inteiro idade, texto habitat) 
+    {
+        este.Nome = nome;
+        este.Idade = idade;
+        este.Habitat = habitat;
+    }
+    
+    // Método redefinível - pode ser sobrescrito
+    publico redefinível vazio emitirSom() 
+    {
+        imprima($"{este.Nome} faz um som genérico");
+    }
+    
+    // Método redefinível para movimento
+    publico redefinível vazio mover() 
+    {
+        imprima($"{este.Nome} está se movendo pelo {este.Habitat}");
+    }
+    
+    // Método comum (não redefinível)
+    publico vazio apresentar() 
+    {
+        imprima($"Animal: {este.Nome}, {este.Idade} anos, vive em {este.Habitat}");
+    }
+    
+    // Método redefinível para alimentação
+    publico redefinível vazio comer() 
+    {
+        imprima($"{este.Nome} está comendo");
+    }
+}
+
+// ===== CLASSE DERIVADA 1 =====
+publico classe Cachorro : Animal 
+{
+    publico texto Raca { buscar; definir; }
+    publico booleano EhDomestico { buscar; definir; }
+    
+    publico Cachorro(texto nome, inteiro idade, texto raca, booleano ehDomestico) 
+        : base(nome, idade, "Casa") 
+    {
+        este.Raca = raca;
+        este.EhDomestico = ehDomestico;
+    }
+    
+    // Sobrescreve o som do animal
+    publico sobrescreve vazio emitirSom() 
+    {
+        se (este.EhDomestico) 
+        {
+            imprima($"{este.Nome} late: Au au!");
+        } 
+        senão 
+        {
+            imprima($"{este.Nome} uiva: Auuuuu!");
+        }
+    }
+    
+    // Sobrescreve o movimento
+    publico sobrescreve vazio mover() 
+    {
+        imprima($"{este.Nome} ({este.Raca}) está correndo pela casa");
+    }
+    
+    // Sobrescreve a alimentação
+    publico sobrescreve vazio comer() 
+    {
+        imprima($"{este.Nome} está comendo ração");
+    }
+    
+    // Método específico do cachorro
+    publico vazio abanarRabo() 
+    {
+        imprima($"{este.Nome} está abanando o rabo!");
+    }
+    
+    publico vazio buscarBola() 
+    {
+        imprima($"{este.Nome} correu para buscar a bola!");
+    }
+}
+
+// ===== CLASSE DERIVADA 2 =====
+publico classe Gato : Animal 
+{
+    publico texto Cor { buscar; definir; }
+    publico booleano GostaDeDormir { buscar; definir; }
+    
+    publico Gato(texto nome, inteiro idade, texto cor, booleano gostaDeDormir) 
+        : base(nome, idade, "Casa") 
+    {
+        este.Cor = cor;
+        este.GostaDeDormir = gostaDeDormir;
+    }
+    
+    // Sobrescreve o som
+    publico sobrescreve vazio emitirSom() 
+    {
+        se (este.GostaDeDormir) 
+        {
+            imprima($"{este.Nome} ronrona suavemente: Purrr...");
+        } 
+        senão 
+        {
+            imprima($"{este.Nome} mia alto: MIAU!");
+        }
+    }
+    
+    // Sobrescreve movimento
+    publico sobrescreve vazio mover() 
+    {
+        imprima($"{este.Nome} ({este.Cor}) caminha silenciosamente");
+    }
+    
+    // Sobrescreve alimentação
+    publico sobrescreve vazio comer() 
+    {
+        imprima($"{este.Nome} está bebendo leite e comendo peixe");
+    }
+    
+    // Métodos específicos do gato
+    publico vazio arranhar() 
+    {
+        imprima($"{este.Nome} está arranhando o sofá!");
+    }
+    
+    publico vazio dormir() 
+    {
+        se (este.GostaDeDormir) 
+        {
+            imprima($"{este.Nome} está dormindo 16 horas por dia");
+        } 
+        senão 
+        {
+            imprima($"{este.Nome} está brincando em vez de dormir");
+        }
+    }
+}
+
+// ===== CLASSE DERIVADA 3 =====
+publico classe Passaro : Animal 
+{
+    publico booleano PodeVoar { buscar; definir; }
+    publico texto TipoBico { buscar; definir; }
+    
+    publico Passaro(texto nome, inteiro idade, booleano podeVoar, texto tipoBico) 
+        : base(nome, idade, "Árvore") 
+    {
+        este.PodeVoar = podeVoar;
+        este.TipoBico = tipoBico;
+    }
+    
+    // Sobrescreve som
+    publico sobrescreve vazio emitirSom() 
+    {
+        se (este.PodeVoar) 
+        {
+            imprima($"{este.Nome} canta melodiosamente: Piu piu!");
+        } 
+        senão 
+        {
+            imprima($"{este.Nome} grasna: Có có có!");
+        }
+    }
+    
+    // Sobrescreve movimento
+    publico sobrescreve vazio mover() 
+    {
+        se (este.PodeVoar) 
+        {
+            imprima($"{este.Nome} está voando pelo céu");
+        } 
+        senão 
+        {
+            imprima($"{este.Nome} está andando no chão");
+        }
+    }
+    
+    // Sobrescreve alimentação
+    publico sobrescreve vazio comer() 
+    {
+        imprima($"{este.Nome} come com seu bico {este.TipoBico}");
+    }
+    
+    // Método específico
+    publico vazio construirNinho() 
+{
+        imprima($"{este.Nome} está construindo um ninho na árvore");
+    }
+}
+
+// ===== FUNÇÃO DE TESTE PRINCIPAL =====
+publico função vazio Principal() {
+    imprima("=== TESTE DE HERANÇA E POLIMORFISMO ===");
+    imprima("");
+    
+    // ===== CRIAÇÃO DE OBJETOS =====
+    imprima("1. Criando animais:");
+    var animal = novo Animal("Animal Genérico", 5, "Natureza");
+    var cachorro = novo Cachorro("Rex", 3, "Golden Retriever", verdadeiro);
+    var gato = novo Gato("Mimi", 2, "Preto", verdadeiro);
+    var passaro = novo Passaro("Piu", 1, verdadeiro, "Pequeno");
+    imprima("");
+    
+    // ===== TESTE DE APRESENTAÇÃO (Método não redefinível) =====
+    imprima("2. Apresentações (método herdado):");
+    animal.apresentar();
+    cachorro.apresentar();
+    gato.apresentar();
+    passaro.apresentar();
+    imprima("");
+    
+    // ===== TESTE DE POLIMORFISMO - Sons =====
+    imprima("3. Polimorfismo - Sons (método redefinível/sobrescreve):");
+    animal.emitirSom();    // Som genérico
+    cachorro.emitirSom();  // Au au! (polimorfismo)
+    gato.emitirSom();      // Purrr... (polimorfismo)
+    passaro.emitirSom();   // Piu piu! (polimorfismo)
+    imprima("");
+    
+    // ===== TESTE DE POLIMORFISMO - Movimento =====
+    imprima("4. Polimorfismo - Movimento:");
+    animal.mover();        // Movimento genérico
+    cachorro.mover();      // Correndo (polimorfismo)
+    gato.mover();          // Silencioso (polimorfismo)
+    passaro.mover();       // Voando (polimorfismo)
+    imprima("");
+    
+    // ===== TESTE DE POLIMORFISMO - Alimentação =====
+    imprima("5. Polimorfismo - Alimentação:");
+    animal.comer();        // Comida genérica
+    cachorro.comer();      // Ração (polimorfismo)
+    gato.comer();          // Leite e peixe (polimorfismo)
+    passaro.comer();       // Com bico (polimorfismo)
+    imprima("");
+    
+    // ===== TESTE DE MÉTODOS ESPECÍFICOS =====
+    imprima("6. Métodos específicos de cada classe:");
+    cachorro.abanarRabo();
+    cachorro.buscarBola();
+    
+    gato.arranhar();
+    gato.dormir();
+    
+    passaro.construirNinho();
+    imprima("");
+    
+    // ===== TESTE DE PROPRIEDADES HERDADAS =====
+    imprima("7. Propriedades herdadas:");
+    imprima($"Nome do cachorro: {cachorro.Nome}");     // Herdado de Animal;
+    imprima($"Idade do gato: {gato.Idade}");           // Herdado de Animal;
+    imprima($"Habitat do pássaro: {passaro.Habitat}"); // Herdado de Animal;
+    imprima("");
+    
+    // ===== TESTE DE PROPRIEDADES ESPECÍFICAS =====
+    imprima("8. Propriedades específicas:");
+    imprima($"Raça do cachorro: {cachorro.Raca}");     // Específico de Cachorro;
+    imprima($"Cor do gato: {gato.Cor}");               // Específico de Gato;
+    imprima($"Pode voar: {passaro.PodeVoar}");         // Específico de Passaro;
+    imprima("");
+    
+    // ===== DEMONSTRAÇÃO DE POLIMORFISMO EM ARRAY =====
+    imprima("9. Polimorfismo em coleção:");
+    imprima("Fazendo todos os animais emitirem sons:");
+    
+    // Em uma linguagem completa, isso seria um array/lista
+    // Por enquanto, chamadas individuais demonstram o conceito
+    animal.emitirSom();
+    cachorro.emitirSom();
+    gato.emitirSom();
+    passaro.emitirSom();
+    
+    imprima("");
+    imprima("=== FIM DOS TESTES ===");
+}
+}

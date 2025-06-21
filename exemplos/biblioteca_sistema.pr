@@ -214,7 +214,7 @@ publico classe Biblioteca
 // ------------------------------------------------------------------
 // DEMONSTRAÇÃO DO SISTEMA
 // ------------------------------------------------------------------
-publico funcao demonstrarSistema() 
+publico função demonstrarSistema() 
 {
 
     imprima("🎯 ===== SISTEMA DE BIBLIOTECA DIGITAL =====");
@@ -319,7 +319,7 @@ publico funcao demonstrarSistema()
     imprima("🏁 ===== FIM DA DEMONSTRAÇÃO =====");
 }
 
-publico funcao principal() 
+publico função principal() 
 {
     demonstrarSistema();
 }

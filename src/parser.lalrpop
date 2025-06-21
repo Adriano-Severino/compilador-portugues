@@ -166,8 +166,8 @@ AcessorPropriedade: (bool, Option<ast::ModificadorAcesso>) = {
 };
 // === FUNÇÕES E MÉTODOS ===
 DeclaracaoFuncao: ast::DeclaracaoFuncao = {
-    // 1. [mod] funcao nome (params) { corpo }      → retorno implícito = Vazio
-    <m:ModificadorAcesso?> "funcao"
+    // 1. [mod] função nome (params) { corpo }      → retorno implícito = Vazio
+    <m:ModificadorAcesso?> "função"
     <nome:IdentificadorSimples> "(" <params:InnerParamList> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
             nome,
@@ -178,8 +178,8 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
         }
     },
 
-    // 2. [mod] funcao nome (params) => Tipo { corpo }
-    <m:ModificadorAcesso?> "funcao"
+    // 2. [mod] função nome (params) => Tipo { corpo }
+    <m:ModificadorAcesso?> "função"
     <nome:IdentificadorSimples>
     "(" <params:InnerParamList> "=>" <ret:Tipo> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
@@ -191,8 +191,8 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
         }
     },
 
-    // 3. [mod] funcao Tipo nome (params) { corpo }  – tipo antes do nome
-    <m:ModificadorAcesso?> "funcao"
+    // 3. [mod] função Tipo nome (params) { corpo }  – tipo antes do nome
+    <m:ModificadorAcesso?> "função"
     <ret:Tipo> <nome:IdentificadorSimples>
     "(" <params:InnerParamList> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
@@ -426,7 +426,7 @@ AtribuicaoOuDeclaracao: ast::Comando = {
     "retorne" <expr:Expressao?> ";" =>
         ast::Comando::Retorne(expr),
 
-    // chamada de função sozinha:  funcao(arg1, arg2 …);
+    // chamada de função sozinha:  função(arg1, arg2 …);
     <nome:TIdentificador> "(" <args:InnerArgList> ";" =>
         ast::Comando::Expressao(ast::Expressao::Chamada(nome, args)),
 };
@@ -580,7 +580,7 @@ extern {
         "senão" => Token::TSenao,
         "enquanto" => Token::TEnquanto,
         "para" => Token::TPara,
-        "funcao" => Token::TFuncao,
+        "função" => Token::TFuncao,
         "retorne" => Token::TRetorne,
         "imprima" => Token::TImprima,
         "var" => Token::TVar,
