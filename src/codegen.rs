@@ -405,6 +405,7 @@ struct BytecodeGenerator<'a> {
     programa: &'a ast::Programa,
     bytecode_instructions: Vec<String>, //Armazena as instruções geradas
     em_metodo: bool,
+    props_por_classe: HashMap<String, Vec<String>>,
 }
 
 impl<'a> BytecodeGenerator<'a> {
@@ -413,6 +414,7 @@ impl<'a> BytecodeGenerator<'a> {
             programa,
             bytecode_instructions: Vec::new(),
             em_metodo,
+            props_por_classe: HashMap::new(),
         }
     }
 
@@ -430,14 +432,26 @@ impl<'a> BytecodeGenerator<'a> {
             // ✅ Reconhece e processa a declaração de classe
             ast::Declaracao::DeclaracaoClasse(classe_def) => {
                 // ------------- 1. coleta as propriedades (campos + props) -------------
-                let propriedades: Vec<String> = classe_def
+                let mut propriedades: Vec<String> = classe_def
                     .propriedades
                     .iter()
                     .map(|p| p.nome.clone())
                     .chain(classe_def.campos.iter().map(|c| c.nome.clone()))
                     .collect();
+
+                if let Some(pai) = &classe_def.classe_pai {
+                    if let Some(props_pai) = self.props_por_classe.get(pai) {
+                        propriedades = props_pai
+                            .clone()
+                            .into_iter()
+                            .chain(propriedades.into_iter())
+                            .collect();
+                    }
+                }
                 let props_str = propriedades.join(" ");
 
+                self.props_por_classe
+                    .insert(classe_def.nome.clone(), propriedades.clone());
                 // ------------- 2. DEFINE_CLASS vem PRIMEIRO ---------------------------
                 self.bytecode_instructions
                     .push(format!("DEFINE_CLASS {} {}", classe_def.nome, props_str));
@@ -455,7 +469,11 @@ impl<'a> BytecodeGenerator<'a> {
                     // b) gera bytecode do corpo do método
                     let mut sub = BytecodeGenerator::new(&sub_programa, true);
                     let mut corpo = sub.generate(); // inclui HALT
-                    corpo.pop(); // remove HALT final
+
+                    if !matches!(corpo.last(), Some(last) if last == "RETURN") {
+                        corpo.push("LOAD_CONST_NULL".to_string());
+                        corpo.push("RETURN".to_string());
+                    }
 
                     // c) cabeçalho + corpo
                     self.bytecode_instructions.push(format!(
@@ -638,6 +656,19 @@ impl<'a> BytecodeGenerator<'a> {
                     .push(format!("STORE_VAR {}", objeto_nome)); //  <<< ADICIONE ESTA LINHA
             }
 
+            ast::Comando::Retorne(expr_opt) => {
+                // (1) Se houver expressão, gera o bytecode que coloca o valor na pilha
+                if let Some(expr) = expr_opt {
+                    self.generate_expressao(expr);
+                } else {
+                    // empilha Nulo para métodos void
+                    self.bytecode_instructions
+                        .push("LOAD_CONST_NULL".to_string());
+                }
+                // (2) encerra o frame
+                self.bytecode_instructions.push("RETURN".to_string());
+            }
+
             // Para outros comandos não implementados, remova a linha de comentário e implemente se necessário
             _ => { /* Fazer nada ou adicionar tratamento para outros comandos */ }
         }
@@ -665,6 +696,19 @@ impl<'a> BytecodeGenerator<'a> {
                     self.bytecode_instructions
                         .push(format!("LOAD_VAR {}", nome));
                 }
+            }
+
+            ast::Expressao::Este => {
+                // empilha o objeto atual do método
+                self.bytecode_instructions.push("LOAD_VAR este".to_string());
+            }
+
+            ast::Expressao::AcessoMembro(obj_expr, membro) => {
+                // 1. gera o objeto (pode ser 'este' ou outro)
+                self.generate_expressao(obj_expr);
+                // 2. lê a propriedade
+                self.bytecode_instructions
+                    .push(format!("GET_PROPERTY {}", membro));
             }
 
             // Expressão para criar um novo objeto

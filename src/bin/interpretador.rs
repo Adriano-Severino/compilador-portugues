@@ -534,6 +534,14 @@ impl VM {
                     }
                 }
 
+                "LOAD_CONST_NULL" => self.pilha.push(Valor::Nulo),
+
+                "RETURN" => {
+                    // interrompe a execução do frame atual;
+                    // o valor de retorno já está no topo da pilha
+                    return Ok(());
+                }
+
                 // Ignora comentários ou linhas vazias
                 op if op.starts_with(';') || op.is_empty() => {}
                 _ => {
