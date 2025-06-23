@@ -670,20 +670,6 @@ impl<'a> BytecodeGenerator<'a> {
                 self.bytecode_instructions.push("POP".to_string()); // Descartar resultado se não usado
             }
 
-            ast::Comando::AtribuirPropriedade(objeto_nome, prop_nome, expr) => {
-                // 1. empilha o valor
-                self.generate_expressao(expr);
-                // 2. empilha o objeto
-                self.bytecode_instructions
-                    .push(format!("LOAD_VAR {}", objeto_nome));
-                // 3. altera a propriedade
-                self.bytecode_instructions
-                    .push(format!("SET_PROPERTY {}", prop_nome));
-                // 4. grava o objeto atualizado na variável
-                self.bytecode_instructions
-                    .push(format!("STORE_VAR {}", objeto_nome)); //  <<< ADICIONE ESTA LINHA
-            }
-
             ast::Comando::Retorne(expr_opt) => {
                 // (1) Se houver expressão, gera o bytecode que coloca o valor na pilha
                 if let Some(expr) = expr_opt {
@@ -843,15 +829,13 @@ impl<'a> BytecodeGenerator<'a> {
                     .push(format!("CONCAT {}", partes.len()));
             }
 
-            ast::Expressao::Chamada(nome, args) => {
-                // empilha cada argumento
-                for a in args {
-                    self.generate_expressao(a);
-                }
-                // chama a função; resultado fica no topo da pilha
-                self.bytecode_instructions
-                    .push(format!("CALL_FUNCTION {} {}", nome, args.len()));
-            }
+            ast::Expressao::Chamada(nome_qualif, args) => {
+    for a in args {            // empilha argumentos
+        self.generate_expressao(a);
+    }
+    self.bytecode_instructions
+        .push(format!("CALL_FUNCTION {} {}", nome_qualif, args.len()));
+}
 
             // Para outras expressões não implementadas, remova a linha de comentário e implemente se necessário
             _ => { /* Fazer nada ou adicionar tratamento para outras expressões */ }
