@@ -205,5 +205,11 @@ fn compilar_para_bytecode(ast: &ast::Programa, nome_base: &str) -> Result<(), Bo
     let mut gerador = codegen::GeradorCodigo::new()?;
     gerador.gerar_bytecode(ast, nome_base).map_err(|e| Box::new(CompilerError(e)))?;
     println!("  ✓ {}.pbc gerado.", nome_base);
+    println!(" ✓ Executando o bytecode...");
+    println!("Você pode executar o bytecode usando o interpretador personalizado.");
+    println!("Execute:");
+    println!("cargo run --bin interpretador -- ./{}.pbc", nome_base);
+    println!("ou use o comando:");
+    println!("Para executar: ./interpretador ./{}.pbc", nome_base);
     Ok(())
 }
