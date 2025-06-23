@@ -403,15 +403,25 @@ impl<'a> ConsoleGenerator<'a> {
 // --- IMPLEMENTAÇÃO DO GERADOR DE BYTECODE ---
 struct BytecodeGenerator<'a> {
     programa: &'a ast::Programa,
-    bytecode_instructions: Vec<String>, //Armazena as instruções geradas
+    namespace_path: String,
+    bytecode_instructions: Vec<String>,
     em_metodo: bool,
     props_por_classe: HashMap<String, Vec<String>>,
 }
 
 impl<'a> BytecodeGenerator<'a> {
+    fn qual(&self, local: &str) -> String {
+        if self.namespace_path.is_empty() {
+            local.to_owned()
+        } else {
+            format!("{}.{}", self.namespace_path, local)
+        }
+    }
+
     fn new(programa: &'a ast::Programa, em_metodo: bool) -> Self {
         Self {
             programa,
+            namespace_path: String::new(),
             bytecode_instructions: Vec::new(),
             em_metodo,
             props_por_classe: HashMap::new(),
@@ -429,6 +439,27 @@ impl<'a> BytecodeGenerator<'a> {
 
     fn generate_declaracao(&mut self, declaracao: &ast::Declaracao) {
         match declaracao {
+            // ===== namespace =====
+            ast::Declaracao::DeclaracaoNamespace(ns) => {
+                let new_path = if self.namespace_path.is_empty() {
+                    ns.nome.clone()
+                } else {
+                    format!("{}.{}", self.namespace_path, ns.nome)
+                };
+                let sub_prog = ast::Programa {
+                    namespaces: vec![],
+                    declaracoes: ns.declaracoes.clone(),
+                };
+                let mut sub = BytecodeGenerator {
+                    programa: &sub_prog,
+                    namespace_path: new_path,
+                    bytecode_instructions: Vec::new(),
+                    em_metodo: false,
+                    props_por_classe: HashMap::new(),
+                };
+                self.bytecode_instructions.extend(sub.generate());
+            }
+
             // ✅ Reconhece e processa a declaração de classe
             ast::Declaracao::DeclaracaoClasse(classe_def) => {
                 // ------------- 1. coleta as propriedades (campos + props) -------------
@@ -448,13 +479,15 @@ impl<'a> BytecodeGenerator<'a> {
                             .collect();
                     }
                 }
+
                 let props_str = propriedades.join(" ");
 
                 self.props_por_classe
                     .insert(classe_def.nome.clone(), propriedades.clone());
                 // ------------- 2. DEFINE_CLASS vem PRIMEIRO ---------------------------
+                let full_class = self.qual(&classe_def.nome);
                 self.bytecode_instructions
-                    .push(format!("DEFINE_CLASS {} {}", classe_def.nome, props_str));
+                    .push(format!("DEFINE_CLASS {} {}", full_class, props_str));
 
                 // ------------- 3. gera cada método como bloco independente ------------
                 for metodo in &classe_def.metodos {
@@ -506,12 +539,14 @@ impl<'a> BytecodeGenerator<'a> {
                 // c) cabeçalho DEFINE_FUNCTION
                 let params: Vec<String> =
                     func_def.parametros.iter().map(|p| p.nome.clone()).collect();
+                let full_fn = self.qual(&func_def.nome); // NOVO
                 self.bytecode_instructions.push(format!(
                     "DEFINE_FUNCTION {} {} {}",
-                    func_def.nome,
+                    full_fn,
                     corpo.len(),
                     params.join(" ")
                 ));
+
                 self.bytecode_instructions.extend(corpo);
             }
 
@@ -830,12 +865,16 @@ impl<'a> BytecodeGenerator<'a> {
             }
 
             ast::Expressao::Chamada(nome_qualif, args) => {
-    for a in args {            // empilha argumentos
-        self.generate_expressao(a);
-    }
-    self.bytecode_instructions
-        .push(format!("CALL_FUNCTION {} {}", nome_qualif, args.len()));
-}
+                for a in args {
+                    // empilha argumentos
+                    self.generate_expressao(a);
+                }
+                self.bytecode_instructions.push(format!(
+                    "CALL_FUNCTION {} {}",
+                    nome_qualif,
+                    args.len()
+                ));
+            }
 
             // Para outras expressões não implementadas, remova a linha de comentário e implemente se necessário
             _ => { /* Fazer nada ou adicionar tratamento para outras expressões */ }

@@ -2,11 +2,11 @@ espaco Meu_Programa.Domain
 {
     publico classe Pessoa2
     {
-        publico texto Nome { buscar; definir; }
-        publico inteiro Idade { buscar; definir; }
-        publico texto Sobrenome { buscar; definir; }
-        publico texto Endereco { buscar; definir; }
-        publico texto Telefone { buscar; definir; }
+        publico texto Nome { obter; definir; }
+        publico inteiro Idade { obter; definir; }
+        publico texto Sobrenome { obter; definir; }
+        publico texto Endereco { obter; definir; }
+        publico texto Telefone { obter; definir; }
 
         // ✅ Construtor com parâmetros padrão (como C#)
         publico Pessoa2(texto nome, texto endereco, texto telefone, inteiro idade = 24, texto sobrenome = "Silva") {

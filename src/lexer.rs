@@ -61,8 +61,8 @@ pub enum Token {
     TNovo,
     #[token("este")]
     TEste,
-    #[token("buscar")]
-    TBuscar,
+    #[token("obter")]
+    TObter,
     #[token("definir")]
     TDefinir,
 

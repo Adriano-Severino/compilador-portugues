@@ -4,14 +4,14 @@ publico classe Livro
 {
 
     // Propriedades
-    publico texto   Titulo               { buscar; definir; }
-    publico texto   Autor                { buscar; definir; }
-    publico texto   ISBN                 { buscar; definir; }
-    publico inteiro AnoPublicacao        { buscar; definir; }
-    publico texto   Categoria            { buscar; definir; }
-    publico inteiro QuantidadeTotal      { buscar; definir; }
-    publico inteiro QuantidadeDisponivel { buscar; definir; }
-    publico booleano Disponivel          { buscar; definir; }
+    publico texto   Titulo               { obter; definir; }
+    publico texto   Autor                { obter; definir; }
+    publico texto   ISBN                 { obter; definir; }
+    publico inteiro AnoPublicacao        { obter; definir; }
+    publico texto   Categoria            { obter; definir; }
+    publico inteiro QuantidadeTotal      { obter; definir; }
+    publico inteiro QuantidadeDisponivel { obter; definir; }
+    publico booleano Disponivel          { obter; definir; }
 
     // Construtor com parâmetros opcionais
     publico Livro(texto titulo,
@@ -92,13 +92,13 @@ publico classe Livro
 publico classe Usuario 
 {
 
-    publico texto   Nome            { buscar; definir; }
-    publico texto   Email           { buscar; definir; }
-    publico texto   Telefone        { buscar; definir; }
-    publico texto   TipoUsuario     { buscar; definir; }
-    publico inteiro NumeroCartao    { buscar; definir; }
-    publico inteiro LimiteEmprestimos { buscar; definir; }
-    publico inteiro LivrosEmprestados { buscar; definir; }
+    publico texto   Nome            { obter; definir; }
+    publico texto   Email           { obter; definir; }
+    publico texto   Telefone        { obter; definir; }
+    publico texto   TipoUsuario     { obter; definir; }
+    publico inteiro NumeroCartao    { obter; definir; }
+    publico inteiro LimiteEmprestimos { obter; definir; }
+    publico inteiro LivrosEmprestados { obter; definir; }
 
     publico Usuario(texto nome,
                     texto email,
@@ -134,10 +134,10 @@ publico classe Usuario
 publico classe Biblioteca 
 {
 
-    publico texto   Nome         { buscar; definir; }
-    publico texto   Endereco     { buscar; definir; }
-    publico inteiro TotalLivros  { buscar; definir; }
-    publico inteiro TotalUsuarios { buscar; definir; }
+    publico texto   Nome         { obter; definir; }
+    publico texto   Endereco     { obter; definir; }
+    publico inteiro TotalLivros  { obter; definir; }
+    publico inteiro TotalUsuarios { obter; definir; }
 
     publico Biblioteca(texto nome,
                        texto endereco = "Endereço não informado") 

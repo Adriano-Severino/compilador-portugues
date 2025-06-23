@@ -2,9 +2,9 @@ espaco Meu_Programa.Domain
 {
     publico classe Pessoa
     {
-        publico texto Nome { buscar; definir; }
-        publico inteiro Idade { buscar; definir; }
-        publico texto Sobrenome { buscar; privado definir; }
+        publico texto Nome { obter; definir; }
+        publico inteiro Idade { obter; definir; }
+        publico texto Sobrenome { obter; privado definir; }
 
         publico Pessoa(texto nome, inteiro idade = 25, texto sobrenome = "Padrão") {
             Nome = nome;

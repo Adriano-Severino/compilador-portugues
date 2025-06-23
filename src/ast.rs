@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /* ========================================================================== */
 /* TIPOS BÁSICOS                                                              */
@@ -7,7 +7,7 @@ use serde::{Serialize, Deserialize};
 pub enum Tipo {
     Inteiro,
     Texto,
-    Decimal,    
+    Decimal,
     Booleano,
     Vazio,
     Lista(Box<Tipo>),
@@ -141,7 +141,7 @@ pub struct PropriedadeClasse {
     pub nome: String,
     pub tipo: Tipo,
     pub modificador: ModificadorAcesso,
-    pub buscar: Option<AcessorPropriedade>,
+    pub obter: Option<AcessorPropriedade>,
     pub definir: Option<AcessorPropriedade>,
     pub valor_inicial: Option<Expressao>,
 }
@@ -195,10 +195,18 @@ pub struct Parametro {
 
 impl Parametro {
     pub fn obrigatorio(nome: String, tipo: Tipo) -> Self {
-        Self { nome, tipo, valor_padrao: None }
+        Self {
+            nome,
+            tipo,
+            valor_padrao: None,
+        }
     }
     pub fn opcional(nome: String, tipo: Tipo, valor_padrao: Expressao) -> Self {
-        Self { nome, tipo, valor_padrao: Some(valor_padrao) }
+        Self {
+            nome,
+            tipo,
+            valor_padrao: Some(valor_padrao),
+        }
     }
     pub fn eh_opcional(&self) -> bool {
         self.valor_padrao.is_some()

@@ -133,12 +133,12 @@ CampoClasse: ast::CampoClasse = {
 // === PROPRIEDADES ===
 PropriedadeClasse: ast::PropriedadeClasse = {
     <modificador:ModificadorAcesso?> <tipo:Tipo> <nome:IdentificadorSimples> "{" <acessores:AcessorPropriedade+> "}" => {
-        let mut buscar = None;
+        let mut obter = None;
         let mut definir = None;
 
         for acessor in acessores {
             match acessor {
-                (true, modificador_acessor) => buscar = Some(ast::AcessorPropriedade { 
+                (true, modificador_acessor) => obter = Some(ast::AcessorPropriedade { 
                     modificador: modificador_acessor, 
                     corpo: None 
                 }),
@@ -153,7 +153,7 @@ PropriedadeClasse: ast::PropriedadeClasse = {
             nome,
             tipo,
             modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
-            buscar,
+            obter,
             definir,
             valor_inicial: None,
         }
@@ -161,7 +161,7 @@ PropriedadeClasse: ast::PropriedadeClasse = {
 };
 
 AcessorPropriedade: (bool, Option<ast::ModificadorAcesso>) = {
-    <modificador:ModificadorAcesso?> "buscar" ";" => (true, modificador),
+    <modificador:ModificadorAcesso?> "obter" ";" => (true, modificador),
     <modificador:ModificadorAcesso?> "definir" ";" => (false, modificador),
 };
 // === FUNÇÕES E MÉTODOS ===
@@ -603,7 +603,7 @@ extern {
         "sobrescreve" => Token::TSobrescreve,
         "novo" => Token::TNovo,
         "este" => Token::TEste,
-        "buscar" => Token::TBuscar,
+        "obter" => Token::TObter,
         "definir" => Token::TDefinir,
         
         // Operadores

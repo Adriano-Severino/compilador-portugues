@@ -73,8 +73,8 @@ espaco Meu_Programa.funcoes
     publico classe Pessoa
     {
         // Propriedades automáticas 100 % compatíveis com a gramática
-        publico texto Nome  { buscar; definir; }
-        publico inteiro Idade { buscar; definir; }
+        publico texto Nome  { obter; definir; }
+        publico inteiro Idade { obter; definir; }
         
         // Construtor – mesmo nome da classe            ← C# style[5]
         publico Pessoa(texto nome, inteiro idade)

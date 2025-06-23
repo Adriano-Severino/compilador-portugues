@@ -3,9 +3,9 @@ espaco Meu_Programa {
 
     publico classe Animal 
     {
-        publico texto Nome { buscar; definir; }
-        publico inteiro Idade { buscar; definir; }
-        publico texto Habitat { buscar; definir; }
+        publico texto Nome { obter; definir; }
+        publico inteiro Idade { obter; definir; }
+        publico texto Habitat { obter; definir; }
 
     publico Animal(texto nome, inteiro idade, texto habitat) 
     {
@@ -42,8 +42,8 @@ espaco Meu_Programa {
 // ===== CLASSE DERIVADA 1 =====
 publico classe Cachorro : Animal 
 {
-    publico texto Raca { buscar; definir; }
-    publico booleano EhDomestico { buscar; definir; }
+    publico texto Raca { obter; definir; }
+    publico booleano EhDomestico { obter; definir; }
     
     publico Cachorro(texto nome, inteiro idade, texto raca, booleano ehDomestico) 
         : base(nome, idade, "Casa") 
@@ -92,8 +92,8 @@ publico classe Cachorro : Animal
 // ===== CLASSE DERIVADA 2 =====
 publico classe Gato : Animal 
 {
-    publico texto Cor { buscar; definir; }
-    publico booleano GostaDeDormir { buscar; definir; }
+    publico texto Cor { obter; definir; }
+    publico booleano GostaDeDormir { obter; definir; }
     
     publico Gato(texto nome, inteiro idade, texto cor, booleano gostaDeDormir) 
         : base(nome, idade, "Casa") 
@@ -149,8 +149,8 @@ publico classe Gato : Animal
 // ===== CLASSE DERIVADA 3 =====
 publico classe Passaro : Animal 
 {
-    publico booleano PodeVoar { buscar; definir; }
-    publico texto TipoBico { buscar; definir; }
+    publico booleano PodeVoar { obter; definir; }
+    publico texto TipoBico { obter; definir; }
     
     publico Passaro(texto nome, inteiro idade, booleano podeVoar, texto tipoBico) 
         : base(nome, idade, "Árvore") 
