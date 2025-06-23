@@ -30,6 +30,12 @@ struct ClasseInfo {
     construtor: Option<Vec<String>>,       // bytecode do construtor
 }
 
+#[derive(Clone, Debug)]
+struct FuncInfo {
+    params: Vec<String>,
+    corpo: Vec<String>,
+}
+
 // Implementa como um `Valor` deve ser exibido para o usuário (usado no `PRINT`).
 impl fmt::Display for Valor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -67,6 +73,7 @@ struct VM {
     ip: usize,
     // ✅ NOVO: Registro de classes
     classes: HashMap<String, ClasseInfo>,
+    functions: HashMap<String, FuncInfo>,
 }
 
 impl VM {
@@ -77,7 +84,8 @@ impl VM {
             variaveis: HashMap::new(),
             bytecode,
             ip: 0,
-            classes: HashMap::new(), // ✅ NOVO
+            classes: HashMap::new(),
+            functions: HashMap::new(),
         }
     }
 
@@ -134,6 +142,7 @@ impl VM {
                         bytecode: corpo.clone(),
                         ip: 0,
                         classes: self.classes.clone(),
+                        functions: self.functions.clone(),
                     };
 
                     vm.run()?; // executa método
@@ -387,7 +396,7 @@ impl VM {
                         _ => return Err("JUMP_IF_FALSE requer um valor booleano".to_string()),
                     }
                 }
-                // ✅ NOVO: Instruções para classes
+                // Instruções para classes
                 "DEFINE_CLASS" => {
                     let nome_classe = partes.get(1).ok_or("DEFINE_CLASS requer nome da classe")?;
                     let propriedades: Vec<String> = if partes.len() > 2 {
@@ -447,8 +456,6 @@ impl VM {
                     let nome_propriedade = partes
                         .get(1)
                         .ok_or("SET_PROPERTY requer nome da propriedade")?;
-
-                    // ✅ CORREÇÃO: A ordem dos 'pop' foi invertida.
 
                     // 1. Desempilha o OBJETO (que está no topo da pilha).
                     let mut objeto = self
@@ -542,6 +549,60 @@ impl VM {
                     return Ok(());
                 }
 
+                "DEFINE_FUNCTION" => {
+                    let nome = partes.get(1).ok_or("DEFINE_FUNCTION requer nome")?;
+                    let tam = partes
+                        .get(2)
+                        .ok_or("DEFINE_FUNCTION requer tamanho")?
+                        .parse::<usize>()
+                        .map_err(|_| "Tamanho inválido")?;
+                    let params: Vec<String> = partes[3..].iter().map(|s| s.to_string()).collect();
+                    let corpo = self.bytecode[self.ip..self.ip + tam].to_vec();
+                    self.ip += tam;
+                    self.functions
+                        .insert((*nome).to_string(), FuncInfo { params, corpo });
+                }
+
+                "CALL_FUNCTION" => {
+                    let nome = partes.get(1).ok_or("CALL_FUNCTION requer nome")?;
+                    let nargs = partes
+                        .get(2)
+                        .ok_or("CALL_FUNCTION requer n")?
+                        .parse::<usize>()
+                        .map_err(|_| "n inválido")?;
+                    if self.pilha.len() < nargs {
+                        return Err("Pilha insuficiente para CALL_FUNCTION".into());
+                    }
+                    // argumentos em ordem
+                    let mut args = self.pilha.split_off(self.pilha.len() - nargs);
+                    // procura função
+                    let func = self
+                        .functions
+                        .get(*nome)
+                        .ok_or_else(|| format!("Função '{}' não definida", nome))?
+                        .clone();
+
+                    // cria ambiente local: parametros -> argumentos
+                    let mut vars = HashMap::new();
+                    for (i, p) in func.params.iter().enumerate() {
+                        let val = args.get(i).cloned().unwrap_or(Valor::Nulo);
+                        vars.insert(p.clone(), val);
+                    }
+
+                    // executa corpo em mini-VM
+                    let mut vm = VM {
+                        pilha: Vec::new(),
+                        variaveis: vars,
+                        bytecode: func.corpo,
+                        ip: 0,
+                        classes: self.classes.clone(),
+                        functions: self.functions.clone(), // permite recursão
+                    };
+                    vm.run()?;
+                    let retorno = vm.pilha.pop().unwrap_or(Valor::Nulo);
+                    self.pilha.push(retorno);
+                }
+
                 // Ignora comentários ou linhas vazias
                 op if op.starts_with(';') || op.is_empty() => {}
                 _ => {
@@ -573,7 +634,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(String::from)
         .collect();
 
-    println!("--- Iniciando Interpretador de Bytecode ---");
+    //println!("--- Executando Bytecode ---");
     let mut vm = VM::new(bytecode);
     if let Err(e) = vm.run() {
         eprintln!("\n--- Erro de Execução ---");
@@ -581,6 +642,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("Execução falhou".into());
     }
 
-    println!("\n--- Execução Concluída ---");
+    //println!("\n--- Execução Concluída ---");
     Ok(())
 }

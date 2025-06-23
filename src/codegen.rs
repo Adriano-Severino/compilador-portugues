@@ -426,7 +426,7 @@ impl<'a> BytecodeGenerator<'a> {
             _ => false,
         }
     }
-    // ADICIONE ESTA NOVA FUNÇÃO:
+
     fn generate_declaracao(&mut self, declaracao: &ast::Declaracao) {
         match declaracao {
             // ✅ Reconhece e processa a declaração de classe
@@ -484,6 +484,35 @@ impl<'a> BytecodeGenerator<'a> {
                     ));
                     self.bytecode_instructions.extend(corpo);
                 }
+            }
+
+            ast::Declaracao::DeclaracaoFuncao(func_def) => {
+                // a) monta AST temporário com corpo
+                let sub_programa = ast::Programa {
+                    namespaces: vec![],
+                    declaracoes: vec![ast::Declaracao::Comando(ast::Comando::Bloco(
+                        func_def.corpo.clone(),
+                    ))],
+                };
+
+                // b) gera corpo
+                let mut sub = BytecodeGenerator::new(&sub_programa, false);
+                let mut corpo = sub.generate(); // inclui HALT
+                if !matches!(corpo.last(), Some(op) if op == "RETURN") {
+                    corpo.push("LOAD_CONST_NULL".to_string());
+                    corpo.push("RETURN".to_string());
+                }
+
+                // c) cabeçalho DEFINE_FUNCTION
+                let params: Vec<String> =
+                    func_def.parametros.iter().map(|p| p.nome.clone()).collect();
+                self.bytecode_instructions.push(format!(
+                    "DEFINE_FUNCTION {} {} {}",
+                    func_def.nome,
+                    corpo.len(),
+                    params.join(" ")
+                ));
+                self.bytecode_instructions.extend(corpo);
             }
 
             // Mantém o comportamento para comandos
@@ -641,7 +670,6 @@ impl<'a> BytecodeGenerator<'a> {
                 self.bytecode_instructions.push("POP".to_string()); // Descartar resultado se não usado
             }
 
-            // dentro de generate_comando
             ast::Comando::AtribuirPropriedade(objeto_nome, prop_nome, expr) => {
                 // 1. empilha o valor
                 self.generate_expressao(expr);
@@ -669,12 +697,16 @@ impl<'a> BytecodeGenerator<'a> {
                 self.bytecode_instructions.push("RETURN".to_string());
             }
 
+            ast::Comando::Expressao(e) => {
+                self.generate_expressao(e);
+                self.bytecode_instructions.push("POP".into());
+            }
+
             // Para outros comandos não implementados, remova a linha de comentário e implemente se necessário
             _ => { /* Fazer nada ou adicionar tratamento para outros comandos */ }
         }
     }
 
-    // Altera a assinatura para `&mut self` e remove o retorno Vec<String>
     fn generate_expressao(&mut self, expr: &ast::Expressao) {
         match expr {
             ast::Expressao::Texto(s) => self
@@ -809,6 +841,16 @@ impl<'a> BytecodeGenerator<'a> {
                 // Concatena tudo; resultado fica no topo da pilha
                 self.bytecode_instructions
                     .push(format!("CONCAT {}", partes.len()));
+            }
+
+            ast::Expressao::Chamada(nome, args) => {
+                // empilha cada argumento
+                for a in args {
+                    self.generate_expressao(a);
+                }
+                // chama a função; resultado fica no topo da pilha
+                self.bytecode_instructions
+                    .push(format!("CALL_FUNCTION {} {}", nome, args.len()));
             }
 
             // Para outras expressões não implementadas, remova a linha de comentário e implemente se necessário
