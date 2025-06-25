@@ -642,6 +642,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("Execução falhou".into());
     }
 
+    // Após carregar todas as definições, executa a função Principal se ela existir.
+    if let Some(func) = vm.functions.get("Principal").cloned() {
+        // Cria uma nova VM para o escopo da função Principal.
+        let mut principal_vm = VM {
+            pilha: Vec::new(),
+            variaveis: HashMap::new(), // Principal não tem parâmetros.
+            bytecode: func.corpo,
+            ip: 0,
+            classes: vm.classes, // Compartilha as definições de classe.
+            functions: vm.functions, // Compartilha as definições de função.
+        };
+
+        // Executa a função Principal.
+        if let Err(e) = principal_vm.run() {
+            eprintln!("\n--- Erro na execução de Principal ---");
+            eprintln!("{}", e);
+            return Err("Execução de Principal falhou".into());
+        }
+    }
+
     //println!("\n--- Execução Concluída ---");
     Ok(())
 }
