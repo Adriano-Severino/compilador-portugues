@@ -1,3 +1,6 @@
+usando Meu_Programa.Domain
+//usando Meu_Programa.Domain { testar_funcoes, Pessoa }; da para usar assim tambem
+
 espaco Meu_Programa.Domain
 {
     publico classe Pessoa
@@ -17,7 +20,11 @@ espaco Meu_Programa.Domain
 
         publico vazio apresentar() {
          imprima($"Nome: {Nome} Sobrenome: {Sobrenome}, Idade: {Idade}");
-}
+        }
+    }
+
+    função testar_funcoes() {
+        imprima("testando funções");
     }
 }
 
@@ -37,3 +44,7 @@ p2.apresentar();
 p3.apresentar();
 
 imprima("=== Teste Concluído ===");
+
+teste_funcoes();
+var pessoa = novo Pessoa("joana", 30);
+pessoa.apresentar();

@@ -1,0 +1,26 @@
+// Arquivo: exemplos/biblioteca.pr
+// Define uma biblioteca de geometria reutilizável.
+
+espaco Geometria {
+
+    publico classe Retangulo {
+        publico inteiro Largura { obter; definir; }
+        publico inteiro Altura { obter; definir; }
+
+        // Construtor para inicializar o retângulo
+        publico Retangulo(inteiro largura, inteiro altura) {
+            Largura = largura;
+            Altura = altura;
+        }
+
+        // Método para calcular a área
+        publico função inteiro calcular_area() {
+            retorne Largura * Altura;
+        }
+
+        // Método para descrever o objeto
+        publico função texto descrever() {
+            retorne $"Retângulo com largura {Largura} e altura {Altura}.";
+        }
+    }
+}

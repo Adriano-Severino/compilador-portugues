@@ -1,0 +1,26 @@
+// Arquivo: exemplos/programa_principal.pr
+// Um programa que utiliza a biblioteca de geometria.
+
+// Importa tudo do namespace 'Geometria'.
+// O compilador precisa receber 'biblioteca.pr' para encontrar este namespace.
+usando Geometria;
+
+// Ponto de entrada do programa
+função vazio Principal() {
+    imprima("--- Criando e usando um Retângulo da nossa biblioteca ---");
+
+    // Cria uma instância da classe Retangulo, que foi importada
+    var meu_retangulo = novo Retangulo(10, 5);
+
+    // Usa os métodos do objeto
+    var area = meu_retangulo.calcular_area();
+    imprima("A área do retângulo é: " + area);
+
+    var descricao = meu_retangulo.descrever();
+    imprima(descricao);
+
+    // Acessando e modificando uma propriedade diretamente
+    meu_retangulo.Largura = 12;
+    imprima("Largura alterada para: " + meu_retangulo.Largura);
+    imprima("Nova área: " + meu_retangulo.calcular_area());
+}
