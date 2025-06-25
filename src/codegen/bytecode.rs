@@ -7,7 +7,6 @@ pub struct BytecodeGenerator<'a> {
     type_checker: &'a crate::type_checker::VerificadorTipos<'a>,
     namespace_path: String,
     bytecode_instructions: Vec<String>,
-    em_metodo: bool,
     props_por_classe: HashMap<String, Vec<String>>,
 }
 
@@ -23,14 +22,12 @@ impl<'a> BytecodeGenerator<'a> {
     pub fn new(
         programa: &'a ast::Programa,
         type_checker: &'a crate::type_checker::VerificadorTipos,
-        em_metodo: bool,
     ) -> Self {
         Self {
             programa,
             type_checker,
             namespace_path: String::new(),
             bytecode_instructions: Vec::new(),
-            em_metodo,
             props_por_classe: HashMap::new(),
         }
     }
@@ -63,7 +60,6 @@ impl<'a> BytecodeGenerator<'a> {
                     type_checker: self.type_checker,
                     namespace_path: new_path,
                     bytecode_instructions: Vec::new(),
-                    em_metodo: false,
                     props_por_classe: self.props_por_classe.clone(),
                 };
                 self.bytecode_instructions.extend(sub.generate());
@@ -139,7 +135,6 @@ impl<'a> BytecodeGenerator<'a> {
                         type_checker: self.type_checker,
                         namespace_path: self.namespace_path.clone(),
                         bytecode_instructions: Vec::new(),
-                        em_metodo: true,
                         props_por_classe: self.props_por_classe.clone(),
                     };
                     let mut corpo = sub.generate(); // inclui HALT
@@ -185,7 +180,6 @@ impl<'a> BytecodeGenerator<'a> {
                     type_checker: self.type_checker,
                     namespace_path: self.namespace_path.clone(),
                     bytecode_instructions: Vec::new(),
-                    em_metodo: false,
                     props_por_classe: self.props_por_classe.clone(),
                 };
                 let mut corpo = sub.generate(); // inclui HALT
@@ -238,7 +232,6 @@ impl<'a> BytecodeGenerator<'a> {
                 type_checker: self.type_checker,
                 namespace_path: namespace.nome.clone(),
                 bytecode_instructions: Vec::new(),
-                em_metodo: false,
                 props_por_classe: self.props_por_classe.clone(),
             };
             self.bytecode_instructions.extend(sub.generate());

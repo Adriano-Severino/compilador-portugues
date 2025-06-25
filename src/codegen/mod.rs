@@ -51,7 +51,7 @@ impl GeradorCodigo {
         type_checker: &'a crate::type_checker::VerificadorTipos,
         nome_base: &str,
     ) -> Result<(), String> {
-        let mut generator = bytecode::BytecodeGenerator::new(programa, type_checker, false);
+        let mut generator = bytecode::BytecodeGenerator::new(programa, type_checker);
         let bytecode = generator.generate();
         fs::write(format!("{}.pbc", nome_base), bytecode.join("\n")).map_err(|e| e.to_string())
     }

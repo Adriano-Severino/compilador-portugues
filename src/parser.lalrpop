@@ -112,9 +112,9 @@ DeclaracaoClasse: ast::DeclaracaoClasse = {
 
 MembroClasse: ast::MembroClasse = {
     <c:ConstrutorDecl>      => ast::MembroClasse::Construtor(c),
-    <f:CampoClasse>         => ast::MembroClasse::Campo(f),        // ← 1º
     <p:PropriedadeClasse>   => ast::MembroClasse::Propriedade(p),
-    <m:MetodoClasse>        => ast::MembroClasse::Metodo(m),       // ←  por último
+    <f:CampoClasse>         => ast::MembroClasse::Campo(f),
+    <m:MetodoClasse>        => ast::MembroClasse::Metodo(m),
 };
 
 // === CAMPOS ===
@@ -171,7 +171,7 @@ PropriedadeInicializador: ast::Expressao = {
     "=" <e:Expressao> => e
 };
 PropriedadeClasse: ast::PropriedadeClasse = {
-    <modificador:ModificadorAcesso?> <estatica:("estática")?> <tipo:Tipo> <nome:IdentificadorSimples> "{" <acessores:AcessorPropriedade+> "}" <inicializador:PropriedadeInicializador?> ";" => {
+    <modificador:ModificadorAcesso?> <estatica:("estática")?> <tipo:Tipo> <nome:IdentificadorSimples> "{" <acessores:AcessorPropriedade+> "}" => {
         let mut obter = None;
         let mut definir = None;
 
@@ -194,7 +194,7 @@ PropriedadeClasse: ast::PropriedadeClasse = {
             modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
             obter,
             definir,
-            valor_inicial: inicializador,
+            valor_inicial: None,
             eh_estatica: estatica.is_some(),
         }
     }
