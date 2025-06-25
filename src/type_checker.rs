@@ -21,47 +21,141 @@ impl<'a> VerificadorTipos<'a> {
     }
 
     pub fn verificar_programa(&mut self, programa: &'a Programa) -> Result<(), Vec<String>> {
-        // 1. Registrar todos os símbolos de todos os namespaces
+        println!("--- Verificador de Tipos: Iniciando verificação do programa ---");
+
+        // Fase 1: Registrar todos os usings.
+        println!("[Fase 1] Registrando usings...");
+        for u in &programa.usings {
+            self.usings.push(u.caminho.clone());
+        }
+        println!("[Fase 1] Usings registrados: {:?}", self.usings);
+
+        // Fase 2: Registrar todos os nomes de classes e funções (primeira passada).
+        println!("[Fase 2] Registrando definições de namespaces e globais...");
         for ns in &programa.namespaces {
             for decl in &ns.declaracoes {
-                let nome_completo = format!("{}.{}", ns.nome, self.get_declaracao_nome(decl));
-                self.simbolos_namespaces.insert(nome_completo, decl);
+                let nome_simples = self.get_declaracao_nome(decl);
+                let nome_completo = format!("{}.{}", ns.nome, nome_simples);
+                println!("  - Registrando símbolo de namespace: {}", nome_completo);
+                self.simbolos_namespaces.insert(nome_completo.clone(), decl);
 
                 if let Declaracao::DeclaracaoClasse(classe) = decl {
-                    self.classes.insert(classe.nome.clone(), classe);
+                    self.classes.insert(nome_completo, classe);
+                }
+            }
+        }
+        for declaracao in &programa.declaracoes {
+            let nome_simples = self.get_declaracao_nome(declaracao);
+            if !nome_simples.is_empty() {
+                println!("  - Registrando símbolo global: {}", nome_simples);
+                self.simbolos_namespaces.insert(nome_simples.clone(), declaracao);
+                if let Declaracao::DeclaracaoClasse(classe) = declaracao {
+                    self.classes.insert(nome_simples, classe);
+                }
+            }
+        }
+        println!("[Fase 2] Registro concluído.");
+
+        // Fase 3: Verificar tudo com o contexto de namespace correto.
+        println!("[Fase 3] Verificando declarações...");
+        for ns in &programa.namespaces {
+            let namespace_atual = &ns.nome;
+            println!("  -> Verificando namespace: {}", namespace_atual);
+            for declaracao in &ns.declaracoes {
+                println!("    - Verificando declaração: {}", self.get_declaracao_nome(declaracao));
+                self.verificar_declaracao(declaracao, namespace_atual);
+            }
+        }
+        println!("  -> Verificando declarações globais...");
+        for declaracao in &programa.declaracoes {
+            println!("    - Verificando declaração global: {}", self.get_declaracao_nome(declaracao));
+            self.verificar_declaracao(declaracao, ""); // Namespace global
+        }
+        println!("[Fase 3] Verificação concluída.");
+
+        if self.erros.is_empty() {
+            println!("--- Verificador de Tipos: Verificação concluída sem erros. ---");
+            Ok(())
+        } else {
+            println!("--- Verificador de Tipos: Verificação concluída com {} erros. ---", self.erros.len());
+            Err(self.erros.clone())
+        }
+    }
+
+    pub fn resolver_nome_classe(&self, nome_classe: &str, namespace_atual: &str) -> String {
+
+
+        // Se o nome já for qualificado, retorne-o.
+        if nome_classe.contains('.') {
+            return nome_classe.to_string();
+        }
+
+        // 1. Tente resolver no namespace atual.
+        if !namespace_atual.is_empty() {
+            let nome_completo = format!("{}.{}", namespace_atual, nome_classe);
+            if let Some(decl) = self.simbolos_namespaces.get(&nome_completo) {
+                if let Declaracao::DeclaracaoClasse(_) = decl {
+                    return nome_completo;
                 }
             }
         }
 
-        // 2. Registrar os usings
-        for u in &programa.usings {
-            self.usings.push(u.caminho.clone());
-        }
-
-        // 3. Registrar classes globais
-        for declaracao in &programa.declaracoes {
-            if let Declaracao::DeclaracaoClasse(classe) = declaracao {
-                self.classes.insert(classe.nome.clone(), classe);
+        // 2. Tente resolver usando os `usings`.
+        for using_path in &self.usings {
+            let nome_completo = format!("{}.{}", using_path, nome_classe);
+            if let Some(decl) = self.simbolos_namespaces.get(&nome_completo) {
+                if let Declaracao::DeclaracaoClasse(_) = decl {
+                    return nome_completo;
+                }
             }
         }
 
-        // ✅ NOVO: Segundo passo - verificar herança
-        for declaracao in &programa.declaracoes {
-            if let Declaracao::DeclaracaoClasse(classe) = declaracao {
-                self.verificar_heranca_classe(classe);
+        // 3. Verifique se é uma classe global (sem namespace).
+        if self.classes.contains_key(nome_classe) {
+            return nome_classe.to_string();
+        }
+
+        // Se não for encontrado, retorne o nome original como fallback.
+        nome_classe.to_string()
+    }
+
+    pub fn resolver_nome_funcao(&self, nome_funcao: &str, namespace_atual: &str) -> String {
+        // Se o nome já for qualificado, retorne-o.
+        if nome_funcao.contains('.') {
+            return nome_funcao.to_string();
+        }
+
+        // 1. Tente resolver no namespace atual.
+        if !namespace_atual.is_empty() {
+            let nome_completo = format!("{}.{}", namespace_atual, nome_funcao);
+            if let Some(decl) = self.simbolos_namespaces.get(&nome_completo) {
+                if let Declaracao::DeclaracaoFuncao(_) = decl {
+                    return nome_completo;
+                }
             }
         }
 
-        // ✅ EXISTENTE: Terceiro passo - verificar comandos
-        for declaracao in &programa.declaracoes {
-            self.verificar_declaracao(declaracao);
+        // 2. Tente resolver usando os `usings`.
+        for using_path in &self.usings {
+            let nome_completo = format!("{}.{}", using_path, nome_funcao);
+            if let Some(decl) = self.simbolos_namespaces.get(&nome_completo) {
+                if let Declaracao::DeclaracaoFuncao(_) = decl {
+                    return nome_completo;
+                }
+            }
         }
 
-        if self.erros.is_empty() {
-            Ok(())
-        } else {
-            Err(self.erros.clone())
+        // 3. Verifique se é uma função global (sem namespace).
+        if let Some(decl) = self.simbolos_namespaces.get(nome_funcao) {
+            if let Declaracao::DeclaracaoFuncao(_) = decl {
+                // A chave em `simbolos_namespaces` para símbolos com namespace contém um ponto.
+                // Se a chave for apenas `nome_funcao`, deve ser global.
+                return nome_funcao.to_string();
+            }
         }
+
+        // Se não for encontrado, retorne o nome original como fallback.
+        nome_funcao.to_string()
     }
 
     // ✅ NOVO: Verificar herança da classe
@@ -73,33 +167,37 @@ impl<'a> VerificadorTipos<'a> {
         }
     }
 
-    fn verificar_heranca_classe(&mut self, classe: &DeclaracaoClasse) {
-        if let Some(classe_pai) = &classe.classe_pai {
-            // Verificar se classe pai existe
-            if !self.classes.contains_key(classe_pai) {
+    fn verificar_heranca_classe(&mut self, classe: &DeclaracaoClasse, namespace_atual: &str) {
+        if let Some(classe_pai_simples) = &classe.classe_pai {
+            let nome_pai_completo = self.resolver_nome_classe(classe_pai_simples, namespace_atual);
+    
+            if !self.classes.contains_key(&nome_pai_completo) {
                 self.erros.push(format!(
                     "Classe pai '{}' não encontrada para classe '{}'",
-                    classe_pai, classe.nome
+                    classe_pai_simples, classe.nome
                 ));
                 return;
             }
-
-            // Verificar dependência circular
-            if self.tem_dependencia_circular(&classe.nome, classe_pai) {
+    
+            let nome_classe_completo = if namespace_atual.is_empty() {
+                classe.nome.clone()
+            } else {
+                format!("{}.{}", namespace_atual, classe.nome)
+            };
+    
+            if self.tem_dependencia_circular(&nome_classe_completo, &nome_pai_completo) {
                 self.erros.push(format!(
                     "Dependência circular detectada: {} -> {}",
-                    classe.nome, classe_pai
+                    classe.nome, classe_pai_simples
                 ));
                 return;
             }
-
-            // Verificar métodos redefiníveis e sobrescreve
+    
             for metodo in &classe.metodos {
-                self.verificar_metodo_heranca(metodo, classe, classe_pai);
+                self.verificar_metodo_heranca(metodo, classe, &nome_pai_completo);
             }
         }
-
-        // Verificar métodos sem herança
+    
         for metodo in &classe.metodos {
             self.verificar_metodo_sem_heranca(metodo, classe);
         }
@@ -231,37 +329,41 @@ impl<'a> VerificadorTipos<'a> {
         true
     }
 
-    fn verificar_declaracao(&mut self, declaracao: &Declaracao) {
+    fn verificar_declaracao(&mut self, declaracao: &'a Declaracao, namespace_atual: &str) {
         match declaracao {
-            Declaracao::Comando(cmd) => self.verificar_comando(cmd),
-            Declaracao::DeclaracaoFuncao(funcao) => {
-                for comando in &funcao.corpo {
-                    self.verificar_comando(comando);
-                }
-            }
             Declaracao::DeclaracaoClasse(classe) => {
-                // ✅ NOVO: Verificar métodos da classe
+                self.verificar_heranca_classe(classe, namespace_atual);
                 for metodo in &classe.metodos {
                     for comando in &metodo.corpo {
-                        self.verificar_comando(comando);
+                        self.verificar_comando(comando, namespace_atual);
                     }
                 }
             }
+            Declaracao::DeclaracaoFuncao(funcao) => {
+                for comando in &funcao.corpo {
+                    self.verificar_comando(comando, namespace_atual);
+                }
+            }
+            Declaracao::Comando(cmd) => self.verificar_comando(cmd, namespace_atual),
             _ => {}
         }
     }
 
-    fn verificar_comando(&mut self, comando: &Comando) {
-        if let Comando::Expressao(Expressao::Chamada(nome_funcao, _)) = comando {
-            self.resolver_funcao(nome_funcao);
-        }
-
-        if let Comando::DeclaracaoVariavel(Tipo::Classe(nome_classe), _, _) = comando {
-            self.resolver_tipo_classe(nome_classe);
-        }
-
+    fn verificar_comando(&mut self, comando: &Comando, namespace_atual: &str) {
         match comando {
+            Comando::Expressao(Expressao::Chamada(nome_funcao, _)) => {
+                let nome_resolvido = self.resolver_nome_funcao(nome_funcao, namespace_atual);
+                if !self.simbolos_namespaces.contains_key(&nome_resolvido) {
+                     self.erros.push(format!("Função '{}' não encontrada.", nome_funcao));
+                }
+            }
             Comando::DeclaracaoVariavel(tipo, nome, _) => {
+                if let Tipo::Classe(nome_classe) = tipo {
+                    let nome_resolvido = self.resolver_nome_classe(nome_classe, namespace_atual);
+                    if !self.classes.contains_key(&nome_resolvido) {
+                        self.erros.push(format!("Tipo ou classe '{}' não encontrada.", nome_classe));
+                    }
+                }
                 self.variaveis.insert(nome.clone(), tipo.clone());
             }
             Comando::Atribuicao(nome, _) => {
@@ -271,44 +373,10 @@ impl<'a> VerificadorTipos<'a> {
             }
             Comando::Bloco(comandos) => {
                 for cmd in comandos {
-                    self.verificar_comando(cmd);
+                    self.verificar_comando(cmd, namespace_atual);
                 }
             }
             _ => {}
         }
-    }
-
-    fn resolver_tipo_classe(&mut self, nome_classe: &str) {
-        // 1. Tenta encontrar no escopo global
-        if self.classes.contains_key(nome_classe) {
-            return;
-        }
-
-        // 2. Tenta encontrar usando os 'usings'
-        for u in &self.usings {
-            let nome_completo = format!("{}.{}", u, nome_classe);
-            if let Some(decl) = self.simbolos_namespaces.get(&nome_completo) {
-                if let Declaracao::DeclaracaoClasse(_) = decl {
-                    // Encontrou a classe via 'usando', está ok.
-                    return;
-                }
-            }
-        }
-
-        self.erros.push(format!("Tipo ou classe '{}' não encontrada.", nome_classe));
-    }
-
-    fn resolver_funcao(&mut self, nome_funcao: &str) {
-        // 1. Tenta encontrar no escopo global (não implementado ainda, mas deveria)
-
-        // 2. Tenta encontrar usando os 'usings'
-        for u in &self.usings {
-            let nome_completo = format!("{}.{}", u, nome_funcao);
-            if self.simbolos_namespaces.contains_key(&nome_completo) {
-                return; // Encontrou
-            }
-        }
-
-        self.erros.push(format!("Função '{}' não encontrada.", nome_funcao));
     }
 }

@@ -103,16 +103,24 @@ fn exibir_ajuda() {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("DEBUG: O compilador iniciou a execução.");
     let args: Vec<String> = env::args().collect();
-    
-    // ✅ CORREÇÃO: Tratar o caso de nenhum argumento ou --help
+
     if args.len() <= 1 || args.contains(&"--help".to_string()) {
         exibir_ajuda();
         return Ok(());
     }
 
-    let arquivo_pr = &args[1];
-    
-    // Análise do argumento --target
+    let caminhos_arquivos: Vec<String> = args.iter()
+        .skip(1)
+        .filter(|arg| arg.ends_with(".pr"))
+        .cloned()
+        .collect();
+
+    if caminhos_arquivos.is_empty() {
+        eprintln!("Erro: Nenhum arquivo de entrada (.pr) especificado.");
+        exibir_ajuda();
+        return Err(Box::new(CompilerError("Nenhum arquivo de entrada".into())));
+    }
+
     let target = args.iter()
         .find(|arg| arg.starts_with("--target="))
         .map(|arg| arg.split('=').nth(1).unwrap_or("universal"))
@@ -125,64 +133,92 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .unwrap_or(TargetCompilacao::Universal);
 
-    compilar_arquivo(arquivo_pr, target)
-}
+    // --- Nova Lógica de Compilação em Fases ---
 
-fn compilar_arquivo(
-    caminho_arquivo: &str,
-    target: TargetCompilacao,
-) -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== Compilando \"{}\" para o alvo: {:?} ===", caminho_arquivo, target);
+    // Fase 1: Ler todos os arquivos para a memória.
+    let codigos: Vec<String> = caminhos_arquivos.iter()
+        .map(|p| fs::read_to_string(p))
+        .collect::<Result<_, _>>()?;
 
-    let codigo = fs::read_to_string(caminho_arquivo)?;
-    let ast = processar_codigo_dinamico(&codigo)?;
-    
-    let nome_base = Path::new(caminho_arquivo).file_stem().unwrap_or_default().to_str().unwrap_or("saida");
+    // Fase 2: Parsear todos os arquivos para ASTs.
+    let mut asts = Vec::new();
+    for (caminho, codigo) in caminhos_arquivos.iter().zip(codigos.iter()) {
+        let lexer = lexer::Token::lexer(codigo);
+        let tokens_result: Result<Vec<_>, _> = lexer.spanned().map(|(token, span)| {
+            token.map(|t| (span.start, t, span.end))
+        }).collect();
 
-    match target {
-        TargetCompilacao::Universal => compilar_universal(&ast, nome_base),
-        TargetCompilacao::LlvmIr => compilar_para_llvm_ir(&ast, nome_base),
-        TargetCompilacao::CilBytecode => compilar_para_cil_bytecode(&ast, nome_base),
-        TargetCompilacao::Console => compilar_para_console(&ast, nome_base),
-        TargetCompilacao::Bytecode => compilar_para_bytecode(&ast, nome_base),
+        let tokens = match tokens_result {
+            Ok(tokens) => tokens,
+            Err(_) => return Err(Box::new(CompilerError(format!("Erro Léxico: Token inválido encontrado em '{}'", caminho)))),
+        };
+
+        let parser = parser::ArquivoParser::new();
+        let mut ast = parser.parse(tokens.iter().cloned())
+            .map_err(|e| Box::new(CompilerError(format!("Erro sintático em '{}': {:?}", caminho, e))))?;
+
+        crate::interpolacao::walk_programa(&mut ast, |e| {
+            *e = interpolacao::planificar_interpolada(e.clone());
+        });
+        asts.push(ast);
     }
-}
 
-// (O restante do arquivo main.rs permanece o mesmo, com as funções processar_codigo_dinamico,
-// compilar_universal, compilar_para_llvm_ir, etc.)
+    // Fase 3: Juntar ASTs para uma análise semântica unificada.
+    let mut programa_final = ast::Programa { usings: vec![], namespaces: vec![], declaracoes: vec![] };
+    for mut ast in asts {
+        programa_final.declaracoes.extend(ast.declaracoes);
+        programa_final.usings.extend(ast.usings);
 
-fn processar_codigo_dinamico(codigo: &str) -> Result<ast::Programa, Box<dyn std::error::Error>> {
-    let lex = lexer::Token::lexer(codigo);
-    let tokens: Vec<_> = lex.spanned().map(|(tok_res, span)| (span.start, tok_res.unwrap(), span.end)).collect();
-    let parser = parser::ArquivoParser::new();
-    let mut ast = parser.parse(tokens.iter().cloned()).map_err(|e| Box::new(CompilerError(format!("Erro sintático: {:?}", e))))?;
+        for ns_para_mesclar in ast.namespaces.drain(..) {
+            if let Some(ns_existente) = programa_final.namespaces.iter_mut().find(|n| n.nome == ns_para_mesclar.nome) {
+                // Namespace já existe, mescla as declarações.
+                ns_existente.declaracoes.extend(ns_para_mesclar.declaracoes);
+            } else {
+                // Namespace novo, adiciona à lista.
+                programa_final.namespaces.push(ns_para_mesclar);
+            }
+        }
+    }
 
-    // Verificação de tipos
+    // Fase 4: Análise semântica no AST combinado.
     let mut type_checker = type_checker::VerificadorTipos::new();
-    if let Err(erros) = type_checker.verificar_programa(&ast) {
+    if let Err(erros) = type_checker.verificar_programa(&programa_final) {
         for erro in erros {
             eprintln!("Erro Semântico: {}", erro);
         }
         return Err(Box::new(CompilerError("Houve erros semânticos.".to_string())));
     }
 
-    crate::interpolacao::walk_programa(&mut ast, |e| {
-        *e = interpolacao::planificar_interpolada(e.clone());
-    });
-    Ok(ast)
+    // Fase 5: Geração de código.
+    let nome_base = Path::new(&caminhos_arquivos[0]).file_stem().unwrap_or_default().to_str().unwrap_or("saida");
+    match target {
+        TargetCompilacao::Universal => compilar_universal(&programa_final, &type_checker, nome_base),
+        TargetCompilacao::LlvmIr => compilar_para_llvm_ir(&programa_final, &type_checker, nome_base),
+        TargetCompilacao::CilBytecode => compilar_para_cil_bytecode(&programa_final, &type_checker, nome_base),
+        TargetCompilacao::Console => compilar_para_console(&programa_final, &type_checker, nome_base),
+        TargetCompilacao::Bytecode => compilar_para_bytecode(&programa_final, &type_checker, nome_base),
+    }
 }
 
-fn compilar_universal(ast: &ast::Programa, nome_base: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn compilar_universal<'a>(
+    ast: &'a ast::Programa,
+    type_checker: &'a type_checker::VerificadorTipos,
+    nome_base: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🌍 Iniciando Compilação Universal...");
-    compilar_para_llvm_ir(ast, nome_base)?;
-    compilar_para_cil_bytecode(ast, nome_base)?;
-    compilar_para_console(ast, nome_base)?;
-    compilar_para_bytecode(ast, nome_base)?;
+    compilar_para_llvm_ir(ast, type_checker, nome_base)?;
+    compilar_para_cil_bytecode(ast, type_checker, nome_base)?;
+    compilar_para_console(ast, type_checker, nome_base)?;
+    compilar_para_bytecode(ast, type_checker, nome_base)?;
     println!("\n🎉 Compilação Universal Concluída!");
     Ok(())
 }
 
-fn compilar_para_llvm_ir(programa: &ast::Programa, nome_base: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn compilar_para_llvm_ir<'a>(
+    programa: &'a ast::Programa,
+    _type_checker: &'a type_checker::VerificadorTipos, // Ainda não usado, mas necessário para a assinatura
+    nome_base: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Gerando LLVM IR...");
     let gerador = codegen::GeradorCodigo::new()?;
     gerador.gerar_llvm_ir(programa, nome_base).map_err(|e| Box::new(CompilerError(e)))?;
@@ -193,7 +229,11 @@ fn compilar_para_llvm_ir(programa: &ast::Programa, nome_base: &str) -> Result<()
     Ok(())
 }
 
-fn compilar_para_cil_bytecode(ast: &ast::Programa, nome_base: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn compilar_para_cil_bytecode<'a>(
+    ast: &'a ast::Programa,
+    _type_checker: &'a type_checker::VerificadorTipos, // Ainda não usado
+    nome_base: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Gerando CIL Bytecode...");
     let gerador = codegen::GeradorCodigo::new()?;
     gerador.gerar_cil(ast, nome_base).map_err(|e| Box::new(CompilerError(e)))?;
@@ -202,7 +242,11 @@ fn compilar_para_cil_bytecode(ast: &ast::Programa, nome_base: &str) -> Result<()
     Ok(())
 }
 
-fn compilar_para_console(ast: &ast::Programa, nome_base: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn compilar_para_console<'a>(
+    ast: &'a ast::Programa,
+    _type_checker: &'a type_checker::VerificadorTipos, // Ainda não usado
+    nome_base: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Gerando Projeto de Console .NET...");
     let gerador = codegen::GeradorCodigo::new()?;
     gerador.gerar_console(ast, nome_base).map_err(|e| Box::new(CompilerError(e)))?;
@@ -211,10 +255,14 @@ fn compilar_para_console(ast: &ast::Programa, nome_base: &str) -> Result<(), Box
     Ok(())
 }
 
-fn compilar_para_bytecode(ast: &ast::Programa, nome_base: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn compilar_para_bytecode<'a>(
+    ast: &'a ast::Programa,
+    type_checker: &'a type_checker::VerificadorTipos,
+    nome_base: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Gerando Bytecode Customizado...");
     let mut gerador = codegen::GeradorCodigo::new()?;
-    gerador.gerar_bytecode(ast, nome_base).map_err(|e| Box::new(CompilerError(e)))?;
+    gerador.gerar_bytecode(ast, type_checker, nome_base).map_err(|e| Box::new(CompilerError(e)))?;
     println!("  ✓ {}.pbc gerado.", nome_base);
     println!(" ✓ Executando o bytecode...");
     println!("Você pode executar o bytecode usando o interpretador personalizado.");

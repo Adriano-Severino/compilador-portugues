@@ -6,7 +6,7 @@ pub struct SistemaModulos {
     modulos: HashMap<String, Modulo>,
     dependencias: HashMap<String, Vec<String>>,
     namespaces: HashMap<String, String>,
-    modulo_atual: Option<String>,
+
 }
 
 #[derive(Debug, Clone)]
@@ -25,7 +25,7 @@ impl SistemaModulos {
             modulos: HashMap::new(),
             dependencias: HashMap::new(),
             namespaces: HashMap::new(),
-            modulo_atual: None,
+
         }
     }
 

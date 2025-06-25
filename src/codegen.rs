@@ -3,7 +3,7 @@
 use crate::ast;
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+
 
 //_______________________________________________________________________________________________
 //
@@ -404,6 +404,7 @@ impl<'a> ConsoleGenerator<'a> {
 // --- IMPLEMENTAÇÃO DO GERADOR DE BYTECODE ---
 struct BytecodeGenerator<'a> {
     programa: &'a ast::Programa,
+    type_checker: &'a crate::type_checker::VerificadorTipos<'a>,
     namespace_path: String,
     bytecode_instructions: Vec<String>,
     em_metodo: bool,
@@ -419,9 +420,14 @@ impl<'a> BytecodeGenerator<'a> {
         }
     }
 
-    fn new(programa: &'a ast::Programa, em_metodo: bool) -> Self {
+    fn new(
+        programa: &'a ast::Programa,
+        type_checker: &'a crate::type_checker::VerificadorTipos,
+        em_metodo: bool,
+    ) -> Self {
         Self {
             programa,
+            type_checker,
             namespace_path: String::new(),
             bytecode_instructions: Vec::new(),
             em_metodo,
@@ -454,10 +460,11 @@ impl<'a> BytecodeGenerator<'a> {
                 };
                 let mut sub = BytecodeGenerator {
                     programa: &sub_prog,
+                    type_checker: self.type_checker,
                     namespace_path: new_path,
                     bytecode_instructions: Vec::new(),
                     em_metodo: false,
-                    props_por_classe: HashMap::new(),
+                    props_por_classe: self.props_por_classe.clone(),
                 };
                 self.bytecode_instructions.extend(sub.generate());
             }
@@ -503,7 +510,14 @@ impl<'a> BytecodeGenerator<'a> {
                     };
 
                     // b) gera bytecode do corpo do método
-                    let mut sub = BytecodeGenerator::new(&sub_programa, true);
+                                        let mut sub = BytecodeGenerator {
+                        programa: &sub_programa,
+                        type_checker: self.type_checker,
+                        namespace_path: self.namespace_path.clone(),
+                        bytecode_instructions: Vec::new(),
+                        em_metodo: true,
+                        props_por_classe: self.props_por_classe.clone(),
+                    };
                     let mut corpo = sub.generate(); // inclui HALT
 
                     if !matches!(corpo.last(), Some(last) if last == "RETURN") {
@@ -512,9 +526,10 @@ impl<'a> BytecodeGenerator<'a> {
                     }
 
                     // c) cabeçalho + corpo
+                                        let full_class_name = self.qual(&classe_def.nome);
                     self.bytecode_instructions.push(format!(
                         "DEFINE_METHOD {} {} {}",
-                        classe_def.nome,
+                        full_class_name,
                         metodo.nome,
                         corpo.len()
                     ));
@@ -533,7 +548,14 @@ impl<'a> BytecodeGenerator<'a> {
                 };
 
                 // b) gera corpo
-                let mut sub = BytecodeGenerator::new(&sub_programa, false);
+                                let mut sub = BytecodeGenerator {
+                    programa: &sub_programa,
+                    type_checker: self.type_checker,
+                    namespace_path: self.namespace_path.clone(),
+                    bytecode_instructions: Vec::new(),
+                    em_metodo: false,
+                    props_por_classe: self.props_por_classe.clone(),
+                };
                 let mut corpo = sub.generate(); // inclui HALT
                 if !matches!(corpo.last(), Some(op) if op == "RETURN") {
                     corpo.push("LOAD_CONST_NULL".to_string());
@@ -543,7 +565,7 @@ impl<'a> BytecodeGenerator<'a> {
                 // c) cabeçalho DEFINE_FUNCTION
                 let params: Vec<String> =
                     func_def.parametros.iter().map(|p| p.nome.clone()).collect();
-                let full_fn = self.qual(&func_def.nome); // NOVO
+                let full_fn = self.type_checker.resolver_nome_funcao(&func_def.nome, &self.namespace_path);
                 self.bytecode_instructions.push(format!(
                     "DEFINE_FUNCTION {} {} {}",
                     full_fn,
@@ -570,15 +592,29 @@ impl<'a> BytecodeGenerator<'a> {
             self.generate_declaracao(declaracao);
         }
 
-        // ✅ CORREÇÃO: Adicione este loop para iterar sobre os namespaces
+
+
+        // Também processa namespaces de primeiro nível
         for namespace in &self.programa.namespaces {
-            for declaracao in &namespace.declaracoes {
-                self.generate_declaracao(declaracao);
-            }
+            // Cria gerador dedicado com o caminho do namespace
+            let mut sub = BytecodeGenerator {
+                programa: &ast::Programa {
+                    usings: vec![],
+                    namespaces: vec![],
+                    declaracoes: namespace.declaracoes.clone(),
+                },
+                type_checker: self.type_checker,
+                namespace_path: namespace.nome.clone(),
+                bytecode_instructions: Vec::new(),
+                em_metodo: false,
+                props_por_classe: self.props_por_classe.clone(),
+            };
+            self.bytecode_instructions.extend(sub.generate());
         }
 
         std::mem::take(&mut self.bytecode_instructions)
     }
+
     // Altera a assinatura para `&mut self` e remove o retorno Vec<String>
     fn generate_comando(&mut self, comando: &ast::Comando) {
         match comando {
@@ -669,9 +705,10 @@ impl<'a> BytecodeGenerator<'a> {
                 }
 
                 // Criar objeto
+                                let nome_completo = self.type_checker.resolver_nome_classe(classe, &self.namespace_path);
                 self.bytecode_instructions.push(format!(
                     "NEW_OBJECT {} {}",
-                    classe,
+                    nome_completo,
                     argumentos.len()
                 ));
                 self.bytecode_instructions
@@ -774,9 +811,11 @@ impl<'a> BytecodeGenerator<'a> {
                     self.generate_expressao(arg);
                 }
                 // Em seguida, emite a instrução para criar um novo objeto
+                // ✅ NOVO: Resolve o nome da classe usando o verificador de tipos
+                                let nome_completo = self.type_checker.resolver_nome_classe(classe_nome, &self.namespace_path);
                 self.bytecode_instructions.push(format!(
                     "NEW_OBJECT {} {}",
-                    classe_nome,
+                    nome_completo,
                     argumentos.len()
                 ));
             }
@@ -867,15 +906,16 @@ impl<'a> BytecodeGenerator<'a> {
                     .push(format!("CONCAT {}", partes.len()));
             }
 
-            ast::Expressao::Chamada(nome_qualif, args) => {
-                for a in args {
-                    // empilha argumentos
-                    self.generate_expressao(a);
+            ast::Expressao::Chamada(nome_funcao, argumentos) => {
+                for arg in argumentos {
+                    self.generate_expressao(arg);
                 }
+                // ✅ CORRIGIDO: Resolve o nome completo da função usando o type_checker
+                let nome_completo = self.type_checker.resolver_nome_funcao(nome_funcao, &self.namespace_path);
                 self.bytecode_instructions.push(format!(
                     "CALL_FUNCTION {} {}",
-                    nome_qualif,
-                    args.len()
+                    nome_completo,
+                    argumentos.len()
                 ));
             }
 
@@ -944,8 +984,13 @@ impl GeradorCodigo {
         fs::write(format!("{}/Program.cs", dir_projeto), program_cs).map_err(|e| e.to_string())
     }
 
-    pub fn gerar_bytecode(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
-        let mut generator = BytecodeGenerator::new(programa, false);
+    pub fn gerar_bytecode<'a>(
+        &mut self,
+        programa: &'a ast::Programa,
+        type_checker: &'a crate::type_checker::VerificadorTipos,
+        nome_base: &str,
+    ) -> Result<(), String> {
+        let mut generator = BytecodeGenerator::new(programa, type_checker, false);
         let bytecode = generator.generate();
         fs::write(format!("{}.pbc", nome_base), bytecode.join("\n")).map_err(|e| e.to_string())
     }
