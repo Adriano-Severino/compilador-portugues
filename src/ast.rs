@@ -23,12 +23,14 @@ pub enum Tipo {
 /* ========================================================================== */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Programa {
+    pub usings: Vec<DeclaracaoUsando>,
     pub namespaces: Vec<DeclaracaoNamespace>,
     pub declaracoes: Vec<Declaracao>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ItemPrograma {
+    Usando(DeclaracaoUsando),
     Namespace(DeclaracaoNamespace),
     Declaracao(Declaracao),
 }
@@ -40,6 +42,11 @@ pub enum ItemPrograma {
 pub struct DeclaracaoNamespace {
     pub nome: String,
     pub declaracoes: Vec<Declaracao>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeclaracaoUsando {
+    pub caminho: String,
 }
 
 /* ========================================================================== */

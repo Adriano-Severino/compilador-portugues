@@ -23,6 +23,8 @@ pub enum Token {
     TVar,
     #[token("espaco")]
     TEspaco,
+    #[token("usando")]
+    TUsando,
 
     /* tipos */
     #[token("inteiro")]

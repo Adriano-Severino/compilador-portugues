@@ -1,26 +1,47 @@
 use crate::ast::*;
 use std::collections::HashMap;
 
-pub struct VerificadorTipos {
+pub struct VerificadorTipos<'a> {
+    usings: Vec<String>,
+    simbolos_namespaces: HashMap<String, &'a Declaracao>,
     variaveis: HashMap<String, Tipo>,
-    classes: HashMap<String, DeclaracaoClasse>, // ✅ NOVO: Armazenar classes
+    classes: HashMap<String, &'a DeclaracaoClasse>,
     erros: Vec<String>,
 }
 
-impl VerificadorTipos {
+impl<'a> VerificadorTipos<'a> {
     pub fn new() -> Self {
         Self {
+            usings: Vec::new(),
+            simbolos_namespaces: HashMap::new(),
             variaveis: HashMap::new(),
-            classes: HashMap::new(), // ✅ NOVO
+            classes: HashMap::new(),
             erros: Vec::new(),
         }
     }
 
-    pub fn verificar_programa(&mut self, programa: &Programa) -> Result<(), Vec<String>> {
-        // ✅ NOVO: Primeiro passo - registrar todas as classes
+    pub fn verificar_programa(&mut self, programa: &'a Programa) -> Result<(), Vec<String>> {
+        // 1. Registrar todos os símbolos de todos os namespaces
+        for ns in &programa.namespaces {
+            for decl in &ns.declaracoes {
+                let nome_completo = format!("{}.{}", ns.nome, self.get_declaracao_nome(decl));
+                self.simbolos_namespaces.insert(nome_completo, decl);
+
+                if let Declaracao::DeclaracaoClasse(classe) = decl {
+                    self.classes.insert(classe.nome.clone(), classe);
+                }
+            }
+        }
+
+        // 2. Registrar os usings
+        for u in &programa.usings {
+            self.usings.push(u.caminho.clone());
+        }
+
+        // 3. Registrar classes globais
         for declaracao in &programa.declaracoes {
             if let Declaracao::DeclaracaoClasse(classe) = declaracao {
-                self.classes.insert(classe.nome.clone(), classe.clone());
+                self.classes.insert(classe.nome.clone(), classe);
             }
         }
 
@@ -44,6 +65,14 @@ impl VerificadorTipos {
     }
 
     // ✅ NOVO: Verificar herança da classe
+    fn get_declaracao_nome(&self, declaracao: &Declaracao) -> String {
+        match declaracao {
+            Declaracao::DeclaracaoFuncao(f) => f.nome.clone(),
+            Declaracao::DeclaracaoClasse(c) => c.nome.clone(),
+            _ => "".to_string(),
+        }
+    }
+
     fn verificar_heranca_classe(&mut self, classe: &DeclaracaoClasse) {
         if let Some(classe_pai) = &classe.classe_pai {
             // Verificar se classe pai existe
@@ -118,7 +147,7 @@ impl VerificadorTipos {
             // Verificar se existe método redefinível na classe pai
             if let Some(metodo_pai) = self.buscar_metodo_redefinivel_pai(classe_pai, &metodo.nome) {
                 // Verificar compatibilidade de assinatura
-                if !self.assinaturas_compativeis(metodo, &metodo_pai) {
+                if !self.assinaturas_compativeis(metodo, metodo_pai) {
                     self.erros.push(format!(
                         "Método '{}' em classe '{}' sobrescreve método da classe pai '{}' mas as assinaturas são incompatíveis",
                         metodo.nome, classe.nome, classe_pai
@@ -159,21 +188,21 @@ impl VerificadorTipos {
     }
 
     // ✅ NOVO: Buscar método redefinível na hierarquia pai
-    fn buscar_metodo_redefinivel_pai(&self, classe_pai: &str, nome_metodo: &str) -> Option<MetodoClasse> {
-        let mut classe_atual = Some(classe_pai.to_string());
+    fn buscar_metodo_redefinivel_pai(&self, classe_pai: &str, nome_metodo: &str) -> Option<&'a MetodoClasse> {
+        let mut classe_atual = self.classes.get(classe_pai);
 
-        while let Some(classe) = classe_atual {
-            if let Some(def_classe) = self.classes.get(&classe) {
-                // Procurar método redefinível na classe atual
-                for metodo in &def_classe.metodos {
-                    if metodo.nome == nome_metodo && metodo.eh_virtual {
-                        return Some(metodo.clone());
-                    }
+        while let Some(def_classe) = classe_atual {
+            // Procurar método redefinível na classe atual
+            for metodo in &def_classe.metodos {
+                if metodo.nome == nome_metodo && metodo.eh_virtual {
+                    return Some(metodo);
                 }
-                // Ir para classe pai
-                classe_atual = def_classe.classe_pai.clone();
+            }
+            // Ir para a classe pai
+            if let Some(pai_nome) = &def_classe.classe_pai {
+                classe_atual = self.classes.get(pai_nome);
             } else {
-                break;
+                classe_atual = None;
             }
         }
 
@@ -223,6 +252,14 @@ impl VerificadorTipos {
     }
 
     fn verificar_comando(&mut self, comando: &Comando) {
+        if let Comando::Expressao(Expressao::Chamada(nome_funcao, _)) = comando {
+            self.resolver_funcao(nome_funcao);
+        }
+
+        if let Comando::DeclaracaoVariavel(Tipo::Classe(nome_classe), _, _) = comando {
+            self.resolver_tipo_classe(nome_classe);
+        }
+
         match comando {
             Comando::DeclaracaoVariavel(tipo, nome, _) => {
                 self.variaveis.insert(nome.clone(), tipo.clone());
@@ -239,5 +276,39 @@ impl VerificadorTipos {
             }
             _ => {}
         }
+    }
+
+    fn resolver_tipo_classe(&mut self, nome_classe: &str) {
+        // 1. Tenta encontrar no escopo global
+        if self.classes.contains_key(nome_classe) {
+            return;
+        }
+
+        // 2. Tenta encontrar usando os 'usings'
+        for u in &self.usings {
+            let nome_completo = format!("{}.{}", u, nome_classe);
+            if let Some(decl) = self.simbolos_namespaces.get(&nome_completo) {
+                if let Declaracao::DeclaracaoClasse(_) = decl {
+                    // Encontrou a classe via 'usando', está ok.
+                    return;
+                }
+            }
+        }
+
+        self.erros.push(format!("Tipo ou classe '{}' não encontrada.", nome_classe));
+    }
+
+    fn resolver_funcao(&mut self, nome_funcao: &str) {
+        // 1. Tenta encontrar no escopo global (não implementado ainda, mas deveria)
+
+        // 2. Tenta encontrar usando os 'usings'
+        for u in &self.usings {
+            let nome_completo = format!("{}.{}", u, nome_funcao);
+            if self.simbolos_namespaces.contains_key(&nome_completo) {
+                return; // Encontrou
+            }
+        }
+
+        self.erros.push(format!("Função '{}' não encontrada.", nome_funcao));
     }
 }

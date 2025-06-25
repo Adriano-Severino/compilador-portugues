@@ -3,23 +3,28 @@ use crate::lexer::Token;
 
 grammar<'input>();
 
+
+
 pub Arquivo: ast::Programa = {
     <items:ItemPrograma*> => {
+        let mut usings = Vec::new();
         let mut namespaces = Vec::new();
         let mut declaracoes = Vec::new();
-        
+
         for item in items {
             match item {
+                ast::ItemPrograma::Usando(u) => usings.push(u),
                 ast::ItemPrograma::Namespace(ns) => namespaces.push(ns),
                 ast::ItemPrograma::Declaracao(decl) => declaracoes.push(decl),
             }
         }
-        
-        ast::Programa { namespaces, declaracoes }
+
+        ast::Programa { usings, namespaces, declaracoes }
     }
 };
 
 ItemPrograma: ast::ItemPrograma = {
+    <us:Usando> => ast::ItemPrograma::Usando(us),
     <ns:Namespace> => ast::ItemPrograma::Namespace(ns),
     <decl:Declaracao> => ast::ItemPrograma::Declaracao(decl),
 };
@@ -29,6 +34,13 @@ Namespace: ast::DeclaracaoNamespace = {
     "espaco" <nome:IdentificadorCompleto> "{" <declaracoes:Declaracao*> "}" => {
         ast::DeclaracaoNamespace { nome, declaracoes }
     }
+};
+
+// === USANDO (IMPORTS) ===
+Usando: ast::DeclaracaoUsando = {
+   "usando" <caminho:IdentificadorCompleto> ";" => {
+       ast::DeclaracaoUsando { caminho }
+   }
 };
 
 // === IDENTIFICADORES ===
@@ -575,6 +587,7 @@ extern {
     type Error = ();
 
     enum Token {
+        "usando" => Token::TUsando,
         // Palavras-chave
         "se" => Token::TSe,
         "senão" => Token::TSenao,

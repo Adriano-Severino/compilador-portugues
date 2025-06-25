@@ -43,13 +43,13 @@ pub use codegen::GeradorCodigo;
 // };
 
 // Estrutura principal do compilador
-pub struct CompiladorPortugues {
-    pub verificador_tipos: VerificadorTipos,
+pub struct CompiladorPortugues<'a> {
+    pub verificador_tipos: VerificadorTipos<'a>,
     pub analisador_ownership: AnalisadorOwnership,
     pub inferencia_tipos: InferenciaTipos,
 }
 
-impl CompiladorPortugues {
+impl<'a> CompiladorPortugues<'a> {
     pub fn new() -> Self {
         Self {
             verificador_tipos: VerificadorTipos::new(),

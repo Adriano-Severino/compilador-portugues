@@ -3,6 +3,7 @@
 use crate::ast;
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 
 //_______________________________________________________________________________________________
 //
@@ -447,6 +448,7 @@ impl<'a> BytecodeGenerator<'a> {
                     format!("{}.{}", self.namespace_path, ns.nome)
                 };
                 let sub_prog = ast::Programa {
+                    usings: vec![],
                     namespaces: vec![],
                     declaracoes: ns.declaracoes.clone(),
                 };
@@ -493,6 +495,7 @@ impl<'a> BytecodeGenerator<'a> {
                 for metodo in &classe_def.metodos {
                     // a) AST temporário que vive até o fim do loop
                     let sub_programa = ast::Programa {
+                        usings: vec![],
                         namespaces: vec![],
                         declaracoes: vec![ast::Declaracao::Comando(ast::Comando::Bloco(
                             metodo.corpo.clone(),
@@ -522,6 +525,7 @@ impl<'a> BytecodeGenerator<'a> {
             ast::Declaracao::DeclaracaoFuncao(func_def) => {
                 // a) monta AST temporário com corpo
                 let sub_programa = ast::Programa {
+                    usings: vec![],
                     namespaces: vec![],
                     declaracoes: vec![ast::Declaracao::Comando(ast::Comando::Bloco(
                         func_def.corpo.clone(),
@@ -573,7 +577,6 @@ impl<'a> BytecodeGenerator<'a> {
             }
         }
 
-        self.bytecode_instructions.push("HALT".to_string());
         std::mem::take(&mut self.bytecode_instructions)
     }
     // Altera a assinatura para `&mut self` e remove o retorno Vec<String>

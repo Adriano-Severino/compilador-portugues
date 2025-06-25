@@ -101,6 +101,7 @@ fn exibir_ajuda() {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("DEBUG: O compilador iniciou a execução.");
     let args: Vec<String> = env::args().collect();
     
     // ✅ CORREÇÃO: Tratar o caso de nenhum argumento ou --help
@@ -155,6 +156,16 @@ fn processar_codigo_dinamico(codigo: &str) -> Result<ast::Programa, Box<dyn std:
     let tokens: Vec<_> = lex.spanned().map(|(tok_res, span)| (span.start, tok_res.unwrap(), span.end)).collect();
     let parser = parser::ArquivoParser::new();
     let mut ast = parser.parse(tokens.iter().cloned()).map_err(|e| Box::new(CompilerError(format!("Erro sintático: {:?}", e))))?;
+
+    // Verificação de tipos
+    let mut type_checker = type_checker::VerificadorTipos::new();
+    if let Err(erros) = type_checker.verificar_programa(&ast) {
+        for erro in erros {
+            eprintln!("Erro Semântico: {}", erro);
+        }
+        return Err(Box::new(CompilerError("Houve erros semânticos.".to_string())));
+    }
+
     crate::interpolacao::walk_programa(&mut ast, |e| {
         *e = interpolacao::planificar_interpolada(e.clone());
     });
@@ -207,8 +218,8 @@ fn compilar_para_bytecode(ast: &ast::Programa, nome_base: &str) -> Result<(), Bo
     println!("  ✓ {}.pbc gerado.", nome_base);
     println!(" ✓ Executando o bytecode...");
     println!("Você pode executar o bytecode usando o interpretador personalizado.");
-    println!("Execute: cargo run --bin interpretador -- ./{}.pbc", nome_base);
+    println!("Execute: cargo run --bin interpretador -- {}.pbc", nome_base);
     println!("ou use o comando:");
-    println!("Para executar: ./interpretador ./{}.pbc", nome_base);
+    println!("Para executar: interpretador {}.pbc", nome_base);
     Ok(())
 }
