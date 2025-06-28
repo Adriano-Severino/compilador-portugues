@@ -14,12 +14,12 @@ espaco Geometria {
         }
 
         // Método para calcular a área
-        publico função inteiro calcular_area() {
+        publico inteiro calcular_area() {
             retorne Largura * Altura;
         }
 
         // Método para descrever o objeto
-        publico função texto descrever() {
+        publico texto descrever() {
             retorne $"Retângulo com largura {Largura} e altura {Altura}.";
         }
     }

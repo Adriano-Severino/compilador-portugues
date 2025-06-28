@@ -1,5 +1,0 @@
-publico classe Teste {
-    publico vazio Main() {
-        imprima("Teste básico");
-    }
-}
