@@ -30,7 +30,7 @@ espaco ConsoleApp {
     }
     
     publico classe Principal {
-        publico estatico vazio Main() {
+        publico estática vazio Main() {
             imprima("=== Teste de Herança e Polimorfismo ===");
             
             var rex = novo Cachorro("Rex");

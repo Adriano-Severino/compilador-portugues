@@ -67,6 +67,8 @@ pub enum Token {
     TObter,
     #[token("definir")]
     TDefinir,
+    #[token("estática")]
+    TEstatica,
 
     /* operadores */
     #[token("==")]
@@ -180,5 +182,26 @@ mod tests {
         } else {
             panic!("String interpolada não reconhecida");
         }
+    }
+
+    #[test]
+    fn test_palavras_chave_oop() {
+        let codigo = "classe construtor publico privado protegido base redefinível sobrescreve abstrato novo este obter definir estática";
+        let mut lex = Token::lexer(codigo);
+
+        assert_eq!(lex.next(), Some(Ok(Token::TClasse)));
+        assert_eq!(lex.next(), Some(Ok(Token::TConstrutor)));
+        assert_eq!(lex.next(), Some(Ok(Token::TPublico)));
+        assert_eq!(lex.next(), Some(Ok(Token::TPrivado)));
+        assert_eq!(lex.next(), Some(Ok(Token::TProtegido)));
+        assert_eq!(lex.next(), Some(Ok(Token::TBase)));
+        assert_eq!(lex.next(), Some(Ok(Token::TRedefinivel)));
+        assert_eq!(lex.next(), Some(Ok(Token::TSobrescreve)));
+        assert_eq!(lex.next(), Some(Ok(Token::TAbstrato)));
+        assert_eq!(lex.next(), Some(Ok(Token::TNovo)));
+        assert_eq!(lex.next(), Some(Ok(Token::TEste)));
+        assert_eq!(lex.next(), Some(Ok(Token::TObter)));
+        assert_eq!(lex.next(), Some(Ok(Token::TDefinir)));
+        assert_eq!(lex.next(), Some(Ok(Token::TEstatica)));
     }
 }

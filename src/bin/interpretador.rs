@@ -29,6 +29,7 @@ struct ClasseInfo {
     nome: String,
     campos: Vec<String>,
     metodos: HashMap<String, FuncInfo>,
+    metodos_estaticos: HashMap<String, FuncInfo>,
     construtor: Option<Vec<String>>,
 }
 
@@ -175,6 +176,41 @@ impl VM {
         }
     }
 
+    fn chamar_metodo_estatico(
+        &mut self,
+        nome_classe: &str,
+        nome_metodo: &str,
+        argumentos: Vec<Valor>,
+    ) -> Result<Valor, String> {
+        if let Some(classe_info) = self.classes.get(nome_classe) {
+            if let Some(metodo_info) = classe_info.metodos_estaticos.get(nome_metodo) {
+                let mut vars = HashMap::new();
+                for (i, param_nome) in metodo_info.parametros.iter().enumerate() {
+                    let valor_arg = argumentos.get(i).cloned().unwrap_or(Valor::Nulo);
+                    vars.insert(param_nome.clone(), valor_arg);
+                }
+
+                let mut vm_metodo = VM {
+                    pilha: Vec::new(),
+                    variaveis: vars,
+                    bytecode: metodo_info.corpo.clone(),
+                    ip: 0,
+                    classes: self.classes.clone(),
+                    functions: self.functions.clone(),
+                    loaded_modules: self.loaded_modules.clone(),
+                    base_dir: self.base_dir.clone(),
+                };
+
+                vm_metodo.run()?;
+                return Ok(vm_metodo.pilha.pop().unwrap_or(Valor::Nulo));
+            } else {
+                Err(format!("Método estático '{}.{}' não encontrado", nome_classe, nome_metodo))
+            }
+        } else {
+            Err(format!("Classe '{}' não encontrada", nome_classe))
+        }
+    }
+
     // Analisa uma definição de função a partir do bytecode.
     fn parse_definicao_funcao(&self, start_index: usize) -> Result<(FuncInfo, usize), String> {
         let def_line = &self.bytecode[start_index];
@@ -215,6 +251,7 @@ impl VM {
                         nome: nome_classe.clone(),
                         campos: Vec::new(),
                         metodos: HashMap::new(),
+                        metodos_estaticos: HashMap::new(),
                         construtor: None,
                     });
                     entry.campos = campos;
@@ -248,9 +285,32 @@ impl VM {
                         nome: classe_nome.clone(),
                         campos: Vec::new(),
                         metodos: HashMap::new(),
+                        metodos_estaticos: HashMap::new(),
                         construtor: None,
                     });
                     entry.metodos.insert(metodo_nome, metodo_info);
+                    i = corpo_fim;
+                }
+                "DEFINE_STATIC_METHOD" => {
+                    let classe_nome = partes.get(1).ok_or("DEFINE_STATIC_METHOD requer classe")?.to_string();
+                    let metodo_nome = partes.get(2).ok_or("DEFINE_STATIC_METHOD requer nome")?.to_string();
+                    let tamanho: usize = partes.get(3).ok_or("DEFINE_STATIC_METHOD requer tamanho")?.parse().map_err(|_| "Tamanho inválido")?;
+                    let parametros: Vec<String> = partes.iter().skip(4).map(|s| s.to_string()).collect();
+                    let corpo_inicio = i + 1;
+                    let corpo_fim = corpo_inicio + tamanho;
+                    if corpo_fim > self.bytecode.len() {
+                        return Err("Bytecode truncado em DEFINE_STATIC_METHOD".into());
+                    }
+                    let corpo = self.bytecode[corpo_inicio..corpo_fim].to_vec();
+                    let metodo_info = FuncInfo { nome: metodo_nome.clone(), parametros, corpo };
+                    let entry = self.classes.entry(classe_nome.clone()).or_insert(ClasseInfo {
+                        nome: classe_nome.clone(),
+                        campos: Vec::new(),
+                        metodos: HashMap::new(),
+                        metodos_estaticos: HashMap::new(),
+                        construtor: None,
+                    });
+                    entry.metodos_estaticos.insert(metodo_nome, metodo_info);
                     i = corpo_fim;
                 }
                 _ => {
@@ -598,6 +658,29 @@ impl VM {
                     self.pilha.push(resultado);
                 }
 
+                "CALL_STATIC_METHOD" => {
+                    let nome_classe = partes.get(1).ok_or("CALL_STATIC_METHOD requer nome da classe")?;
+                    let nome_metodo = partes.get(2).ok_or("CALL_STATIC_METHOD requer nome do método")?;
+                    let num_args = partes
+                        .get(3)
+                        .ok_or("CALL_STATIC_METHOD requer número de argumentos")?
+                        .parse::<usize>()
+                        .map_err(|e| format!("Número inválido de argumentos: {}", e))?;
+
+                    if self.pilha.len() < num_args {
+                        return Err(format!("Pilha insuficiente para CALL_STATIC_METHOD"));
+                    }
+
+                    let argumentos = if num_args > 0 {
+                        self.pilha.split_off(self.pilha.len() - num_args)
+                    } else {
+                        Vec::new()
+                    };
+
+                    let resultado = self.chamar_metodo_estatico(nome_classe, nome_metodo, argumentos)?;
+                    self.pilha.push(resultado);
+                }
+
                 "POP" => {
                     // Remove o valor do topo da pilha.
                     // O uso de .ok_or previne um pânico se a pilha estiver vazia,
@@ -695,7 +778,7 @@ impl VM {
                 continue;
             }
             
-            if instrucao.starts_with("DEFINE_METHOD") {
+            if instrucao.starts_with("DEFINE_METHOD") || instrucao.starts_with("DEFINE_STATIC_METHOD") {
                 // Pula definição de método
                 let partes: Vec<&str> = instrucao.split_whitespace().collect();
                 if partes.len() >= 4 {

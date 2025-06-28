@@ -127,11 +127,19 @@ impl<'a> BytecodeGenerator<'a> {
 
                     // c) cabeçalho + corpo
                                         let full_class_name = self.qual(&classe_def.nome);
+                    let params: Vec<String> = metodo.parametros.iter().map(|p| p.nome.clone()).collect();
+                    let instruction = if metodo.eh_estatica {
+                        "DEFINE_STATIC_METHOD"
+                    } else {
+                        "DEFINE_METHOD"
+                    };
                     self.bytecode_instructions.push(format!(
-                        "DEFINE_METHOD {} {} {}",
+                        "{} {} {} {} {}",
+                        instruction,
                         full_class_name,
                         metodo.nome,
-                        corpo.len()
+                        corpo.len(),
+                        params.join(" ")
                     ));
                     self.bytecode_instructions.extend(corpo);
                 }
@@ -376,15 +384,8 @@ impl<'a> BytecodeGenerator<'a> {
                 .bytecode_instructions
                 .push(format!("LOAD_CONST_BOOL {}", b)),
             ast::Expressao::Identificador(nome) => {
-                if self.em_metodo {
-                    // dentro de método ⇒ equivalente a “este.<nome>”
-                    self.bytecode_instructions.push("LOAD_VAR este".to_string());
-                    self.bytecode_instructions
-                        .push(format!("GET_PROPERTY {}", nome));
-                } else {
-                    self.bytecode_instructions
-                        .push(format!("LOAD_VAR {}", nome));
-                }
+                self.bytecode_instructions
+                    .push(format!("LOAD_VAR {}", nome));
             }
 
             ast::Expressao::Este => {
@@ -516,15 +517,28 @@ impl<'a> BytecodeGenerator<'a> {
             }
 
             ast::Expressao::ChamadaMetodo(objeto_expr, nome_metodo, argumentos) => {
-                // 1. Gera o bytecode para o objeto (instância) e o coloca na pilha.
-                self.generate_expressao(objeto_expr);
+                if let ast::Expressao::Identificador(class_name) = &**objeto_expr {
+                    if self.type_checker.is_class(class_name) {
+                        // Static method call
+                        for arg in argumentos {
+                            self.generate_expressao(arg);
+                        }
+                        let full_class_name = self.type_checker.resolver_nome_classe(class_name, &self.namespace_path);
+                        self.bytecode_instructions.push(format!(
+                            "CALL_STATIC_METHOD {} {} {}",
+                            full_class_name,
+                            nome_metodo,
+                            argumentos.len()
+                        ));
+                        return;
+                    }
+                }
 
-                // 2. Gera o bytecode para cada argumento e os coloca na pilha.
+                // Instance method call
+                self.generate_expressao(objeto_expr);
                 for arg in argumentos {
                     self.generate_expressao(arg);
                 }
-
-                // 3. Emite a instrução CALL_METHOD.
                 self.bytecode_instructions.push(format!(
                     "CALL_METHOD {} {}",
                     nome_metodo,

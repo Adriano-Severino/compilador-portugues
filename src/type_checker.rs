@@ -20,6 +20,10 @@ impl<'a> VerificadorTipos<'a> {
         }
     }
 
+    pub fn is_class(&self, name: &str) -> bool {
+        self.classes.contains_key(name)
+    }
+
     pub fn verificar_programa(&mut self, programa: &'a Programa) -> Result<(), Vec<String>> {
         println!("--- Verificador de Tipos: Iniciando verificação do programa ---");
 
@@ -173,7 +177,7 @@ impl<'a> VerificadorTipos<'a> {
     
             if !self.classes.contains_key(&nome_pai_completo) {
                 self.erros.push(format!(
-                    "Classe pai '{}' não encontrada para classe '{}'",
+                    "Classe pai \"{}\" não encontrada para classe \"{}\"",
                     classe_pai_simples, classe.nome
                 ));
                 return;
@@ -247,13 +251,13 @@ impl<'a> VerificadorTipos<'a> {
                 // Verificar compatibilidade de assinatura
                 if !self.assinaturas_compativeis(metodo, metodo_pai) {
                     self.erros.push(format!(
-                        "Método '{}' em classe '{}' sobrescreve método da classe pai '{}' mas as assinaturas são incompatíveis",
+                        "Método \"{}\" em classe \"{}\" sobrescreve método da classe pai \"{}\" mas as assinaturas são incompatíveis",
                         metodo.nome, classe.nome, classe_pai
                     ));
                 }
             } else {
                 self.erros.push(format!(
-                    "Método '{}' marcado como 'sobrescreve' mas não existe método 'redefinível' na classe pai '{}'",
+                    "Método \"{}\" marcado como \"sobrescreve\" mas não existe método \"redefinível\" na classe pai \"{}\"",
                     metodo.nome, classe_pai
                 ));
             }
@@ -262,7 +266,7 @@ impl<'a> VerificadorTipos<'a> {
         // Verificar se método redefinível não pode ter corpo vazio em classe não abstrata
         if metodo.eh_virtual && metodo.corpo.is_empty() && !classe.eh_abstrata {
             self.erros.push(format!(
-                "Método redefinível '{}' deve ter implementação em classe não abstrata '{}'",
+                "Método redefinível \"{}\" deve ter implementação em classe não abstrata \"{}\"",
                 metodo.nome, classe.nome
             ));
         }
@@ -272,14 +276,14 @@ impl<'a> VerificadorTipos<'a> {
     fn verificar_metodo_sem_heranca(&mut self, metodo: &MetodoClasse, classe: &DeclaracaoClasse) {
         if metodo.eh_override && classe.classe_pai.is_none() {
             self.erros.push(format!(
-                "Método '{}' marcado como 'sobrescreve' mas classe '{}' não tem classe pai",
+                "Método \"{}\" marcado como \"sobrescreve\" mas classe \"{}\" não tem classe pai",
                 metodo.nome, classe.nome
             ));
         }
 
         if metodo.eh_virtual && metodo.eh_override {
             self.erros.push(format!(
-                "Método '{}' não pode ser 'redefinível' e 'sobrescreve' ao mesmo tempo",
+                "Método \"{}\" não pode ser \"redefinível\" e \"sobrescreve\" ao mesmo tempo",
                 metodo.nome
             ));
         }
@@ -342,8 +346,8 @@ impl<'a> VerificadorTipos<'a> {
             Declaracao::DeclaracaoFuncao(funcao) => {
                 for comando in &funcao.corpo {
                     self.verificar_comando(comando, namespace_atual);
+                    }
                 }
-            }
             Declaracao::Comando(cmd) => self.verificar_comando(cmd, namespace_atual),
             _ => {}
         }
@@ -354,21 +358,32 @@ impl<'a> VerificadorTipos<'a> {
             Comando::Expressao(Expressao::Chamada(nome_funcao, _)) => {
                 let nome_resolvido = self.resolver_nome_funcao(nome_funcao, namespace_atual);
                 if !self.simbolos_namespaces.contains_key(&nome_resolvido) {
-                     self.erros.push(format!("Função '{}' não encontrada.", nome_funcao));
+                     self.erros.push(format!("Função \"{}\" não encontrada.", nome_funcao));
                 }
             }
-            Comando::DeclaracaoVariavel(tipo, nome, _) => {
+            Comando::DeclaracaoVariavel(tipo, nome, opt_expr) => {
+                if let Some(expr) = opt_expr {
+                    if let Expressao::NovoObjeto(classe_nome, _) = expr {
+                        let nome_resolvido = self.resolver_nome_classe(classe_nome, namespace_atual);
+                        if let Some(classe_def) = self.classes.get(&nome_resolvido) {
+                            if classe_def.eh_estatica {
+                                self.erros.push(format!("A classe estática '{}' não pode ser instanciada.", classe_nome));
+                            }
+                        }
+                    }
+                }
+
                 if let Tipo::Classe(nome_classe) = tipo {
                     let nome_resolvido = self.resolver_nome_classe(nome_classe, namespace_atual);
                     if !self.classes.contains_key(&nome_resolvido) {
-                        self.erros.push(format!("Tipo ou classe '{}' não encontrada.", nome_classe));
+                        self.erros.push(format!("Tipo ou classe \"{}\" não encontrada.", nome_classe));
                     }
                 }
                 self.variaveis.insert(nome.clone(), tipo.clone());
             }
             Comando::Atribuicao(nome, _) => {
                 if !self.variaveis.contains_key(nome) {
-                    self.erros.push(format!("Variável '{}' não foi declarada", nome));
+                    self.erros.push(format!("Variável \"{}\" não foi declarada", nome));
                 }
             }
             Comando::Bloco(comandos) => {

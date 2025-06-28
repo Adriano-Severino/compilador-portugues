@@ -81,7 +81,7 @@ ModificadorAcesso: ast::ModificadorAcesso = {
 
 // === CLASSES ===
 DeclaracaoClasse: ast::DeclaracaoClasse = {
-    <modificador:ModificadorAcesso?> "classe" <nome:IdentificadorSimples> <heranca:(":" <IdentificadorSimples>)?> "{" <membros:MembroClasse*> "}" => {
+    <modificador:ModificadorAcesso?> <estatica:("estática")?> "classe" <nome:IdentificadorSimples> <heranca:(":" <IdentificadorSimples>)?> "{" <membros:MembroClasse*> "}" => {
         let mut campos = Vec::new();
         let mut propriedades = Vec::new();
         let mut metodos = Vec::new();
@@ -105,6 +105,7 @@ DeclaracaoClasse: ast::DeclaracaoClasse = {
             metodos,
             construtores,
             eh_abstrata: false,
+            eh_estatica: estatica.is_some(),
         }
     }
 };
@@ -125,7 +126,7 @@ CampoClasse: ast::CampoClasse = {
             tipo: t,
             modificador: acc.unwrap_or(ast::ModificadorAcesso::Privado),
             valor_inicial: None,
-            eh_estatico: false,
+            eh_estatica: false,
         }
     },
 
@@ -136,7 +137,7 @@ CampoClasse: ast::CampoClasse = {
             tipo: t,
             modificador: acc.unwrap_or(ast::ModificadorAcesso::Privado),
             valor_inicial: Some(v),
-            eh_estatico: false,
+            eh_estatica: false,
         }
     },
 };
@@ -220,6 +221,7 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
 // — MÉTODO DE INSTÂNCIA ----------------------------------------------------
 MetodoClasse: ast::MetodoClasse = {
     <m:ModificadorAcesso?>            // publico | privado | protegido
+    <estatica:("estática")?>
     <redefinivel:("redefinível")?> 
     <sobrescreve:("sobrescreve")?> 
     <ret:Tipo>                       // inteiro | texto | Classe ...
@@ -235,7 +237,7 @@ MetodoClasse: ast::MetodoClasse = {
             eh_virtual: redefinivel.is_some(),
             eh_override: sobrescreve.is_some(),
             eh_abstrato: false,
-            eh_estatico: false,
+            eh_estatica: estatica.is_some(),
         },
 };
 
@@ -614,6 +616,7 @@ extern {
         "protegido" => Token::TProtegido,
         "redefinível" => Token::TRedefinivel,
         "sobrescreve" => Token::TSobrescreve,
+        "estática" => Token::TEstatica,
         "novo" => Token::TNovo,
         "este" => Token::TEste,
         "obter" => Token::TObter,

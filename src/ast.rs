@@ -124,6 +124,7 @@ pub struct DeclaracaoClasse {
     pub metodos: Vec<MetodoClasse>,
     pub construtores: Vec<ConstrutorClasse>,
     pub eh_abstrata: bool,
+    pub eh_estatica: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,7 +141,7 @@ pub struct CampoClasse {
     pub tipo: Tipo,
     pub modificador: ModificadorAcesso,
     pub valor_inicial: Option<Expressao>,
-    pub eh_estatico: bool,
+    pub eh_estatica: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,7 +170,7 @@ pub struct MetodoClasse {
     pub eh_virtual: bool,
     pub eh_override: bool,
     pub eh_abstrato: bool,
-    pub eh_estatico: bool,
+    pub eh_estatica: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -276,7 +277,7 @@ pub enum Expressao {
     StringInterpolada(Vec<PartStringInterpolada>),
     Unario(OperadorUnario, Box<Expressao>),
     Este,
-}
+    }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OperadorUnario {
