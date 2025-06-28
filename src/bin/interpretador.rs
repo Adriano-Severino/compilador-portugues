@@ -1116,7 +1116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err("Execução de Principal falhou".into());
         }
         
-        println!("✅ Função Principal executada com sucesso");
+        //println!("✅ Função Principal executada com sucesso");
     } else {
         println!("=== Executando código direto (sem função Principal) ===");
         
@@ -1125,7 +1125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err("Execução falhou".into());
         }
         
-        println!("✅ Código executado com sucesso");
+        //println!("✅ Código executado com sucesso");
     }
 
     Ok(())

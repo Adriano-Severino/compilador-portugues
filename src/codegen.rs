@@ -716,17 +716,14 @@ impl<'a> BytecodeGenerator<'a> {
             }
 
             ast::Comando::AtribuirPropriedade(objeto_nome, prop_nome, expr) => {
-                // 1. Gera o valor a ser atribuído e o coloca na pilha.
-                self.generate_expressao(expr);
-                // 2. Carrega a instância do objeto na pilha.
+                // 1. Carrega a instância do objeto na pilha.
                 self.bytecode_instructions
                     .push(format!("LOAD_VAR {}", objeto_nome));
+                // 2. Gera o valor a ser atribuído e o coloca na pilha.
+                self.generate_expressao(expr);
                 // 3. Emite a nova instrução para definir a propriedade.
                 self.bytecode_instructions
                     .push(format!("SET_PROPERTY {}", prop_nome));
-
-                self.bytecode_instructions
-                    .push(format!("STORE_VAR {}", objeto_nome));
             }
 
             ast::Comando::ChamarMetodo(objeto_nome, metodo, argumentos) => {
@@ -742,7 +739,6 @@ impl<'a> BytecodeGenerator<'a> {
                     metodo,
                     argumentos.len()
                 ));
-                self.bytecode_instructions.push("POP".to_string()); // Descartar resultado se não usado
             }
 
             ast::Comando::Retorne(expr_opt) => {
@@ -915,6 +911,23 @@ impl<'a> BytecodeGenerator<'a> {
                 self.bytecode_instructions.push(format!(
                     "CALL_FUNCTION {} {}",
                     nome_completo,
+                    argumentos.len()
+                ));
+            }
+
+            ast::Expressao::ChamadaMetodo(objeto_expr, nome_metodo, argumentos) => {
+                // 1. Gera o bytecode para o objeto (instância) e o coloca na pilha.
+                self.generate_expressao(objeto_expr);
+
+                // 2. Gera o bytecode para cada argumento e os coloca na pilha.
+                for arg in argumentos {
+                    self.generate_expressao(arg);
+                }
+
+                // 3. Emite a instrução CALL_METHOD.
+                self.bytecode_instructions.push(format!(
+                    "CALL_METHOD {} {}",
+                    nome_metodo,
                     argumentos.len()
                 ));
             }
