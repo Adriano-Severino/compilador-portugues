@@ -31,7 +31,7 @@ espaco Meu_Programa.funcoes
     
     // Sintaxe 6: NOVA - Outros tipos no início
     publico função texto obter_nome() {
-        retorne "João";
+        retorne ("João");
     }
     
     publico função booleano eh_par(inteiro numero) {
@@ -54,12 +54,12 @@ espaco Meu_Programa.funcoes
     
     // Sintaxe com tipo no início
     publico função texto gerar_relatorio(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) {
-        retorne "Relatório gerado";
+        retorne ("Relatório gerado");
     }
     
     // Sintaxe com seta
     publico função processar_completo(texto nome, inteiro idade, booleano ativo, texto endereco, texto telefone) => texto {
-        retorne "Processamento completo";
+        retorne ("Processamento completo");
     }
     
     publico função testar_funcoes() {

@@ -630,8 +630,8 @@ impl VM {
                         }
                     }
 
-                    // Devolve o objeto modificado para a pilha para permitir atribuições encadeadas.
-                    self.pilha.push(objeto);
+                // Devolve o objeto modificado para a pilha para permitir atribuições encadeadas.
+                // self.pilha.push(objeto);
                 }
 
                 "GET_STATIC_PROPERTY" => {
@@ -908,8 +908,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("❌ Erro na execução de Principal: {}", e);
             return Err("Execução de Principal falhou".into());
         }
-    } else {
-        println!("AVISO: Função 'Principal' não encontrada.");
     }
 
     Ok(())
