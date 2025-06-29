@@ -23,6 +23,7 @@ fn criar_funcoes_matematicas() -> Vec<Declaracao> {
             tipo_retorno: Some(Tipo::Inteiro),
             modificador: ModificadorAcesso::Publico,
             corpo: vec![],
+            eh_estatica: false,
         }),
     ]
 }

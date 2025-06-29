@@ -24,6 +24,18 @@ impl<'a> VerificadorTipos<'a> {
         self.classes.contains_key(name)
     }
 
+    pub fn is_static_class(&self, name: &str) -> bool {
+        if let Some(class_def) = self.classes.get(name) {
+            return class_def.eh_estatica;
+        }
+
+        if let Some(Declaracao::DeclaracaoClasse(class_def)) = self.simbolos_namespaces.get(name) {
+            return class_def.eh_estatica;
+        }
+
+        false
+    }
+
     pub fn verificar_programa(&mut self, programa: &'a Programa) -> Result<(), Vec<String>> {
         println!("--- Verificador de Tipos: Iniciando verificação do programa ---");
 

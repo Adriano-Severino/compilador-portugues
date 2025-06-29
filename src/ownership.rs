@@ -138,20 +138,27 @@ impl AnalisadorOwnership {
                 }
             }
 
-            Comando::AtribuirPropriedade(objeto, _propriedade, expr) => {
-                self.analisar_expressao(expr);
-                
-                // ✅ NOVO: Tratamento especial para 'este' em herança
-                if objeto == "este" {
-                    // 'este' é sempre disponível em métodos
-                    if self.contexto_metodo_atual.is_none() {
-                        self.warnings.push(
-                            "Uso de 'este' fora de contexto de método".to_string()
-                        );
-                    }
-                } else {
-                    if let Some(info) = self.variaveis.get_mut(objeto) {
-                        info.ultimo_uso = Some(self.instrucao_atual);
+            Comando::AtribuirPropriedade(objeto_expr, _propriedade, expr) => {
+                self.analisar_expressao(expr); // Analyze the value being assigned
+
+                // Analyze the object/expression on the left-hand side of the assignment
+                self.analisar_expressao(objeto_expr);
+
+                // Check if the base of the assignment is an identifier (variable or 'este')
+                if let Expressao::Identificador(nome_base) = &**objeto_expr {
+                    if nome_base == "este" {
+                        // 'este' is always available in methods
+                        if self.contexto_metodo_atual.is_none() {
+                            self.warnings.push(
+                                "Uso de 'este' fora de contexto de método".to_string()
+                            );
+                        }
+                    } else {
+                        // It's a variable assignment
+                        if let Some(info) = self.variaveis.get_mut(nome_base) {
+                            info.ultimo_uso = Some(self.instrucao_atual);
+                            info.status = StatusOwnership::Dono; // Reassociação restaura ownership
+                        }
                     }
                 }
             }

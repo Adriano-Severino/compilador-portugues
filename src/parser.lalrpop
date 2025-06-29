@@ -119,7 +119,7 @@ MembroClasse: ast::MembroClasse = {
 
 // === CAMPOS ===
 CampoClasse: ast::CampoClasse = {
-    // sem valor inicial
+    // sem valor inicial (não estático)
     <acc:ModificadorAcesso?> <t:Tipo> <id:IdentificadorSimples> ";" => {
         ast::CampoClasse {
             nome: id,
@@ -130,7 +130,7 @@ CampoClasse: ast::CampoClasse = {
         }
     },
 
-    // com valor inicial
+    // com valor inicial (não estático)
     <acc:ModificadorAcesso?> <t:Tipo> <id:IdentificadorSimples> "=" <v:Expressao> ";" => {
         ast::CampoClasse {
             nome: id,
@@ -140,24 +140,50 @@ CampoClasse: ast::CampoClasse = {
             eh_estatica: false,
         }
     },
+
+    // sem valor inicial (estático)
+    <acc:ModificadorAcesso?> "estática" <t:Tipo> <id:IdentificadorSimples> ";" => {
+        ast::CampoClasse {
+            nome: id,
+            tipo: t,
+            modificador: acc.unwrap_or(ast::ModificadorAcesso::Privado),
+            valor_inicial: None,
+            eh_estatica: true,
+        }
+    },
+
+    // com valor inicial (estático)
+    <acc:ModificadorAcesso?> "estática" <t:Tipo> <id:IdentificadorSimples> "=" <v:Expressao> ";" => {
+        ast::CampoClasse {
+            nome: id,
+            tipo: t,
+            modificador: acc.unwrap_or(ast::ModificadorAcesso::Privado),
+            valor_inicial: Some(v),
+            eh_estatica: true,
+        }
+    },
 };
 
 
 // === PROPRIEDADES ===
+
+PropriedadeInicializador: ast::Expressao = {
+    "=" <e:Expressao> => e
+};
 PropriedadeClasse: ast::PropriedadeClasse = {
-    <modificador:ModificadorAcesso?> <tipo:Tipo> <nome:IdentificadorSimples> "{" <acessores:AcessorPropriedade+> "}" => {
+    <modificador:ModificadorAcesso?> <estatica:("estática")?> <tipo:Tipo> <nome:IdentificadorSimples> "{" <acessores:AcessorPropriedade+> "}" <inicializador:PropriedadeInicializador?> ";" => {
         let mut obter = None;
         let mut definir = None;
 
         for acessor in acessores {
             match acessor {
-                (true, modificador_acessor) => obter = Some(ast::AcessorPropriedade { 
-                    modificador: modificador_acessor, 
-                    corpo: None 
+                (true, modificador_acessor) => obter = Some(ast::AcessorPropriedade {
+                    modificador: modificador_acessor,
+                    corpo: None
                 }),
-                (false, modificador_acessor) => definir = Some(ast::AcessorPropriedade { 
-                    modificador: modificador_acessor, 
-                    corpo: None 
+                (false, modificador_acessor) => definir = Some(ast::AcessorPropriedade {
+                    modificador: modificador_acessor,
+                    corpo: None
                 }),
             }
         }
@@ -168,7 +194,8 @@ PropriedadeClasse: ast::PropriedadeClasse = {
             modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
             obter,
             definir,
-            valor_inicial: None,
+            valor_inicial: inicializador,
+            eh_estatica: estatica.is_some(),
         }
     }
 };
@@ -179,8 +206,8 @@ AcessorPropriedade: (bool, Option<ast::ModificadorAcesso>) = {
 };
 // === FUNÇÕES E MÉTODOS ===
 DeclaracaoFuncao: ast::DeclaracaoFuncao = {
-    // 1. [mod] função nome (params) { corpo }      → retorno implícito = Vazio
-    <m:ModificadorAcesso?> "função"
+    // 1. [mod] [estática] função nome (params) { corpo }      → retorno implícito = Vazio
+    <m:ModificadorAcesso?> <estatica:("estática")?> "função"
     <nome:IdentificadorSimples> "(" <params:InnerParamList> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
             nome,
@@ -188,11 +215,12 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
             tipo_retorno: Some(ast::Tipo::Vazio),
             modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
             corpo: body,
+            eh_estatica: estatica.is_some(),
         }
     },
 
-    // 2. [mod] função nome (params) => Tipo { corpo }
-    <m:ModificadorAcesso?> "função"
+    // 2. [mod] [estática] função nome (params) => Tipo { corpo }
+    <m:ModificadorAcesso?> <estatica:("estática")?> "função"
     <nome:IdentificadorSimples>
     "(" <params:InnerParamList> "=>" <ret:Tipo> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
@@ -201,11 +229,12 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
             tipo_retorno: Some(ret),
             modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
             corpo: body,
+            eh_estatica: estatica.is_some(),
         }
     },
 
-    // 3. [mod] função Tipo nome (params) { corpo }  – tipo antes do nome
-    <m:ModificadorAcesso?> "função"
+    // 3. [mod] [estática] função Tipo nome (params) { corpo }  – tipo antes do nome
+    <m:ModificadorAcesso?> <estatica:("estática")?> "função"
     <ret:Tipo> <nome:IdentificadorSimples>
     "(" <params:InnerParamList> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
@@ -214,6 +243,7 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
             tipo_retorno: Some(ret),
             modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
             corpo: body,
+            eh_estatica: estatica.is_some(),
         }
     },
 };
@@ -333,13 +363,7 @@ ComandosBasicos: ast::Comando = {
 
     // obj.propriedade = expr;
     <obj:ExpressaoAtomo> "." <prop:IdentificadorSimples> "=" <expr:Expressao> ";" => {
-        match obj {
-            ast::Expressao::Identificador(nome) =>
-                ast::Comando::AtribuirPropriedade(nome, prop, expr),
-            ast::Expressao::Este =>
-                ast::Comando::AtribuirPropriedade("este".to_string(), prop, expr),
-            _ => panic!("Esperava um identificador simples ou 'este'")
-        }
+        ast::Comando::AtribuirPropriedade(Box::new(obj), prop, expr)
     },
 
     // nome = expr;
@@ -420,13 +444,7 @@ ChamadaMetodoOuBloco: ast::Comando = {
 AtribuicaoOuDeclaracao: ast::Comando = {
     // obj.propriedade = expr;
     <obj:ExpressaoAtomo> "." <prop:TIdentificador> "=" <expr:Expressao> ";" => {
-        match obj {
-            ast::Expressao::Identificador(nome) =>
-                ast::Comando::AtribuirPropriedade(nome, prop, expr),
-            ast::Expressao::Este =>
-                ast::Comando::AtribuirPropriedade("este".to_string(), prop, expr),
-            _ => panic!("Esperava um identificador simples ou 'este'")
-        }
+        ast::Comando::AtribuirPropriedade(Box::new(obj), prop, expr)
     },
 
     // nome = expr;

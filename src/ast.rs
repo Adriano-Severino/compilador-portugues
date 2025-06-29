@@ -152,6 +152,7 @@ pub struct PropriedadeClasse {
     pub obter: Option<AcessorPropriedade>,
     pub definir: Option<AcessorPropriedade>,
     pub valor_inicial: Option<Expressao>,
+    pub eh_estatica: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +192,7 @@ pub struct DeclaracaoFuncao {
     pub tipo_retorno: Option<Tipo>,
     pub modificador: ModificadorAcesso,
     pub corpo: Vec<Comando>,
+    pub eh_estatica: bool,
 }
 
 /* — parâmetros com valor padrão (C#-style) — */
@@ -239,7 +241,7 @@ pub enum Comando {
     DeclaracaoVariavel(Tipo, String, Option<Expressao>),
     DeclaracaoVar(String, Expressao),
     Atribuicao(String, Expressao),
-    AtribuirPropriedade(String, String, Expressao),
+    AtribuirPropriedade(Box<Expressao>, String, Expressao),
     AtribuirCampo(Box<Expressao>, String, Expressao),
     Imprima(Expressao),
     Se(Expressao, Box<Comando>, Option<Box<Comando>>),

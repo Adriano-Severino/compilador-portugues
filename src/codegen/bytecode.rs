@@ -98,6 +98,30 @@ impl<'a> BytecodeGenerator<'a> {
                 self.bytecode_instructions
                     .push(format!("DEFINE_CLASS {} {}", full_class, props_str));
 
+                // ------------- 2.1. Initialize Static Fields/Properties ----------
+                for campo in &classe_def.campos {
+                    if campo.eh_estatica {
+                        if let Some(valor_inicial) = &campo.valor_inicial {
+                            self.generate_expressao(valor_inicial);
+                            self.bytecode_instructions.push(format!(
+                                "SET_STATIC_PROPERTY {} {}",
+                                full_class, campo.nome
+                            ));
+                        }
+                    }
+                }
+                for prop in &classe_def.propriedades {
+                    if prop.eh_estatica {
+                        if let Some(valor_inicial) = &prop.valor_inicial {
+                            self.generate_expressao(valor_inicial);
+                            self.bytecode_instructions.push(format!(
+                                "SET_STATIC_PROPERTY {} {}",
+                                full_class, prop.nome
+                            ));
+                        }
+                    }
+                }
+
                 // ------------- 3. gera cada método como bloco independente ------------
                 for metodo in &classe_def.metodos {
                     // a) AST temporário que vive até o fim do loop
@@ -323,30 +347,57 @@ impl<'a> BytecodeGenerator<'a> {
                     .push(format!("STORE_VAR {}", var_nome));
             }
 
-            ast::Comando::AtribuirPropriedade(objeto_nome, prop_nome, expr) => {
-                // 1. Carrega a instância do objeto na pilha.
-                self.bytecode_instructions
-                    .push(format!("LOAD_VAR {}", objeto_nome));
-                // 2. Gera o valor a ser atribuído e o coloca na pilha.
+            ast::Comando::AtribuirPropriedade(objeto_expr, prop_nome, expr) => {
+                if let ast::Expressao::Identificador(class_name) = &**objeto_expr {
+                    let full_class_name = self.type_checker.resolver_nome_classe(class_name, &self.namespace_path);
+                    if self.type_checker.is_static_class(&full_class_name) {
+                        // Static property assignment
+                        self.generate_expressao(expr);
+                        self.bytecode_instructions.push(format!(
+                            "SET_STATIC_PROPERTY {} {}",
+                            full_class_name,
+                            prop_nome
+                        ));
+                        return;
+                    }
+                }
+
+                // Instance property assignment
+                self.generate_expressao(objeto_expr);
                 self.generate_expressao(expr);
-                // 3. Emite a nova instrução para definir a propriedade.
                 self.bytecode_instructions
                     .push(format!("SET_PROPERTY {}", prop_nome));
             }
 
             ast::Comando::ChamarMetodo(objeto_nome, metodo, argumentos) => {
-                self.bytecode_instructions
-                    .push(format!("LOAD_VAR {}", objeto_nome));
+                let full_class_name = self.type_checker.resolver_nome_classe(objeto_nome, &self.namespace_path);
 
-                for arg in argumentos {
-                    self.generate_expressao(arg);
+                if self.type_checker.is_static_class(&full_class_name) {
+                    // Static method call
+                    for arg in argumentos {
+                        self.generate_expressao(arg);
+                    }
+                    self.bytecode_instructions.push(format!(
+                        "CALL_STATIC_METHOD {} {} {}",
+                        full_class_name,
+                        metodo,
+                        argumentos.len()
+                    ));
+                } else {
+                    // Instance method call
+                    self.bytecode_instructions
+                        .push(format!("LOAD_VAR {}", objeto_nome));
+
+                    for arg in argumentos {
+                        self.generate_expressao(arg);
+                    }
+
+                    self.bytecode_instructions.push(format!(
+                        "CALL_METHOD {} {}",
+                        metodo,
+                        argumentos.len()
+                    ));
                 }
-
-                self.bytecode_instructions.push(format!(
-                    "CALL_METHOD {} {}",
-                    metodo,
-                    argumentos.len()
-                ));
             }
 
             ast::Comando::Retorne(expr_opt) => {
@@ -394,9 +445,21 @@ impl<'a> BytecodeGenerator<'a> {
             }
 
             ast::Expressao::AcessoMembro(obj_expr, membro) => {
-                // 1. gera o objeto (pode ser 'este' ou outro)
+                if let ast::Expressao::Identificador(class_name) = &**obj_expr {
+                    let full_class_name = self.type_checker.resolver_nome_classe(class_name, &self.namespace_path);
+                    if self.type_checker.is_static_class(&full_class_name) {
+                        // Acesso a membro estático
+                        self.bytecode_instructions.push(format!(
+                            "GET_STATIC_PROPERTY {} {}",
+                            full_class_name,
+                            membro
+                        ));
+                        return;
+                    }
+                }
+
+                // Acesso a membro de instância
                 self.generate_expressao(obj_expr);
-                // 2. lê a propriedade
                 self.bytecode_instructions
                     .push(format!("GET_PROPERTY {}", membro));
             }
@@ -518,12 +581,12 @@ impl<'a> BytecodeGenerator<'a> {
 
             ast::Expressao::ChamadaMetodo(objeto_expr, nome_metodo, argumentos) => {
                 if let ast::Expressao::Identificador(class_name) = &**objeto_expr {
-                    if self.type_checker.is_class(class_name) {
+                    let full_class_name = self.type_checker.resolver_nome_classe(class_name, &self.namespace_path);
+                    if self.type_checker.is_static_class(&full_class_name) {
                         // Static method call
                         for arg in argumentos {
                             self.generate_expressao(arg);
                         }
-                        let full_class_name = self.type_checker.resolver_nome_classe(class_name, &self.namespace_path);
                         self.bytecode_instructions.push(format!(
                             "CALL_STATIC_METHOD {} {} {}",
                             full_class_name,

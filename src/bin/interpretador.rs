@@ -29,6 +29,7 @@ struct ClasseInfo {
     nome: String,
     campos: Vec<String>,
     metodos: HashMap<String, FuncInfo>,
+    campos_estaticos: Rc<RefCell<HashMap<String, Valor>>>,
     metodos_estaticos: HashMap<String, FuncInfo>,
     construtor: Option<Vec<String>>,
 }
@@ -251,6 +252,7 @@ impl VM {
                         nome: nome_classe.clone(),
                         campos: Vec::new(),
                         metodos: HashMap::new(),
+                        campos_estaticos: Rc::new(RefCell::new(HashMap::new())),
                         metodos_estaticos: HashMap::new(),
                         construtor: None,
                     });
@@ -285,6 +287,7 @@ impl VM {
                         nome: classe_nome.clone(),
                         campos: Vec::new(),
                         metodos: HashMap::new(),
+                        campos_estaticos: Rc::new(RefCell::new(HashMap::new())),
                         metodos_estaticos: HashMap::new(),
                         construtor: None,
                     });
@@ -307,6 +310,7 @@ impl VM {
                         nome: classe_nome.clone(),
                         campos: Vec::new(),
                         metodos: HashMap::new(),
+                        campos_estaticos: Rc::new(RefCell::new(HashMap::new())),
                         metodos_estaticos: HashMap::new(),
                         construtor: None,
                     });
@@ -630,6 +634,22 @@ impl VM {
                     self.pilha.push(objeto);
                 }
 
+                "GET_STATIC_PROPERTY" => {
+                    let nome_classe = partes.get(1).ok_or("GET_STATIC_PROPERTY requer nome da classe")?;
+                    let nome_prop = partes.get(2).ok_or("GET_STATIC_PROPERTY requer nome da propriedade")?;
+                    let classe = self.classes.get(*nome_classe).ok_or_else(|| format!("Classe '{}' não encontrada", nome_classe))?;
+                    let valor = classe.campos_estaticos.borrow().get(*nome_prop).cloned().unwrap_or(Valor::Nulo);
+                    self.pilha.push(valor);
+                }
+
+                "SET_STATIC_PROPERTY" => {
+                    let nome_classe = partes.get(1).ok_or("SET_STATIC_PROPERTY requer nome da classe")?;
+                    let nome_prop = partes.get(2).ok_or("SET_STATIC_PROPERTY requer nome da propriedade")?;
+                    let valor = self.pilha.pop().ok_or("Pilha vazia em SET_STATIC_PROPERTY")?;
+                    let classe = self.classes.get_mut(*nome_classe).ok_or_else(|| format!("Classe '{}' não encontrada", nome_classe))?;
+                    classe.campos_estaticos.borrow_mut().insert(nome_prop.to_string(), valor);
+                }
+
                 "CALL_METHOD" => {
                     let nome_metodo = partes.get(1).ok_or("CALL_METHOD requer nome do método")?;
                     let num_args = partes
@@ -747,76 +767,74 @@ impl VM {
     }
 
     
-    // ✅ NOVO: Executa código que não está dentro de função Principal
-    fn executar_codigo_direto(&mut self) -> Result<(), String> {
-        // Filtra apenas instruções que não são definições de classes/funções
-        let mut instrucoes_diretas = Vec::new();
-        
-        let mut i = 0;
-        while i < self.bytecode.len() {
-            let instrucao = &self.bytecode[i];
-            
-            if instrucao.starts_with("DEFINE_CLASS") {
-                // Pula definição de classe
-                i += 1;
-                while i < self.bytecode.len() && !self.bytecode[i].starts_with("DEFINE_") {
-                    i += 1;
-                }
-                continue;
-            }
-            
-            if instrucao.starts_with("DEFINE_FUNCTION") {
-                // Pula definição de função
-                let partes: Vec<&str> = instrucao.split_whitespace().collect();
-                if partes.len() >= 3 {
-                    if let Ok(tamanho) = partes[2].parse::<usize>() {
-                        i += tamanho + 1; // Pula a função inteira
-                        continue;
-                    }
-                }
-                i += 1;
-                continue;
-            }
-            
-            if instrucao.starts_with("DEFINE_METHOD") || instrucao.starts_with("DEFINE_STATIC_METHOD") {
-                // Pula definição de método
-                let partes: Vec<&str> = instrucao.split_whitespace().collect();
-                if partes.len() >= 4 {
-                    if let Ok(tamanho) = partes[3].parse::<usize>() {
-                        i += tamanho + 1; // Pula o método inteiro
-                        continue;
-                    }
-                }
-                i += 1;
-                continue;
-            }
-            
-            // Se chegou aqui, é uma instrução direta
-            instrucoes_diretas.push(instrucao.clone());
-            i += 1;
-        }
-        
-        // Se não há instruções diretas, não faz nada
-        if instrucoes_diretas.is_empty() {
-            println!("📝 Nenhuma instrução direta encontrada");
+    fn executar_codigo_de_inicializacao(&mut self) -> Result<(), String> {
+        println!("=== Executando Código de Inicialização ===");
+
+        let inicializadores: Vec<String> = self.bytecode.iter()
+            .filter(|inst| inst.starts_with("SET_STATIC_PROPERTY"))
+            .cloned()
+            .collect();
+
+        if inicializadores.is_empty() {
             return Ok(());
         }
-        
-        println!("📝 Executando {} instruções diretas", instrucoes_diretas.len());
-        
-        // Executa as instruções diretas
-        let mut vm_direto = VM {
+
+        // Cria uma VM temporária para executar apenas as inicializações
+        let mut init_vm = VM {
             pilha: Vec::new(),
-            variaveis: HashMap::new(),
-            bytecode: instrucoes_diretas,
-            ip: 0,
-            classes: self.classes.clone(),
+            variaveis: HashMap::new(), // Escopo limpo
+            bytecode: self.bytecode.clone(), // Usa o bytecode completo
+            ip: 0, // Começa do início
+            classes: self.classes.clone(), // Compartilha as definições de classe
             functions: self.functions.clone(),
-            loaded_modules: self.loaded_modules.clone(), // ✅ NOVO
-            base_dir: self.base_dir.clone(),             // ✅ NOVO
+            loaded_modules: self.loaded_modules.clone(),
+            base_dir: self.base_dir.clone(),
         };
-        
-        vm_direto.run()
+
+        init_vm.run_apenas_inicializadores()?;
+
+        // Atualiza os campos estáticos na VM principal
+        self.classes = init_vm.classes;
+
+        Ok(())
+    }
+
+    fn run_apenas_inicializadores(&mut self) -> Result<(), String> {
+        while self.ip < self.bytecode.len() {
+            let instrucao_str = self.bytecode[self.ip].clone();
+            let partes: Vec<&str> = instrucao_str.split_whitespace().collect();
+            let op = partes.get(0).ok_or("Instrução vazia encontrada")?;
+
+            self.ip += 1;
+
+            match *op {
+                "LOAD_CONST_STR" | "LOAD_CONST_INT" | "LOAD_CONST_BOOL" | "LOAD_CONST_NULL" => {
+                    // Executa apenas as instruções de carregamento de constantes
+                    // (Reciclando a lógica do `run` principal)
+                    match *op {
+                        "LOAD_CONST_STR" => {
+                            let valor = partes[1..].join(" ");
+                            self.pilha.push(Valor::Texto(valor.trim_matches('"').to_string()));
+                        }
+                         "LOAD_CONST_INT" => {
+                            let valor = partes.get(1).ok_or("LOAD_CONST_INT requer um argumento")?.parse::<i64>().map_err(|e| format!("Valor inválido para LOAD_CONST_INT: {}", e))?;
+                            self.pilha.push(Valor::Inteiro(valor));
+                        }
+                        _ => {}
+                    }
+                }
+                "SET_STATIC_PROPERTY" => {
+                    let nome_classe = partes.get(1).ok_or("SET_STATIC_PROPERTY requer nome da classe")?;
+                    let nome_prop = partes.get(2).ok_or("SET_STATIC_PROPERTY requer nome da propriedade")?;
+                    let valor = self.pilha.pop().ok_or("Pilha vazia em SET_STATIC_PROPERTY")?;
+                    let classe = self.classes.get_mut(*nome_classe).ok_or_else(|| format!("Classe '{}' não encontrada", nome_classe))?;
+                    classe.campos_estaticos.borrow_mut().insert(nome_prop.to_string(), valor);
+                }
+                // Ignora todas as outras instruções
+                _ => {}
+            }
+        }
+        Ok(())
     }
 }
 
@@ -851,7 +869,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(e.into());
     }
 
-    // Fase 2: Encontrar e executar a função 'Principal'
+    // Fase 2: Executar código de inicialização (atribuição de propriedades estáticas)
+    if let Err(e) = vm.executar_codigo_de_inicializacao() {
+        eprintln!("Erro ao executar código de inicialização: {}", e);
+        return Err(e.into());
+    }
+
+    // Fase 3: Encontrar e executar a função 'Principal'
     let funcao_principal = vm.functions.keys()
         .find(|nome| nome.ends_with("Principal") || nome == &"Principal")
         .cloned();
@@ -878,12 +902,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         
         //println!("✅ Função Principal executada com sucesso");
     } else {
-        println!("=== Executando código direto (sem função Principal) ===");
-        
-        if let Err(e) = vm.executar_codigo_direto() {
-            eprintln!("❌ Erro na execução: {}", e);
-            return Err("Execução falhou".into());
-        }
+        println!("AVISO: Função 'Principal' não encontrada. O programa não será executado.");
         
         //println!("✅ Código executado com sucesso");
     }
