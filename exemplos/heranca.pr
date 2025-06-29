@@ -1,205 +1,212 @@
 // ===== CLASSE BASE =====
-espaco Meu_Programa {
+usando Meu_Programa;
+
+espaco Meu_Programa 
+{
 
     publico classe Animal 
     {
         publico texto Nome { obter; definir; }
         publico inteiro Idade { obter; definir; }
         publico texto Habitat { obter; definir; }
+    
+        publico Animal(texto nome, inteiro idade, texto habitat) 
+        {
+            este.Nome = nome;
+            este.Idade = idade;
+            este.Habitat = habitat;
+        }
+    
+        // Método redefinível - pode ser sobrescrito
+        publico redefinível vazio emitirSom() 
+        {
+            imprima($"{este.Nome} faz um som genérico");
+        }
+    
+        // Método redefinível para movimento
+        publico redefinível vazio mover() 
+        {
+            imprima($"{este.Nome} está se movendo pelo {este.Habitat}");
+        }
+    
+        // Método comum (não redefinível)
+        publico vazio apresentar() 
+        {
+            imprima($"Animal: {este.Nome}, {este.Idade} anos, vive em {este.Habitat}");
+        }
+    
+        // Método redefinível para alimentação
+        publico redefinível vazio comer() 
+        {
+            imprima($"{este.Nome} está comendo");
+        }
+    }   
+   
+    // ===== CLASSE DERIVADA 1 =====
+    publico classe Cachorro : Animal 
+    {
+        publico texto Raca { obter; definir; }
+        publico booleano EhDomestico { obter; definir; }
+    
+        publico Cachorro(texto nome, inteiro idade, texto raca, booleano ehDomestico) 
+            : base(nome, idade, "Casa") 
+        {
+            este.Raca = raca;
+            este.EhDomestico = ehDomestico;
+        }
+    
+        // Sobrescreve o som do animal
+        publico sobrescreve vazio emitirSom() 
+        {
+            se (este.EhDomestico) 
+            {
+                imprima($"{este.Nome} late: Au au!");
+            } 
+            senão 
+            {   
+                imprima($"{este.Nome} uiva: Auuuuu!");
+            }
+        }
+    
+        // Sobrescreve o movimento
+        publico sobrescreve vazio mover() 
+        {
+            imprima($"{este.Nome} ({este.Raca}) está correndo pela casa");
+        }
+    
+        // Sobrescreve a alimentação
+        publico sobrescreve vazio comer() 
+        {
+            imprima($"{este.Nome} está comendo ração");
+        }
+    
+        // Método específico do cachorro
+        publico vazio abanarRabo() 
+        {
+            imprima($"{este.Nome} está abanando o rabo!");
+        }
+    
+        publico vazio buscarBola() 
+        {
+            imprima($"{este.Nome} correu para buscar a bola!");
+        }
 
-    publico Animal(texto nome, inteiro idade, texto habitat) 
-    {
-        este.Nome = nome;
-        este.Idade = idade;
-        este.Habitat = habitat;
     }
-    
-    // Método redefinível - pode ser sobrescrito
-    publico redefinível vazio emitirSom() 
-    {
-        imprima($"{este.Nome} faz um som genérico");
-    }
-    
-    // Método redefinível para movimento
-    publico redefinível vazio mover() 
-    {
-        imprima($"{este.Nome} está se movendo pelo {este.Habitat}");
-    }
-    
-    // Método comum (não redefinível)
-    publico vazio apresentar() 
-    {
-        imprima($"Animal: {este.Nome}, {este.Idade} anos, vive em {este.Habitat}");
-    }
-    
-    // Método redefinível para alimentação
-    publico redefinível vazio comer() 
-    {
-        imprima($"{este.Nome} está comendo");
-    }
-}
 
-// ===== CLASSE DERIVADA 1 =====
-publico classe Cachorro : Animal 
-{
-    publico texto Raca { obter; definir; }
-    publico booleano EhDomestico { obter; definir; }
+    // ===== CLASSE DERIVADA 2 =====
+    publico classe Gato : Animal 
+    {   
+        publico texto Cor { obter; definir; }
+        publico booleano GostaDeDormir { obter; definir; }
     
-    publico Cachorro(texto nome, inteiro idade, texto raca, booleano ehDomestico) 
-        : base(nome, idade, "Casa") 
-    {
-        este.Raca = raca;
-        este.EhDomestico = ehDomestico;
-    }
+        publico Gato(texto nome, inteiro idade, texto cor, booleano gostaDeDormir) 
+            : base(nome, idade, "Casa") 
+        {
+            este.Cor = cor;
+            este.GostaDeDormir = gostaDeDormir;
+        }
     
-    // Sobrescreve o som do animal
-    publico sobrescreve vazio emitirSom() 
-    {
-        se (este.EhDomestico) 
+        // Sobrescreve o som
+        publico sobrescreve vazio emitirSom() 
         {
-            imprima($"{este.Nome} late: Au au!");
-        } 
-        senão 
+            se (este.GostaDeDormir) 
+            {
+                imprima($"{este.Nome} ronrona suavemente: Purrr...");
+            } 
+            senão 
+            {
+                imprima($"{este.Nome} mia alto: MIAU!");
+            }
+        }
+    
+        // Sobrescreve movimento
+        publico sobrescreve vazio mover() 
         {
-            imprima($"{este.Nome} uiva: Auuuuu!");
+            imprima($"{este.Nome} ({este.Cor}) caminha silenciosamente");
+        }
+    
+        // Sobrescreve alimentação
+        publico sobrescreve vazio comer() 
+        {
+            imprima($"{este.Nome} está bebendo leite e comendo peixe");
+        }
+    
+        // Métodos específicos do gato
+        publico vazio arranhar() 
+        {
+            imprima($"{este.Nome} está arranhando o sofá!");
+        }
+    
+        publico vazio dormir() 
+        {
+            se (este.GostaDeDormir) 
+            {
+                imprima($"{este.Nome} está dormindo 16 horas por dia");
+            } 
+            senão 
+            {
+                imprima($"{este.Nome} está brincando em vez de dormir");
+            }
         }
     }
-    
-    // Sobrescreve o movimento
-    publico sobrescreve vazio mover() 
-    {
-        imprima($"{este.Nome} ({este.Raca}) está correndo pela casa");
-    }
-    
-    // Sobrescreve a alimentação
-    publico sobrescreve vazio comer() 
-    {
-        imprima($"{este.Nome} está comendo ração");
-    }
-    
-    // Método específico do cachorro
-    publico vazio abanarRabo() 
-    {
-        imprima($"{este.Nome} está abanando o rabo!");
-    }
-    
-    publico vazio buscarBola() 
-    {
-        imprima($"{este.Nome} correu para buscar a bola!");
-    }
-}
 
-// ===== CLASSE DERIVADA 2 =====
-publico classe Gato : Animal 
-{
-    publico texto Cor { obter; definir; }
-    publico booleano GostaDeDormir { obter; definir; }
-    
-    publico Gato(texto nome, inteiro idade, texto cor, booleano gostaDeDormir) 
-        : base(nome, idade, "Casa") 
+    // ===== CLASSE DERIVADA 3 =====
+    publico classe Passaro : Animal 
     {
-        este.Cor = cor;
-        este.GostaDeDormir = gostaDeDormir;
-    }
+        publico booleano PodeVoar { obter; definir; }
+        publico texto TipoBico { obter; definir; }
     
-    // Sobrescreve o som
-    publico sobrescreve vazio emitirSom() 
-    {
-        se (este.GostaDeDormir) 
+        publico Passaro(texto nome, inteiro idade, booleano podeVoar, texto tipoBico) 
+            : base(nome, idade, "Árvore") 
         {
-            imprima($"{este.Nome} ronrona suavemente: Purrr...");
-        } 
-        senão 
+            este.PodeVoar = podeVoar;
+            este.TipoBico = tipoBico;
+        }
+    
+        // Sobrescreve som
+        publico sobrescreve vazio emitirSom() 
         {
-            imprima($"{este.Nome} mia alto: MIAU!");
+            se (este.PodeVoar) 
+            {
+                imprima($"{este.Nome} canta melodiosamente: Piu piu!");
+            } 
+            senão 
+            {
+                imprima($"{este.Nome} grasna: Có có có!");
+            }
+        }
+    
+        // Sobrescreve movimento
+        publico sobrescreve vazio mover() 
+        {
+            se (este.PodeVoar) 
+            {
+                imprima($"{este.Nome} está voando pelo céu");
+            } 
+            senão 
+            {
+                imprima($"{este.Nome} está andando no chão");
+            }
+        }
+        
+        // Sobrescreve alimentação
+        publico sobrescreve vazio comer() 
+        {
+            imprima($"{este.Nome} come com seu bico {este.TipoBico}");
+        }
+    
+        // Método específico
+        publico vazio construirNinho() 
+        {
+            imprima($"{este.Nome} está construindo um ninho na árvore");
         }
     }
-    
-    // Sobrescreve movimento
-    publico sobrescreve vazio mover() 
-    {
-        imprima($"{este.Nome} ({este.Cor}) caminha silenciosamente");
-    }
-    
-    // Sobrescreve alimentação
-    publico sobrescreve vazio comer() 
-    {
-        imprima($"{este.Nome} está bebendo leite e comendo peixe");
-    }
-    
-    // Métodos específicos do gato
-    publico vazio arranhar() 
-    {
-        imprima($"{este.Nome} está arranhando o sofá!");
-    }
-    
-    publico vazio dormir() 
-    {
-        se (este.GostaDeDormir) 
-        {
-            imprima($"{este.Nome} está dormindo 16 horas por dia");
-        } 
-        senão 
-        {
-            imprima($"{este.Nome} está brincando em vez de dormir");
-        }
-    }
-}
 
-// ===== CLASSE DERIVADA 3 =====
-publico classe Passaro : Animal 
-{
-    publico booleano PodeVoar { obter; definir; }
-    publico texto TipoBico { obter; definir; }
-    
-    publico Passaro(texto nome, inteiro idade, booleano podeVoar, texto tipoBico) 
-        : base(nome, idade, "Árvore") 
-    {
-        este.PodeVoar = podeVoar;
-        este.TipoBico = tipoBico;
-    }
-    
-    // Sobrescreve som
-    publico sobrescreve vazio emitirSom() 
-    {
-        se (este.PodeVoar) 
-        {
-            imprima($"{este.Nome} canta melodiosamente: Piu piu!");
-        } 
-        senão 
-        {
-            imprima($"{este.Nome} grasna: Có có có!");
-        }
-    }
-    
-    // Sobrescreve movimento
-    publico sobrescreve vazio mover() 
-    {
-        se (este.PodeVoar) 
-        {
-            imprima($"{este.Nome} está voando pelo céu");
-        } 
-        senão 
-        {
-            imprima($"{este.Nome} está andando no chão");
-        }
-    }
-    
-    // Sobrescreve alimentação
-    publico sobrescreve vazio comer() 
-    {
-        imprima($"{este.Nome} come com seu bico {este.TipoBico}");
-    }
-    
-    // Método específico
-    publico vazio construirNinho() 
-{
-        imprima($"{este.Nome} está construindo um ninho na árvore");
-    }
 }
 
 // ===== FUNÇÃO DE TESTE PRINCIPAL =====
 publico função vazio Principal() {
+
     imprima("=== TESTE DE HERANÇA E POLIMORFISMO ===");
     imprima("");
     
@@ -281,5 +288,4 @@ publico função vazio Principal() {
     
     imprima("");
     imprima("=== FIM DOS TESTES ===");
-}
 }
