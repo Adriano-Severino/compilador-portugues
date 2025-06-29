@@ -767,36 +767,44 @@ impl VM {
     }
 
     
-    fn executar_codigo_de_inicializacao(&mut self) -> Result<(), String> {
-        println!("=== Executando Código de Inicialização ===");
+    fn executar_codigo_global(&mut self) -> Result<(), String> {
+        println!("=== Executando Código Global ===");
 
-        let inicializadores: Vec<String> = self.bytecode.iter()
-            .filter(|inst| inst.starts_with("SET_STATIC_PROPERTY"))
-            .cloned()
-            .collect();
+        // Filtra o bytecode para obter apenas as instruções globais
+        let mut codigo_global = Vec::new();
+        let mut i = 0;
+        while i < self.bytecode.len() {
+            let instrucao = &self.bytecode[i];
+            if instrucao.starts_with("DEFINE_") {
+                // Pula a definição e seu corpo
+                let partes: Vec<&str> = instrucao.split(' ').collect();
+                let tamanho_str = if partes[0] == "DEFINE_CLASS" { "0" } else { partes.get(2).unwrap_or(&"0") };
+                let tamanho: usize = tamanho_str.parse().unwrap_or(0);
+                i += tamanho + 1;
+            } else {
+                codigo_global.push(instrucao.clone());
+                i += 1;
+            }
+        }
 
-        if inicializadores.is_empty() {
+        if codigo_global.is_empty() {
+            println!("Nenhum código global para executar.");
             return Ok(());
         }
 
-        // Cria uma VM temporária para executar apenas as inicializações
-        let mut init_vm = VM {
+        // Executa o código global em uma nova VM para não interferir com o escopo principal
+        let mut vm_global = VM {
             pilha: Vec::new(),
-            variaveis: HashMap::new(), // Escopo limpo
-            bytecode: self.bytecode.clone(), // Usa o bytecode completo
-            ip: 0, // Começa do início
-            classes: self.classes.clone(), // Compartilha as definições de classe
+            variaveis: self.variaveis.clone(), // Pode herdar variáveis globais se necessário
+            bytecode: codigo_global,
+            ip: 0,
+            classes: self.classes.clone(),
             functions: self.functions.clone(),
             loaded_modules: self.loaded_modules.clone(),
             base_dir: self.base_dir.clone(),
         };
 
-        init_vm.run_apenas_inicializadores()?;
-
-        // Atualiza os campos estáticos na VM principal
-        self.classes = init_vm.classes;
-
-        Ok(())
+        vm_global.run()
     }
 
     fn run_apenas_inicializadores(&mut self) -> Result<(), String> {
@@ -870,14 +878,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Fase 2: Executar código de inicialização (atribuição de propriedades estáticas)
-    if let Err(e) = vm.executar_codigo_de_inicializacao() {
+    if let Err(e) = vm.executar_codigo_global() {
         eprintln!("Erro ao executar código de inicialização: {}", e);
         return Err(e.into());
     }
 
-    // Fase 3: Encontrar e executar a função 'Principal'
+
+    // Fase 4: Encontrar e executar a função 'Principal' (se existir)
     let funcao_principal = vm.functions.keys()
-        .find(|nome| nome.ends_with("Principal") || nome == &"Principal")
+        .find(|nome| nome.ends_with("Principal") || nome == &&"Principal".to_string())
         .cloned();
 
     if let Some(nome_principal) = funcao_principal {
@@ -891,20 +900,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ip: 0,
             classes: vm.classes.clone(),
             functions: vm.functions.clone(),
-            loaded_modules: vm.loaded_modules.clone(), // ✅ NOVO
-            base_dir: vm.base_dir.clone(),             // ✅ NOVO
+            loaded_modules: vm.loaded_modules.clone(),
+            base_dir: vm.base_dir.clone(),
         };
 
         if let Err(e) = main_vm.run() {
             eprintln!("❌ Erro na execução de Principal: {}", e);
             return Err("Execução de Principal falhou".into());
         }
-        
-        //println!("✅ Função Principal executada com sucesso");
     } else {
-        println!("AVISO: Função 'Principal' não encontrada. O programa não será executado.");
-        
-        //println!("✅ Código executado com sucesso");
+        println!("AVISO: Função 'Principal' não encontrada.");
     }
 
     Ok(())
