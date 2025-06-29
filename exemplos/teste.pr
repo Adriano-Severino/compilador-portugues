@@ -1,4 +1,6 @@
 // Programa em português
+usando MeuPrograma.Domain;
+
 espaco MeuPrograma.Domain
 {
     publico classe Pessoa 
@@ -66,3 +68,6 @@ senão
 {
     imprima("Menor de idade");
 }
+
+var resultao = testar();
+imprima(resultao);

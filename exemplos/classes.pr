@@ -1,3 +1,5 @@
+usando Meu_Programa.Domain;
+
 espaco Meu_Programa.Domain
 {
     publico classe Pessoa2
@@ -54,3 +56,5 @@ se (a > b) {
 } senão {
     imprima("a não é maior que b");
 }
+
+teste_pessoa();

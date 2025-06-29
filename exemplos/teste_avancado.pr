@@ -1,5 +1,4 @@
 usando Meu_Programa.Domain
-//usando Meu_Programa.Domain { testar_funcoes, Pessoa }; da para usar assim tambem
 
 espaco Meu_Programa.Domain
 {
