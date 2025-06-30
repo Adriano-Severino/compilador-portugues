@@ -1,4 +1,4 @@
-usando Meu_Programa.Domain
+usando Meu_Programa.Domain;
 
 espaco Meu_Programa.Domain
 {
@@ -44,6 +44,6 @@ p3.apresentar();
 
 imprima("=== Teste Concluído ===");
 
-teste_funcoes();
+testar_funcoes();
 var pessoa = novo Pessoa("joana", 30);
 pessoa.apresentar();
