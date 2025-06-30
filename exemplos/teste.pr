@@ -19,12 +19,6 @@ espaco MeuPrograma.Domain
             retorne "Olá, eu sou " + este.nome;
         }
     }
-    
-    publico função texto testar() 
-    {
-        Pessoa p = novo Pessoa("João", 30);
-        retorne p.apresentar();
-    }
 }
 
 inteiro a = 10;
@@ -71,3 +65,9 @@ senão
 
 var resultao = testar();
 imprima(resultao);
+
+publico função texto testar() 
+{
+    Pessoa p = novo Pessoa("João", 30);
+    retorne p.apresentar();
+}
