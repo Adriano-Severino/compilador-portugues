@@ -54,13 +54,16 @@ se (idade > 18)
 {
     imprima("Maior de idade");
 } 
-senão se (idade == 18) 
-{
-    imprima("Tem 18 anos");
-}
 senão 
 {
-    imprima("Menor de idade");
+    se (idade == 18) 
+    {
+        imprima("Tem 18 anos");
+    }
+    senão 
+    {
+        imprima("Menor de idade");
+    }
 }
 
 var resultao = testar();
