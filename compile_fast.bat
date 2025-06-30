@@ -8,7 +8,7 @@ set PROGRAMA=%1
 echo Compilando %PROGRAMA%.pr...
 
 REM Usar o compilador já construído
-.\target\release\compilador-portugues.exe "%PROGRAMA%.pr"
+.	arget\debug\compilador-portugues.exe "%PROGRAMA%.pr"
 
 REM Gerar executável diretamente
 clang -O3 "%PROGRAMA%.ll" -o "%PROGRAMA%.exe"
