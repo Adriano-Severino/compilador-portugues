@@ -44,12 +44,6 @@ imprima("Olá mundo!");
 imprima(nome);
 imprima(idade);
 
-se (idade > 18) {
-    imprima("Maior de idade");
-} senão {
-    imprima("Menor de idade");
-}
-
 se (idade > 18)  
 {
     imprima("Maior de idade");
