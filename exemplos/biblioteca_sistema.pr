@@ -32,62 +32,62 @@ espaco BibliotecaDigital.Sistema
             QuantidadeDisponivel = quantidade;
             Disponivel           = verdadeiro;
         }
-    }
-    
-    publico vazio apresentarDetalhes(booleano completo = verdadeiro)
-    {
-        se (completo)
+        
+        publico vazio apresentarDetalhes(booleano completo = verdadeiro)
         {
-            imprima("📚 LIVRO: " + Titulo);
-            imprima(" Autor: "      + Autor);
-            imprima(" ISBN: "       + ISBN);
-            imprima(" Ano: "        + AnoPublicacao);
-            imprima(" Categoria: "  + Categoria);
-            imprima(" Disponível: " +
-            QuantidadeDisponivel + "/" + QuantidadeTotal);
-            
-            se (Disponivel)
+            se (completo)
             {
-                imprima(" Status: Disponível");
+                imprima("📚 LIVRO: " + Titulo);
+                imprima(" Autor: "      + Autor);
+                imprima(" ISBN: "       + ISBN);
+                imprima(" Ano: "        + AnoPublicacao);
+                imprima(" Categoria: "  + Categoria);
+                imprima(" Disponível: " +
+                QuantidadeDisponivel + "/" + QuantidadeTotal);
+                
+                se (Disponivel)
+                {
+                    imprima(" Status: Disponível");
+                }
+                senão
+                {
+                    imprima(" Status: Indisponível");
+                }
             }
             senão
             {
-                imprima(" Status: Indisponível");
+                se (Disponivel)
+                {
+                    imprima($"📚 {Titulo} - {Autor} ✅");
+                }
+                senão
+                {
+                    imprima($"📚 {Titulo} - {Autor} ❌");
+                }
             }
         }
-        senão
+        
+        publico booleano emprestar()
         {
-            se (Disponivel)
+            se (QuantidadeDisponivel > 0)
             {
-                imprima($"📚 {Titulo} - {Autor} ✅");
+                QuantidadeDisponivel = QuantidadeDisponivel - 1;
+                se (QuantidadeDisponivel == 0)
+                {
+                    Disponivel = falso;
+                }
+                retorne verdadeiro;
             }
-            senão
-            {
-                imprima($"📚 {Titulo} - {Autor} ❌");
-            }
+            retorne falso;
         }
-    }
-    
-    publico booleano emprestar()
-    {
-        se (QuantidadeDisponivel > 0)
+        
+        publico vazio devolver()
         {
-            QuantidadeDisponivel = QuantidadeDisponivel - 1;
-            se (QuantidadeDisponivel == 0)
+            QuantidadeDisponivel = QuantidadeDisponivel + 1;
+            se (QuantidadeDisponivel > 0)
             {
-                Disponivel = falso;
+                Disponivel = verdadeiro;
             }
-            retorne verdadeiro;
-        }
-        retorne falso;
-    }
-    
-    publico vazio devolver()
-    {
-        QuantidadeDisponivel = QuantidadeDisponivel + 1;
-        se (QuantidadeDisponivel > 0)
-        {
-            Disponivel = verdadeiro;
         }
     }
     
@@ -216,7 +216,7 @@ espaco BibliotecaDigital.Sistema
     // ------------------------------------------------------------------
     // DEMONSTRAÇÃO DO SISTEMA
     // ------------------------------------------------------------------
-    publico função demonstrarSistema()
+    publico função vazio demonstrarSistema()
     {
         
         imprima("🎯 ===== SISTEMA DE BIBLIOTECA DIGITAL =====");
