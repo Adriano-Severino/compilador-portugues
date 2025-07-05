@@ -344,10 +344,10 @@ Abaixo um exemplo real de programa completo, mostrando classes, propriedades, co
 ```pordosol
 usando BibliotecaDigital.Sistema;
 
-espaco BibliotecaDigital.Sistema 
+espaco BibliotecaDigital.Sistema
 {
-    publico classe Livro 
-    {  
+    publico classe Livro
+    {
         // Propriedades
         publico texto   Titulo               { obter; definir; }
         publico texto   Autor                { obter; definir; }
@@ -357,16 +357,16 @@ espaco BibliotecaDigital.Sistema
         publico inteiro QuantidadeTotal      { obter; definir; }
         publico inteiro QuantidadeDisponivel { obter; definir; }
         publico booleano Disponivel          { obter; definir; }
-
+        
         // Construtor com parâmetros opcionais
         publico Livro(texto titulo,
-                    texto autor,
-                    texto isbn,
-                    inteiro ano = 2024,
-                    texto categoria = "Geral",
-                    inteiro quantidade = 1) 
+        texto autor,
+        texto isbn,
+        inteiro ano = 2024,
+        texto categoria = "Geral",
+        inteiro quantidade = 1)
         {
-
+            
             Titulo               = titulo;
             Autor                = autor;
             ISBN                 = isbn;
@@ -376,68 +376,68 @@ espaco BibliotecaDigital.Sistema
             QuantidadeDisponivel = quantidade;
             Disponivel           = verdadeiro;
         }
-    }
-
-    publico vazio apresentarDetalhes(booleano completo = verdadeiro) 
-    {
-        se (completo) 
+        
+        publico vazio apresentarDetalhes(booleano completo = verdadeiro)
         {
-            imprima("📚 LIVRO: " + Titulo);
-            imprima(" Autor: "      + Autor);
-            imprima(" ISBN: "       + ISBN);
-            imprima(" Ano: "        + AnoPublicacao);
-            imprima(" Categoria: "  + Categoria);
-            imprima(" Disponível: " +
-                    QuantidadeDisponivel + "/" + QuantidadeTotal);
-
-            se (Disponivel) 
+            se (completo)
             {
-                imprima(" Status: Disponível");
-            } 
-            senão 
-            {
-                imprima(" Status: Indisponível");
+                imprima("📚 LIVRO: " + Titulo);
+                imprima(" Autor: "      + Autor);
+                imprima(" ISBN: "       + ISBN);
+                imprima(" Ano: "        + AnoPublicacao);
+                imprima(" Categoria: "  + Categoria);
+                imprima(" Disponível: " +
+                QuantidadeDisponivel + "/" + QuantidadeTotal);
+                
+                se (Disponivel)
+                {
+                    imprima(" Status: Disponível");
+                }
+                senão
+                {
+                    imprima(" Status: Indisponível");
+                }
             }
-        } 
-        senão 
+            senão
+            {
+                se (Disponivel)
+                {
+                    imprima($"📚 {Titulo} - {Autor} ✅");
+                }
+                senão
+                {
+                    imprima($"📚 {Titulo} - {Autor} ❌");
+                }
+            }
+        }
+        
+        publico booleano emprestar()
         {
-            se (Disponivel) 
+            se (QuantidadeDisponivel > 0)
             {
-                imprima($"📚 {Titulo} - {Autor} ✅");
-            } 
-            senão 
+                QuantidadeDisponivel = QuantidadeDisponivel - 1;
+                se (QuantidadeDisponivel == 0)
+                {
+                    Disponivel = falso;
+                }
+                retorne verdadeiro;
+            }
+            retorne falso;
+        }
+        
+        publico vazio devolver()
+        {
+            QuantidadeDisponivel = QuantidadeDisponivel + 1;
+            se (QuantidadeDisponivel > 0)
             {
-                imprima($"📚 {Titulo} - {Autor} ❌");
+                Disponivel = verdadeiro;
             }
         }
     }
-
-    publico booleano emprestar() 
+    
+    publico classe Usuario
     {
-        se (QuantidadeDisponivel > 0) 
-        {
-            QuantidadeDisponivel = QuantidadeDisponivel - 1;
-            se (QuantidadeDisponivel == 0) 
-            {
-                Disponivel = falso;
-            }
-            retorne verdadeiro;
-        }
-        retorne falso;
-    }
-
-    publico vazio devolver() 
-    {
-        QuantidadeDisponivel = QuantidadeDisponivel + 1;
-        se (QuantidadeDisponivel > 0) 
-        {
-            Disponivel = verdadeiro;
-        }
-    }
-   
-    publico classe Usuario 
-    {
-
+        
         publico texto   Nome            { obter; definir; }
         publico texto   Email           { obter; definir; }
         publico texto   Telefone        { obter; definir; }
@@ -445,14 +445,14 @@ espaco BibliotecaDigital.Sistema
         publico inteiro NumeroCartao    { obter; definir; }
         publico inteiro LimiteEmprestimos { obter; definir; }
         publico inteiro LivrosEmprestados { obter; definir; }
-
+        
         publico Usuario(texto nome,
-                    texto email,
-                    texto telefone = "",
-                    texto tipo = "Comum",
-                    inteiro limite = 3) 
-        { 
-
+        texto email,
+        texto telefone = "",
+        texto tipo = "Comum",
+        inteiro limite = 3)
+        {
+            
             Nome              = nome;
             Email             = email;
             Telefone          = telefone;
@@ -461,8 +461,8 @@ espaco BibliotecaDigital.Sistema
             LivrosEmprestados = 0;
             NumeroCartao      = 1000 + (nome.tamanho() * 7);
         }
-
-        publico vazio apresentarPerfil() 
+        
+        publico vazio apresentarPerfil()
         {
             imprima("👤 USUÁRIO: " + Nome);
             imprima(" Email: "      + Email);
@@ -470,68 +470,68 @@ espaco BibliotecaDigital.Sistema
             imprima(" Tipo: "       + TipoUsuario);
             imprima(" Empréstimos: "+ LivrosEmprestados + "/" + LimiteEmprestimos);
         }
-
-        publico booleano podeEmprestar() 
+        
+        publico booleano podeEmprestar()
         {
             retorne LivrosEmprestados < LimiteEmprestimos;
         }
-    }   
-
-    publico classe Biblioteca 
+    }
+    
+    publico classe Biblioteca
     {
-
+        
         publico texto   Nome         { obter; definir; }
         publico texto   Endereco     { obter; definir; }
         publico inteiro TotalLivros  { obter; definir; }
         publico inteiro TotalUsuarios { obter; definir; }
-
+        
         publico Biblioteca(texto nome,
-                       texto endereco = "Endereço não informado") 
+        texto endereco = "Endereço não informado")
         {
-
+            
             Nome          = nome;
             Endereco      = endereco;
             TotalLivros   = 0;
             TotalUsuarios = 0;
         }
-
-        publico vazio adicionarLivro(Livro livro) 
+        
+        publico vazio adicionarLivro(Livro livro)
         {
             TotalLivros = TotalLivros + 1;
             imprima("✅ Livro '" + livro.Titulo + "' adicionado à biblioteca!");
         }
-
-        publico vazio cadastrarUsuario(Usuario usuario) 
+        
+        publico vazio cadastrarUsuario(Usuario usuario)
         {
             TotalUsuarios = TotalUsuarios + 1;
             imprima("✅ Usuário '" + usuario.Nome + "' cadastrado com sucesso!");
             imprima(" Número do cartão: #" + usuario.NumeroCartao);
         }
-
-        publico vazio realizarEmprestimo(Usuario usuario, Livro livro) 
+        
+        publico vazio realizarEmprestimo(Usuario usuario, Livro livro)
         {
-            se (usuario.podeEmprestar()) 
+            se (usuario.podeEmprestar())
             {
-                se (livro.emprestar()) 
+                se (livro.emprestar())
                 {
                     usuario.LivrosEmprestados = usuario.LivrosEmprestados + 1;
                     imprima("📖 EMPRÉSTIMO REALIZADO:");
                     imprima(" Livro: "   + livro.Titulo);
                     imprima(" Usuário: " + usuario.Nome);
                     imprima(" Cartão: #" + usuario.NumeroCartao);
-                } 
-                senão 
+                }
+                senão
                 {
                     imprima("❌ Livro '" + livro.Titulo + "' não está disponível!");
                 }
-            } 
-            senão 
+            }
+            senão
             {
                 imprima("❌ Usuário '" + usuario.Nome + "' atingiu o limite de empréstimos!");
             }
         }
-
-        publico vazio realizarDevolucao(Usuario usuario, Livro livro) 
+        
+        publico vazio realizarDevolucao(Usuario usuario, Livro livro)
         {
             livro.devolver();
             usuario.LivrosEmprestados = usuario.LivrosEmprestados - 1;
@@ -539,8 +539,8 @@ espaco BibliotecaDigital.Sistema
             imprima(" Livro: "   + livro.Titulo);
             imprima(" Usuário: " + usuario.Nome);
         }
-
-        publico vazio gerarRelatorio() 
+        
+        publico vazio gerarRelatorio()
         {
             imprima("📊 ========== RELATÓRIO DA BIBLIOTECA ==========");
             imprima("🏛️ Biblioteca: " + Nome);
@@ -549,135 +549,127 @@ espaco BibliotecaDigital.Sistema
             imprima("👥 Total de Usuários: " + TotalUsuarios);
             imprima("============================================");
         }
-
-        publico vazio buscarLivrosPorCategoria(texto categoria) 
+        
+        publico vazio buscarLivrosPorCategoria(texto categoria)
         {
             imprima("🔍 Buscando livros da categoria: " + categoria);
             imprima(" (Simulação - em implementação real buscaria no banco de dados)");
         }
     }
-}
-
-// ------------------------------------------------------------------
-// DEMONSTRAÇÃO DO SISTEMA
-// ------------------------------------------------------------------
-publico função demonstrarSistema() 
-{
-
-    imprima("🎯 ===== SISTEMA DE BIBLIOTECA DIGITAL =====");
-    imprima("");
-
-    // Criando biblioteca
-    Livro livro1 = novo Livro("1984", "George Orwell", "978-85-250-4099-1", 1949, "Ficção Científica", 2);
-    Livro livro2 = novo Livro("Clean Code", "Robert Martin", "978-0-13-235088-4", 2008, "Tecnologia");
-    Livro livro3 = novo Livro("O Pequeno Príncipe", "Antoine de Saint-Exupéry", "978-85-325-2734-9");
-
-    // Adicionando livros
-    biblioteca.adicionarLivro(livro1);
-    biblioteca.adicionarLivro(livro2);
-    biblioteca.adicionarLivro(livro3);
-    imprima("");
-
-    // Criando usuários
-    Usuario usuario1 = novo Usuario("Ana Silva",
-                                    "ana.silva@email.com",
-                                    "11987654321",
-                                    "Premium",
-                                    5);
-
-    Usuario usuario2 = novo Usuario("Joana Silva",
-                                    "joana@email.com",
-                                    "11876543210");
-
-    Usuario usuario3 = novo Usuario("Maria Oliveira",
-                                    "maria@email.com");
-
-    // Cadastrando usuários
-    biblioteca.cadastrarUsuario(usuario1);
-    biblioteca.cadastrarUsuario(usuario2);
-    biblioteca.cadastrarUsuario(usuario3);
-    imprima("");
-
-    // Catálogo
-    imprima("📋 CATÁLOGO DE LIVROS:");
-    livro1.apresentarDetalhes();
-    imprima("");
-    livro2.apresentarDetalhes(falso);
-    livro3.apresentarDetalhes(falso);
-    livro4.apresentarDetalhes(falso);
-    imprima("");
-
-    // Perfis
-    imprima("👥 USUÁRIOS CADASTRADOS:");
-    usuario1.apresentarPerfil();
-    imprima("");
-    usuario2.apresentarPerfil();
-    imprima("");
-
-    // Empréstimos
-    imprima("📖 REALIZANDO EMPRÉSTIMOS:");
-    biblioteca.realizarEmprestimo(usuario1, livro1);
-    biblioteca.realizarEmprestimo(usuario1, livro2);
-    biblioteca.realizarEmprestimo(usuario2, livro1); // Falhará
-    biblioteca.realizarEmprestimo(usuario2, livro3);
-    imprima("");
-
-    // Status após empréstimos
-    imprima("📊 STATUS APÓS EMPRÉSTIMOS:");
-    livro1.apresentarDetalhes(falso);
-    livro2.apresentarDetalhes(falso);
-    livro3.apresentarDetalhes(falso);
-    imprima("");
-
-    // Devolução
-    imprima("📥 REALIZANDO DEVOLUÇÕES:");
     
-    biblioteca.realizarDevolucao(usuario1, livro1);
-    
-    imprima("");
-
-    // Status final
-    livro1.apresentarDetalhes(falso);
-    
-    imprima("");
-
-    // Relatório
-    biblioteca.gerarRelatorio();
-
-    // Busca
-    biblioteca.buscarLivrosPorCategoria("Literatura");
-    biblioteca.buscarLivrosPorCategoria("Tecnologia");
-    
-    imprima("");
-
-    imprima("✨ Sistema funcionando perfeitamente!");
-
-    // Estatísticas
-    inteiro totalOperacoes = 0;
-
-    imprima("🧮 CONTABILIZANDO OPERAÇÕES DO SISTEMA:");
-
-    totalOperacoes = totalOperacoes + 4; // Livros adicionados
-    totalOperacoes = totalOperacoes + 3; // Usuários cadastrados
-    totalOperacoes = totalOperacoes + 4; // Empréstimos tentados
-    totalOperacoes = totalOperacoes + 1; // Devoluções
-
-    imprima("📈 Total de operações realizadas: " + totalOperacoes);
-
-    se (totalOperacoes > 10) 
-    {
-        imprima("🎯 Sistema com alta atividade!");
-    } 
-    senão 
+    // ------------------------------------------------------------------
+    // DEMONSTRAÇÃO DO SISTEMA
+    // ------------------------------------------------------------------
+    publico função vazio demonstrarSistema()
     {
         
-        imprima("📊 Sistema com atividade moderada.");
+        imprima("🎯 ===== SISTEMA DE BIBLIOTECA DIGITAL =====");
+        imprima("");
+        
+        // Criando biblioteca
+        Livro livro1 = novo Livro("1984", "George Orwell", "978-85-250-4099-1", 1949, "Ficção Científica", 2);
+        Livro livro2 = novo Livro("Clean Code", "Robert Martin", "978-0-13-235088-4", 2008, "Tecnologia");
+        Livro livro3 = novo Livro("O Pequeno Príncipe", "Antoine de Saint-Exupéry", "978-85-325-2734-9");
+        
+        // Adicionando livros
+        biblioteca.adicionarLivro(livro1);
+        biblioteca.adicionarLivro(livro2);
+        biblioteca.adicionarLivro(livro3);
+        imprima("");
+        
+        // Criando usuários
+        Usuario usuario1 = novo Usuario("Ana Silva",
+        "ana.silva@email.com",
+        "11987654321",
+        "Premium",
+        5);
+        
+        Usuario usuario2 = novo Usuario("Joana Silva",
+        "joana@email.com",
+        "11876543210");
+        
+        Usuario usuario3 = novo Usuario("Maria Oliveira",
+        "maria@email.com");
+        
+        // Cadastrando usuários
+        biblioteca.cadastrarUsuario(usuario1);
+        biblioteca.cadastrarUsuario(usuario2);
+        biblioteca.cadastrarUsuario(usuario3);
+        imprima("");
+        
+        // Catálogo
+        imprima("📋 CATÁLOGO DE LIVROS:");
+        livro1.apresentarDetalhes();
+        imprima("");
+        livro2.apresentarDetalhes(falso);
+        livro3.apresentarDetalhes(falso);
+        livro4.apresentarDetalhes(falso);
+        imprima("");
+        
+        // Perfis
+        imprima("👥 USUÁRIOS CADASTRADOS:");
+        usuario1.apresentarPerfil();
+        imprima("");
+        usuario2.apresentarPerfil();
+        imprima("");
+        
+        // Empréstimos
+        imprima("📖 REALIZANDO EMPRÉSTIMOS:");
+        biblioteca.realizarEmprestimo(usuario1, livro1);
+        biblioteca.realizarEmprestimo(usuario1, livro2);
+        biblioteca.realizarEmprestimo(usuario2, livro1); // Falhará
+        biblioteca.realizarEmprestimo(usuario2, livro3);
+        imprima("");
+        
+        // Status após empréstimos
+        imprima("📊 STATUS APÓS EMPRÉSTIMOS:");
+        livro1.apresentarDetalhes(falso);
+        livro2.apresentarDetalhes(falso);
+        livro3.apresentarDetalhes(falso);
+        imprima("");
+        
+        // Devolução
+        imprima("📥 REALIZANDO DEVOLUÇÕES:");
+        biblioteca.realizarDevolucao(usuario1, livro1);
+        imprima("");
+        
+        // Status final
+        livro1.apresentarDetalhes(falso);
+        imprima("");
+        
+        // Relatório
+        biblioteca.gerarRelatorio();
+        
+        // Busca
+        biblioteca.buscarLivrosPorCategoria("Literatura");
+        biblioteca.buscarLivrosPorCategoria("Tecnologia");
+        imprima("");
+        
+        imprima("✨ Sistema funcionando perfeitamente!");
+        
+        // Estatísticas
+        inteiro totalOperacoes = 0;
+        imprima("🧮 CONTABILIZANDO OPERAÇÕES DO SISTEMA:");
+        totalOperacoes = totalOperacoes + 4; // Livros adicionados
+        totalOperacoes = totalOperacoes + 3; // Usuários cadastrados
+        totalOperacoes = totalOperacoes + 4; // Empréstimos tentados
+        totalOperacoes = totalOperacoes + 1; // Devoluções
+        imprima("📈 Total de operações realizadas: " + totalOperacoes);
+        
+        se (totalOperacoes > 10)
+        {
+            imprima("🎯 Sistema com alta atividade!");
+        }
+        senão
+        {
+            imprima("📊 Sistema com atividade moderada.");
+        }
+        
+        imprima("🏁 ===== FIM DA DEMONSTRAÇÃO =====");
     }
-    
-    imprima("🏁 ===== FIM DA DEMONSTRAÇÃO =====");
 }
 
-publico função Princiapl() 
+publico função Princiapl()
 {
     demonstrarSistema();
 }
