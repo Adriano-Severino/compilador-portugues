@@ -11,7 +11,7 @@ pub enum Tipo {
     Booleano,
     Vazio,
     Lista(Box<Tipo>),
-    Classe(String),
+    Classe(String), // Stores FQN
     Funcao(Vec<Tipo>, Box<Tipo>),
     Generico(String),
     Opcional(Box<Tipo>),
@@ -38,7 +38,7 @@ pub enum ItemPrograma {
 /* ========================================================================== */
 /* NAMESPACES                                                                 */
 /* ========================================================================== */
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeclaracaoNamespace {
     pub nome: String,
     pub declaracoes: Vec<Declaracao>,
@@ -52,7 +52,7 @@ pub struct DeclaracaoUsando {
 /* ========================================================================== */
 /* DECLARAÇÕES TOP-LEVEL                                                      */
 /* ========================================================================== */
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Declaracao {
     DeclaracaoClasse(DeclaracaoClasse),
     DeclaracaoFuncao(DeclaracaoFuncao),
@@ -67,19 +67,19 @@ pub enum Declaracao {
 }
 
 /* — módulos / interfaces / enums / type-alias — */
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeclaracaoModulo {
     pub nome: String,
     pub conteudo: Vec<Declaracao>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeclaracaoInterface {
     pub nome: String,
     pub metodos: Vec<AssinaturaMetodo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AssinaturaMetodo {
     pub nome: String,
     pub parametros: Vec<Parametro>,
@@ -87,25 +87,25 @@ pub struct AssinaturaMetodo {
     pub modificador: ModificadorAcesso,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeclaracaoEnum {
     pub nome: String,
     pub valores: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeclaracaoTipo {
     pub nome: String,
     pub tipo_base: Tipo,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Importacao {
     pub caminho: String,
     pub itens: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Exportacao {
     pub nome: String,
     pub publico: bool,
@@ -114,7 +114,7 @@ pub struct Exportacao {
 /* ========================================================================== */
 /* CLASSES                                                                    */
 /* ========================================================================== */
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeclaracaoClasse {
     pub nome: String,
     pub classe_pai: Option<String>,
@@ -135,7 +135,7 @@ pub enum MembroClasse {
     Construtor(ConstrutorClasse),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CampoClasse {
     pub nome: String,
     pub tipo: Tipo,
@@ -144,7 +144,7 @@ pub struct CampoClasse {
     pub eh_estatica: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PropriedadeClasse {
     pub nome: String,
     pub tipo: Tipo,
@@ -155,13 +155,13 @@ pub struct PropriedadeClasse {
     pub eh_estatica: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AcessorPropriedade {
     pub modificador: Option<ModificadorAcesso>,
     pub corpo: Option<Vec<Comando>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MetodoClasse {
     pub nome: String,
     pub parametros: Vec<Parametro>,
@@ -174,18 +174,19 @@ pub struct MetodoClasse {
     pub eh_estatica: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ConstrutorClasse {
     pub parametros: Vec<Parametro>,
     pub modificador: ModificadorAcesso,
     pub corpo: Vec<Comando>,
+    pub chamada_pai: Option<Vec<Expressao>>,
     pub nome_escrito: Option<String>, // para construtor “Classe(...)”
 }
 
 /* ========================================================================== */
 /* FUNÇÕES                                                                    */
 /* ========================================================================== */
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeclaracaoFuncao {
     pub nome: String,
     pub parametros: Vec<Parametro>,
@@ -196,7 +197,7 @@ pub struct DeclaracaoFuncao {
 }
 
 /* — parâmetros com valor padrão (C#-style) — */
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Parametro {
     pub nome: String,
     pub tipo: Tipo,
@@ -236,7 +237,7 @@ pub enum ModificadorAcesso {
 /* ========================================================================== */
 /* COMANDOS                                                                   */
 /* ========================================================================== */
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Comando {
     DeclaracaoVariavel(Tipo, String, Option<Expressao>),
     DeclaracaoVar(String, Expressao),
@@ -263,11 +264,12 @@ pub enum Comando {
 /* ========================================================================== */
 /* EXPRESSÕES                                                                 */
 /* ========================================================================== */
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Expressao {
     Inteiro(i64),
     Texto(String),
     Booleano(bool),
+    Decimal(f64),
     Identificador(String),
     Aritmetica(OperadorAritmetico, Box<Expressao>, Box<Expressao>),
     Comparacao(OperadorComparacao, Box<Expressao>, Box<Expressao>),
@@ -287,13 +289,13 @@ pub enum OperadorUnario {
     NegacaoNumerica,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum PartStringInterpolada {
     Texto(String),
     Expressao(Expressao),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OperadorAritmetico {
     Soma,
     Subtracao,
@@ -302,7 +304,7 @@ pub enum OperadorAritmetico {
     Modulo,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OperadorComparacao {
     Igual,
     Diferente,
@@ -312,7 +314,7 @@ pub enum OperadorComparacao {
     MaiorIgual,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OperadorLogico {
     E,
     Ou,

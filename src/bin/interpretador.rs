@@ -32,6 +32,8 @@ struct ClasseInfo {
     campos_estaticos: Rc<RefCell<HashMap<String, Valor>>>,
     metodos_estaticos: HashMap<String, FuncInfo>,
     construtor: Option<Vec<String>>,
+    nome_classe_pai: Option<String>, // Adicionado para herança
+    construtor_params: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -114,40 +116,65 @@ impl VM {
         }
     }
 
-    fn criar_objeto(&self, nome_classe: &str, argumentos: Vec<Valor>) -> Result<Valor, String> {
+    fn criar_objeto(&mut self, nome_classe: &str, argumentos: Vec<Valor>) -> Result<Valor, String> {
         let classe = self
             .classes
             .get(nome_classe)
-            .ok_or_else(|| format!("Classe '{}' não encontrada", nome_classe))?;
+            .ok_or_else(|| format!("Classe '{}' não encontrada", nome_classe))?
+            .clone();
 
         let mut campos_map = HashMap::new();
 
-        // Inicializar campos com valores padrão
-        for (i, campo_nome) in classe.campos.iter().enumerate() {
-            let valor = argumentos.get(i).cloned().unwrap_or(Valor::Nulo);
-            campos_map.insert(campo_nome.clone(), valor);
+        // Inicializar todos os campos da classe com Nulo
+        for campo_nome in classe.campos.iter() {
+            campos_map.insert(campo_nome.clone(), Valor::Nulo);
         }
 
-        Ok(Valor::Objeto {
+        // Atribuir argumentos do construtor aos campos
+        for (i, param_name) in classe.construtor_params.iter().enumerate() {
+            if let Some(arg_val) = argumentos.get(i) {
+                campos_map.insert(param_name.clone(), arg_val.clone());
+            }
+        }
+
+        let objeto = Valor::Objeto {
             nome_classe: nome_classe.to_string(),
             campos: Rc::new(RefCell::new(campos_map)),
             metodos: classe.metodos.clone(),
-        })
+        };
+
+        Ok(objeto)
     }
 
     fn chamar_metodo(
         &mut self,
-        objeto: Valor,
+        objeto: &mut Valor,
         nome_metodo: &str,
         argumentos: Vec<Valor>,
-    ) -> Result<Valor, String> {
-        if let Valor::Objeto { nome_classe, campos, metodos } = objeto {
-            if let Some(metodo_info) = metodos.get(nome_metodo) {
+    ) -> Result<(), String> {
+        if let Valor::Objeto { ref nome_classe, .. } = objeto {
+            // Tenta encontrar o método na classe atual ou em suas classes pai
+            let mut current_class_name = Some(nome_classe.clone());
+            let mut metodo_info: Option<FuncInfo> = None;
+
+            while let Some(c_name) = current_class_name.clone() {
+                if let Some(class_info) = self.classes.get(&c_name) {
+                    if let Some(m_info) = class_info.metodos.get(nome_metodo) {
+                        metodo_info = Some(m_info.clone());
+                        break;
+                    }
+                    current_class_name = class_info.nome_classe_pai.clone();
+                } else {
+                    break;
+                }
+            }
+
+            if let Some(metodo_info) = metodo_info {
                 // --- Prepara o ambiente do método ---
                 let mut vars = HashMap::new();
 
-                // 1. Adiciona "este" ao escopo local.
-                vars.insert("este".to_string(), Valor::Objeto { nome_classe: nome_classe.clone(), campos, metodos: metodos.clone() });
+                // 1. Adiciona "este" ao escopo local, compartilhando o Rc para os campos.
+                vars.insert("este".to_string(), objeto.clone());
 
                 // 2. Adiciona os argumentos do método ao escopo local.
                 for (i, param_nome) in metodo_info.parametros.iter().enumerate() {
@@ -163,12 +190,13 @@ impl VM {
                     ip: 0,
                     classes: self.classes.clone(),
                     functions: self.functions.clone(),
-                    loaded_modules: self.loaded_modules.clone(), // ✅ NOVO
-                    base_dir: self.base_dir.clone(),             // ✅ NOVO
+                    loaded_modules: self.loaded_modules.clone(),
+                    base_dir: self.base_dir.clone(),
                 };
 
                 vm_metodo.run()?;
-                return Ok(vm_metodo.pilha.pop().unwrap_or(Valor::Nulo));
+
+                return Ok(());
             } else {
                 Err(format!("Método '{}.{}' não encontrado", nome_classe, nome_metodo))
             }
@@ -247,18 +275,37 @@ impl VM {
             match *op {
                 "DEFINE_CLASS" => {
                     let nome_classe = partes.get(1).ok_or("DEFINE_CLASS requer nome")?.to_string();
-                    let campos: Vec<String> = partes.iter().skip(2).map(|s| s.to_string()).collect();
-                    let entry = self.classes.entry(nome_classe.clone()).or_insert(ClasseInfo {
+                    let parent_class = partes.get(2).map(|s| s.to_string());
+                    let parent_class = if parent_class.as_deref() == Some("NULO") { None } else { parent_class };
+                    let props_and_constructor_str = partes.get(3).ok_or("DEFINE_CLASS requer propriedades e parâmetros do construtor")?;
+                    let parts: Vec<&str> = props_and_constructor_str.split('|').collect();
+                    let campos: Vec<String> = parts.get(0).map_or(Vec::new(), |s| s.split_whitespace().map(String::from).collect());
+                    let construtor_params: Vec<String> = parts.get(1).map_or(Vec::new(), |s| s.split_whitespace().map(String::from).collect());
+
+                    let all_campos = if let Some(parent_name) = &parent_class {
+                        if let Some(parent_info) = self.classes.get(parent_name) {
+                            let mut inherited_campos = parent_info.campos.clone();
+                            inherited_campos.extend(campos);
+                            inherited_campos
+                        } else {
+                            campos
+                        }
+                    } else {
+                        campos
+                    };
+
+                    self.classes.insert(nome_classe.clone(), ClasseInfo {
                         nome: nome_classe.clone(),
-                        campos: Vec::new(),
+                        campos: all_campos,
                         metodos: HashMap::new(),
                         campos_estaticos: Rc::new(RefCell::new(HashMap::new())),
                         metodos_estaticos: HashMap::new(),
                         construtor: None,
+                        nome_classe_pai: parent_class,
+                        construtor_params,
                     });
-                    entry.campos = campos;
                     i += 1;
-                }
+                },
                 "DEFINE_FUNCTION" => {
                     let nome_func = partes.get(1).ok_or("DEFINE_FUNCTION requer nome")?.to_string();
                     let tamanho: usize = partes.get(2).ok_or("DEFINE_FUNCTION requer tamanho")?.parse().map_err(|_| "Tamanho inválido")?;
@@ -290,6 +337,8 @@ impl VM {
                         campos_estaticos: Rc::new(RefCell::new(HashMap::new())),
                         metodos_estaticos: HashMap::new(),
                         construtor: None,
+                        nome_classe_pai: None,
+                        construtor_params: Vec::new(),
                     });
                     entry.metodos.insert(metodo_nome, metodo_info);
                     i = corpo_fim;
@@ -313,6 +362,8 @@ impl VM {
                         campos_estaticos: Rc::new(RefCell::new(HashMap::new())),
                         metodos_estaticos: HashMap::new(),
                         construtor: None,
+                        nome_classe_pai: None,
+                        construtor_params: Vec::new(),
                     });
                     entry.metodos_estaticos.insert(metodo_nome, metodo_info);
                     i = corpo_fim;
@@ -357,19 +408,33 @@ impl VM {
                 }
                 "LOAD_VAR" => {
                     let nome_var = partes.get(1).ok_or("LOAD_VAR requer um nome de variável")?;
-                    let valor = self
-                        .variaveis
-                        .get(*nome_var)
+                    let valor = self.variaveis.get(*nome_var)
                         .cloned()
+                        // Se não encontrar na pilha local, tenta nos campos de 'este'
+                        .or_else(|| {
+                            if let Some(Valor::Objeto { campos, .. }) = self.variaveis.get("este") {
+                                campos.borrow().get(*nome_var).cloned()
+                            } else {
+                                None
+                            }
+                        })
                         .unwrap_or(Valor::Nulo);
                     self.pilha.push(valor);
                 }
                 "STORE_VAR" => {
-                    let nome_var = partes
-                        .get(1)
-                        .ok_or("STORE_VAR requer um nome de variável")?;
+                    let nome_var = partes.get(1).ok_or("STORE_VAR requer um nome de variável")?;
                     let valor = self.pilha.pop().ok_or("Pilha vazia em STORE_VAR")?;
-                    self.variaveis.insert(nome_var.to_string(), valor);
+
+                    // Tenta atualizar o campo de um objeto se 'este' existir e tiver o campo.
+                    if let Some(Valor::Objeto { campos, .. }) = self.variaveis.get("este") {
+                        if campos.borrow().contains_key(*nome_var) {
+                            campos.borrow_mut().insert(nome_var.to_string(), valor);
+                        } else {
+                            self.variaveis.insert(nome_var.to_string(), valor);
+                        }
+                    } else {
+                        self.variaveis.insert(nome_var.to_string(), valor);
+                    }
                 }
                 "PRINT" => {
                     let valor = self.pilha.pop().ok_or("Pilha vazia em PRINT")?;
@@ -592,10 +657,24 @@ impl VM {
                     let objeto = self.pilha.pop().ok_or("Pilha vazia para GET_PROPERTY")?;
 
                     match objeto {
-                        Valor::Objeto { campos, .. } => {
-                            let campos_ref = campos.borrow();
-                            let valor = campos_ref.get(*nome_propriedade).cloned().unwrap_or(Valor::Nulo);
-                            self.pilha.push(valor);
+                        Valor::Objeto { nome_classe, campos, .. } => {
+                            let mut current_class_name = Some(nome_classe.clone());
+                            let mut valor_encontrado = None;
+
+                            while let Some(c_name) = current_class_name {
+                                if let Some(_class_info) = self.classes.get(&c_name) {
+                                    // Check if the property exists in the current class's fields
+                                    if let Some(valor) = campos.borrow().get(*nome_propriedade) {
+                                    valor_encontrado = Some(valor.clone());
+                                    break;
+                                }
+                                    current_class_name = self.classes.get(&c_name).and_then(|ci| ci.nome_classe_pai.clone());
+                                } else {
+                                    current_class_name = None;
+                                }
+                            }
+
+                            self.pilha.push(valor_encontrado.unwrap_or(Valor::Nulo));
                         }
                         _ => return Err("GET_PROPERTY requer um objeto".to_string()),
                     }
@@ -613,14 +692,13 @@ impl VM {
                         .ok_or("Pilha vazia para valor em SET_PROPERTY")?;
 
                     // O objeto está abaixo do valor.
-                    let objeto = self
+                    let mut objeto = self
                         .pilha
                         .pop()
                         .ok_or("Pilha vazia para objeto em SET_PROPERTY")?;
 
-                    match &objeto {
-                        Valor::Objeto { campos, .. } => {
-                            // Modifica a propriedade do objeto.
+                    match &mut objeto {
+                        Valor::Objeto { nome_classe: _, campos, .. } => {
                             campos.borrow_mut().insert(nome_propriedade.to_string(), valor);
                         }
                         _ => {
@@ -631,7 +709,7 @@ impl VM {
                     }
 
                 // Devolve o objeto modificado para a pilha para permitir atribuições encadeadas.
-                // self.pilha.push(objeto);
+                self.pilha.push(objeto);
                 }
 
                 "GET_STATIC_PROPERTY" => {
@@ -669,13 +747,10 @@ impl VM {
                     } else {
                         Vec::new()
                     };
-                    let objeto = self
-                        .pilha
-                        .pop()
-                        .ok_or("Objeto não encontrado para CALL_METHOD")?;
 
-                    let resultado = self.chamar_metodo(objeto, nome_metodo, argumentos)?;
-                    self.pilha.push(resultado);
+                    let mut objeto = self.pilha.pop().ok_or("Pilha vazia para objeto em CALL_METHOD")?;
+                    self.chamar_metodo(&mut objeto, nome_metodo, argumentos)?;
+                    self.pilha.push(objeto);
                 }
 
                 "CALL_STATIC_METHOD" => {
@@ -725,7 +800,7 @@ impl VM {
                         return Err("Pilha insuficiente para CALL_FUNCTION".into());
                     }
                     // argumentos em ordem
-                    let mut args = self.pilha.split_off(self.pilha.len() - nargs);
+                    let args = self.pilha.split_off(self.pilha.len() - nargs);
                     // procura função
                     let func = self
                         .functions
@@ -775,7 +850,14 @@ impl VM {
         let mut i = 0;
         while i < self.bytecode.len() {
             let instrucao = &self.bytecode[i];
-            if instrucao.starts_with("DEFINE_") {
+            if instrucao.starts_with("DEFINE_CLASS") {
+                // Pula a definição da classe e seus métodos
+                i += 1;
+                while i < self.bytecode.len() && !self.bytecode[i].starts_with("END_CLASS") {
+                    i += 1;
+                }
+                i += 1; // Pula o END_CLASS
+            } else if instrucao.starts_with("DEFINE_FUNCTION") {
                 // Pula a definição e seu corpo
                 let partes: Vec<&str> = instrucao.split(' ').collect();
                 let tamanho_str = if partes[0] == "DEFINE_CLASS" { "0" } else { partes.get(2).unwrap_or(&"0") };

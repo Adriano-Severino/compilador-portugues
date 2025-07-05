@@ -59,6 +59,7 @@ pub struct TipoPropriedade {
 pub struct ConstrutorInfo {
     pub parametros: Vec<Parametro>,
     pub corpo: Vec<Comando>,
+    pub chamada_pai: Option<Vec<Expressao>>,
 }
 
 #[derive(Clone, Debug)]
@@ -118,6 +119,7 @@ impl ContextoExecucao {
             construtores.push(ConstrutorInfo {
                 parametros: construtor.parametros.clone(),
                 corpo: construtor.corpo.clone(),
+                chamada_pai: construtor.chamada_pai.clone(),
             });
         }
 
@@ -139,67 +141,101 @@ impl ContextoExecucao {
             .ok_or_else(|| format!("Classe '{}' não encontrada", nome_classe))?
             .clone();
 
-        // Capturar argumentos para uso dinâmico
-        self.argumentos_capturados.push(argumentos.clone());
-
-        // Encontrar construtor compatível
         let construtor = classe.construtores.iter()
             .find(|c| c.parametros.len() == argumentos.len())
-            .ok_or_else(|| format!("Nenhum construtor compatível encontrado para {} argumentos", argumentos.len()))?;
+            .ok_or_else(|| format!("Nenhum construtor compatível para {} argumentos em {}", argumentos.len(), nome_classe))?;
 
-        // Criar objeto com propriedades inicializadas
-        let mut propriedades = HashMap::new();
-        
-        // Inicializar propriedades com valores padrão
-        for (nome_prop, tipo_prop) in &classe.propriedades {
-            let valor = if let Some(valor_inicial) = &tipo_prop.valor_inicial {
-                valor_inicial.clone()
-            } else {
-                self.valor_padrao_para_tipo(&tipo_prop.tipo)
-            };
-            propriedades.insert(nome_prop.clone(), valor);
-        }
+        let mut propriedades_runtime = HashMap::new();
 
-        // **DINÂMICO**: Mapear argumentos reais do construtor para propriedades
-        for (i, param) in construtor.parametros.iter().enumerate() {
-            if let Some(arg) = argumentos.get(i) {
-                if propriedades.contains_key(&param.nome) {
-                    propriedades.insert(param.nome.clone(), arg.clone());
+        // 1. Inicializar propriedades da classe pai (se houver) e mesclá-las
+        if let Some(ref classe_pai_nome) = classe.classe_pai {
+            if let Some(ref chamada_pai_args_expr) = construtor.chamada_pai {
+                let mut args_pai_avaliados = Vec::new();
+                self.entrar_escopo(); // Escopo temporário para resolver os argumentos da chamada pai
+                
+                // Disponibilizar os parâmetros do construtor filho para resolver os argumentos do pai
+                for (i, param) in construtor.parametros.iter().enumerate() {
+                    if let Some(arg) = argumentos.get(i) {
+                        self.definir_variavel(&param.nome, arg.clone());
+                    }
+                }
+
+                for expr in chamada_pai_args_expr {
+                    args_pai_avaliados.push(self.avaliar_expressao(expr)?);
+                }
+                self.sair_escopo();
+
+                // Criar recursivamente a instância da classe pai e obter suas propriedades inicializadas
+                match self.criar_instancia(classe_pai_nome, args_pai_avaliados)? {
+                    ValorRuntime::Objeto { propriedades: props_pai, .. } => {
+                        propriedades_runtime.extend(props_pai);
+                    }
+                    _ => return Err(format!("A classe pai '{}' não retornou um objeto.", classe_pai_nome)),
                 }
             }
         }
 
-        // Coletar métodos da classe e hierarquia
-        let mut metodos_completos = HashMap::new();
-        self.coletar_metodos_hierarquia(&nome_classe, &mut metodos_completos)?;
+        // 2. Inicializar propriedades da classe atual com valores padrão ou definidos
+        for (nome_prop, tipo_prop) in &classe.propriedades {
+            let valor = tipo_prop.valor_inicial.clone().unwrap_or_else(|| self.valor_padrao_para_tipo(&tipo_prop.tipo));
+            propriedades_runtime.insert(nome_prop.clone(), valor);
+        }
+        
+        // 3. Mapear argumentos do construtor atual para as propriedades (sobrescrevendo se necessário)
+        for (i, param) in construtor.parametros.iter().enumerate() {
+            if let Some(arg) = argumentos.get(i) {
+                // Apenas mapeia se a propriedade existe na classe (ou hierarquia)
+                if propriedades_runtime.contains_key(&param.nome) {
+                    propriedades_runtime.insert(param.nome.clone(), arg.clone());
+                }
+            }
+        }
 
-        let objeto = ValorRuntime::Objeto {
+        // 4. Coletar todos os métodos da hierarquia
+        let mut metodos_completos = HashMap::new();
+        self.coletar_metodos_hierarquia(nome_classe, &mut metodos_completos)?;
+
+        let mut objeto = ValorRuntime::Objeto {
             classe: nome_classe.to_string(),
-            propriedades,
+            propriedades: propriedades_runtime,
             metodos: metodos_completos,
         };
 
-        // Executar corpo do construtor com valores reais
+        // 5. Executar o corpo do construtor
         self.entrar_escopo();
-        self.definir_variavel("este", objeto.clone());
-        
-        // Definir parâmetros com valores reais dos argumentos
+        self.definir_variavel("este", objeto);
         for (i, param) in construtor.parametros.iter().enumerate() {
             if let Some(arg) = argumentos.get(i) {
                 self.definir_variavel(&param.nome, arg.clone());
             }
         }
 
-        // Executar comandos do construtor
         for comando in &construtor.corpo {
             self.executar_comando(comando)?;
         }
 
-        let objeto_final = self.obter_variavel("este")
-            .ok_or_else(|| "Objeto 'este' perdido durante construção".to_string())?;
-        
+        // Obter o estado final do objeto 'este'
+        let objeto_final = self.obter_variavel("este").unwrap();
         self.sair_escopo();
+
         Ok(objeto_final)
+    }
+
+    // NOVO: Coleta e inicializa propriedades de toda a hierarquia com valores padrão
+    fn coletar_e_inicializar_propriedades_hierarquia(&self, nome_classe: &str, propriedades: &mut HashMap<String, ValorRuntime>) -> Result<(), String> {
+        if let Some(classe) = self.classes_compiladas.get(nome_classe) {
+            // Primeiro, coletar propriedades da classe pai (recursivamente)
+            if let Some(classe_pai) = &classe.classe_pai {
+                self.coletar_e_inicializar_propriedades_hierarquia(classe_pai, propriedades)?;
+            }
+
+            // Em seguida, adicionar/sobrescrever propriedades da classe atual
+            for (nome_prop, tipo_prop) in &classe.propriedades {
+                let valor = tipo_prop.valor_inicial.clone().unwrap_or_else(|| self.valor_padrao_para_tipo(&tipo_prop.tipo));
+                propriedades.insert(nome_prop.clone(), valor);
+            }
+        }
+        Ok(())
     }
 
     // RUNTIME: Avaliação dinâmica de expressões
@@ -369,14 +405,30 @@ impl ContextoExecucao {
 
     fn coletar_metodos_hierarquia(&self, nome_classe: &str, metodos: &mut HashMap<String, MetodoInfo>) -> Result<(), String> {
         if let Some(classe) = self.classes_compiladas.get(nome_classe) {
-            // Adicionar métodos da classe atual
+            // Coletar métodos da classe pai primeiro
+            if let Some(classe_pai) = &classe.classe_pai {
+                self.coletar_metodos_hierarquia(classe_pai, metodos)?;
+            }
+
+            // Adicionar/sobrescrever métodos da classe atual
             for (nome, metodo) in &classe.metodos {
                 metodos.insert(nome.clone(), metodo.clone());
             }
+        }
+        Ok(())
+    }
 
-            // Recursivamente coletar métodos da classe pai
+    // **NOVO**: Coleta propriedades de toda a hierarquia
+    fn coletar_propriedades_hierarquia(&self, nome_classe: &str, propriedades: &mut HashMap<String, TipoPropriedade>) -> Result<(), String> {
+        if let Some(classe) = self.classes_compiladas.get(nome_classe) {
+            // Coletar propriedades da classe pai primeiro (base)
             if let Some(classe_pai) = &classe.classe_pai {
-                self.coletar_metodos_hierarquia(classe_pai, metodos)?;
+                self.coletar_propriedades_hierarquia(classe_pai, propriedades)?;
+            }
+
+            // Adicionar/sobrescrever propriedades da classe atual
+            for (nome, prop) in &classe.propriedades {
+                propriedades.insert(nome.clone(), prop.clone());
             }
         }
         Ok(())

@@ -1,12 +1,23 @@
+use crate::ast;
 use crate::ast::*;
 use std::collections::HashMap;
 
 pub struct VerificadorTipos<'a> {
     usings: Vec<String>,
     simbolos_namespaces: HashMap<String, &'a Declaracao>,
-    variaveis: HashMap<String, Tipo>,
     classes: HashMap<String, &'a DeclaracaoClasse>,
+    resolved_classes: HashMap<String, ResolvedClassInfo<'a>>,
     erros: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedClassInfo<'a> {
+    pub name: String,
+    pub parent_name: Option<String>,
+    pub properties: Vec<&'a ast::PropriedadeClasse>,
+    pub fields: Vec<&'a ast::CampoClasse>,
+    pub methods: HashMap<String, &'a ast::MetodoClasse>,
+    pub eh_estatica: bool,
 }
 
 impl<'a> VerificadorTipos<'a> {
@@ -14,167 +25,166 @@ impl<'a> VerificadorTipos<'a> {
         Self {
             usings: Vec::new(),
             simbolos_namespaces: HashMap::new(),
-            variaveis: HashMap::new(),
             classes: HashMap::new(),
+            resolved_classes: HashMap::new(),
             erros: Vec::new(),
         }
     }
 
-    pub fn is_class(&self, name: &str) -> bool {
-        self.classes.contains_key(name)
-    }
-
-    pub fn is_static_class(&self, name: &str) -> bool {
-        if let Some(class_def) = self.classes.get(name) {
-            return class_def.eh_estatica;
-        }
-
-        if let Some(Declaracao::DeclaracaoClasse(class_def)) = self.simbolos_namespaces.get(name) {
-            return class_def.eh_estatica;
-        }
-
-        false
-    }
-
     pub fn verificar_programa(&mut self, programa: &'a Programa) -> Result<(), Vec<String>> {
-        println!("--- Verificador de Tipos: Iniciando verificação do programa ---");
+        // 1. usings
+        self.usings = programa.usings.iter().map(|u| u.caminho.clone()).collect();
 
-        // Fase 1: Registrar todos os usings.
-        println!("[Fase 1] Registrando usings...");
-        for u in &programa.usings {
-            self.usings.push(u.caminho.clone());
+        // 2. primeira passagem: só registra classes e functions
+        for decl in &programa.declaracoes {
+            let nome = self.get_declaracao_nome(decl);
+            if let Declaracao::DeclaracaoClasse(cl) = decl {
+                self.classes.insert(nome.clone(), cl);
+            }
+            self.simbolos_namespaces.insert(nome, decl);
         }
-        println!("[Fase 1] Usings registrados: {:?}", self.usings);
-
-        // Fase 2: Registrar todos os nomes de classes e funções (primeira passada).
-        println!("[Fase 2] Registrando definições de namespaces e globais...");
         for ns in &programa.namespaces {
             for decl in &ns.declaracoes {
                 let nome_simples = self.get_declaracao_nome(decl);
-                let nome_completo = format!("{}.{}", ns.nome, nome_simples);
-                println!("  - Registrando símbolo de namespace: {}", nome_completo);
-                self.simbolos_namespaces.insert(nome_completo.clone(), decl);
-
-                if let Declaracao::DeclaracaoClasse(classe) = decl {
-                    self.classes.insert(nome_completo, classe);
+                let fqn = format!("{}.{}", ns.nome, nome_simples);
+                if let Declaracao::DeclaracaoClasse(cl) = decl {
+                    self.classes.insert(fqn.clone(), cl);
                 }
+                self.simbolos_namespaces.insert(fqn, decl);
             }
         }
-        for declaracao in &programa.declaracoes {
-            let nome_simples = self.get_declaracao_nome(declaracao);
-            if !nome_simples.is_empty() {
-                println!("  - Registrando símbolo global: {}", nome_simples);
-                self.simbolos_namespaces.insert(nome_simples.clone(), declaracao);
-                if let Declaracao::DeclaracaoClasse(classe) = declaracao {
-                    self.classes.insert(nome_simples, classe);
-                }
-            }
-        }
-        println!("[Fase 2] Registro concluído.");
 
-        // Fase 3: Verificar tudo com o contexto de namespace correto.
-        println!("[Fase 3] Verificando declarações...");
+        // 3. resolve hierarquias agora que `self.classes` está cheia
+        let classes_snapshot = self.classes.clone();
+        for (nome, decl) in &classes_snapshot {
+            self.resolve_class_hierarchy(nome, decl);
+        }
+
+        // 4. segunda passagem: verificação completa
+        let mut vars_globais = HashMap::new();
+        for decl in &programa.declaracoes {
+            self.verificar_declaracao(decl, "", &mut vars_globais);
+        }
         for ns in &programa.namespaces {
-            let namespace_atual = &ns.nome;
-            println!("  -> Verificando namespace: {}", namespace_atual);
-            for declaracao in &ns.declaracoes {
-                println!("    - Verificando declaração: {}", self.get_declaracao_nome(declaracao));
-                self.verificar_declaracao(declaracao, namespace_atual);
-            }
+            self.verificar_namespace(ns);
         }
-        println!("  -> Verificando declarações globais...");
-        for declaracao in &programa.declaracoes {
-            println!("    - Verificando declaração global: {}", self.get_declaracao_nome(declaracao));
-            self.verificar_declaracao(declaracao, ""); // Namespace global
-        }
-        println!("[Fase 3] Verificação concluída.");
 
         if self.erros.is_empty() {
-            println!("--- Verificador de Tipos: Verificação concluída sem erros. ---");
             Ok(())
         } else {
-            println!("--- Verificador de Tipos: Verificação concluída com {} erros. ---", self.erros.len());
             Err(self.erros.clone())
         }
     }
 
+    fn resolve_class_hierarchy(&mut self, class_name: &str, class_decl: &'a DeclaracaoClasse) {
+        if self.resolved_classes.contains_key(class_name) {
+            return;
+        }
+
+        let mut properties: Vec<&'a ast::PropriedadeClasse> =
+            class_decl.propriedades.iter().collect();
+        let mut fields: Vec<&'a ast::CampoClasse> = class_decl.campos.iter().collect();
+        let mut methods: HashMap<String, &'a ast::MetodoClasse> = class_decl
+            .metodos
+            .iter()
+            .map(|m| (m.nome.clone(), m))
+            .collect();
+
+        if let Some(parent_name_simple) = &class_decl.classe_pai {
+            let parent_name = self.resolver_nome_classe(
+                parent_name_simple,
+                &self.get_namespace_from_full_name(class_name),
+            );
+            if let Some(parent_decl) = self.classes.get(&parent_name).copied() {
+                self.resolve_class_hierarchy(&parent_name, parent_decl);
+                if let Some(parent_info) = self.resolved_classes.get(&parent_name) {
+                    let new_properties: Vec<_> = parent_info
+                        .properties
+                        .iter()
+                        .filter(|p| !properties.iter().any(|ep| ep.nome == p.nome))
+                        .cloned()
+                        .collect();
+                    properties.extend(new_properties);
+
+                    let new_fields: Vec<_> = parent_info
+                        .fields
+                        .iter()
+                        .filter(|f| !fields.iter().any(|ef| ef.nome == f.nome))
+                        .cloned()
+                        .collect();
+                    fields.extend(new_fields);
+
+                    for (name, method) in &parent_info.methods {
+                        methods.entry(name.clone()).or_insert(method);
+                    }
+                }
+            }
+        }
+
+        self.resolved_classes.insert(
+            class_name.to_string(),
+            ResolvedClassInfo {
+                name: class_name.to_string(),
+                parent_name: class_decl.classe_pai.clone(),
+                properties,
+                fields,
+                methods,
+                eh_estatica: class_decl.eh_estatica,
+            },
+        );
+    }
+
+    fn get_namespace_from_full_name(&self, full_name: &str) -> String {
+        if let Some(pos) = full_name.rfind('.') {
+            full_name[..pos].to_string()
+        } else {
+            "".to_string()
+        }
+    }
+
+    fn verificar_namespace(&mut self, ns: &'a DeclaracaoNamespace) {
+        let mut ns_vars = HashMap::new();
+        for decl in &ns.declaracoes {
+            self.verificar_declaracao(decl, &ns.nome, &mut ns_vars);
+        }
+    }
+
     pub fn resolver_nome_classe(&self, nome_classe: &str, namespace_atual: &str) -> String {
-
-
-        // Se o nome já for qualificado, retorne-o.
+        println!(
+            "DEBUG: Resolvendo nome de classe: '{}', namespace atual: '{}'",
+            nome_classe, namespace_atual
+        );
         if nome_classe.contains('.') {
+            println!("DEBUG: Nome já qualificado: {}", nome_classe);
             return nome_classe.to_string();
         }
-
-        // 1. Tente resolver no namespace atual.
         if !namespace_atual.is_empty() {
-            let nome_completo = format!("{}.{}", namespace_atual, nome_classe);
-            if let Some(decl) = self.simbolos_namespaces.get(&nome_completo) {
-                if let Declaracao::DeclaracaoClasse(_) = decl {
-                    return nome_completo;
-                }
+            let fqn = format!("{}.{}", namespace_atual, nome_classe);
+            println!("DEBUG: Tentando FQN com namespace atual: {}", fqn);
+            if self.classes.contains_key(&fqn) {
+                println!("DEBUG: Encontrado FQN com namespace atual: {}", fqn);
+                return fqn;
             }
         }
-
-        // 2. Tente resolver usando os `usings`.
         for using_path in &self.usings {
-            let nome_completo = format!("{}.{}", using_path, nome_classe);
-            if let Some(decl) = self.simbolos_namespaces.get(&nome_completo) {
-                if let Declaracao::DeclaracaoClasse(_) = decl {
-                    return nome_completo;
-                }
+            let fqn = format!("{}.{}", using_path, nome_classe);
+            println!("DEBUG: Tentando FQN com using: {}", fqn);
+            if self.classes.contains_key(&fqn) {
+                println!("DEBUG: Encontrado FQN com using: {}", fqn);
+                return fqn;
             }
         }
-
-        // 3. Verifique se é uma classe global (sem namespace).
         if self.classes.contains_key(nome_classe) {
+            println!("DEBUG: Encontrado como classe global: {}", nome_classe);
             return nome_classe.to_string();
         }
-
-        // Se não for encontrado, retorne o nome original como fallback.
+        println!(
+            "DEBUG: Classe '{}' não resolvida. Retornando nome original.",
+            nome_classe
+        );
         nome_classe.to_string()
     }
 
-    pub fn resolver_nome_funcao(&self, nome_funcao: &str, namespace_atual: &str) -> String {
-        // Se o nome já for qualificado, retorne-o.
-        if nome_funcao.contains('.') {
-            return nome_funcao.to_string();
-        }
-
-        // 1. Tente resolver no namespace atual.
-        if !namespace_atual.is_empty() {
-            let nome_completo = format!("{}.{}", namespace_atual, nome_funcao);
-            if let Some(decl) = self.simbolos_namespaces.get(&nome_completo) {
-                if let Declaracao::DeclaracaoFuncao(_) = decl {
-                    return nome_completo;
-                }
-            }
-        }
-
-        // 2. Tente resolver usando os `usings`.
-        for using_path in &self.usings {
-            let nome_completo = format!("{}.{}", using_path, nome_funcao);
-            if let Some(decl) = self.simbolos_namespaces.get(&nome_completo) {
-                if let Declaracao::DeclaracaoFuncao(_) = decl {
-                    return nome_completo;
-                }
-            }
-        }
-
-        // 3. Verifique se é uma função global (sem namespace).
-        if let Some(decl) = self.simbolos_namespaces.get(nome_funcao) {
-            if let Declaracao::DeclaracaoFuncao(_) = decl {
-                // A chave em `simbolos_namespaces` para símbolos com namespace contém um ponto.
-                // Se a chave for apenas `nome_funcao`, deve ser global.
-                return nome_funcao.to_string();
-            }
-        }
-
-        // Se não for encontrado, retorne o nome original como fallback.
-        nome_funcao.to_string()
-    }
-
-    // ✅ NOVO: Verificar herança da classe
     fn get_declaracao_nome(&self, declaracao: &Declaracao) -> String {
         match declaracao {
             Declaracao::DeclaracaoFuncao(f) => f.nome.clone(),
@@ -183,227 +193,270 @@ impl<'a> VerificadorTipos<'a> {
         }
     }
 
-    fn verificar_heranca_classe(&mut self, classe: &DeclaracaoClasse, namespace_atual: &str) {
-        if let Some(classe_pai_simples) = &classe.classe_pai {
-            let nome_pai_completo = self.resolver_nome_classe(classe_pai_simples, namespace_atual);
-    
-            if !self.classes.contains_key(&nome_pai_completo) {
-                self.erros.push(format!(
-                    "Classe pai \"{}\" não encontrada para classe \"{}\"",
-                    classe_pai_simples, classe.nome
-                ));
-                return;
-            }
-    
-            let nome_classe_completo = if namespace_atual.is_empty() {
-                classe.nome.clone()
-            } else {
-                format!("{}.{}", namespace_atual, classe.nome)
-            };
-    
-            if self.tem_dependencia_circular(&nome_classe_completo, &nome_pai_completo) {
-                self.erros.push(format!(
-                    "Dependência circular detectada: {} -> {}",
-                    classe.nome, classe_pai_simples
-                ));
-                return;
-            }
-    
-            for metodo in &classe.metodos {
-                self.verificar_metodo_heranca(metodo, classe, &nome_pai_completo);
-            }
-        }
-    
-        for metodo in &classe.metodos {
-            self.verificar_metodo_sem_heranca(metodo, classe);
-        }
-    }
-
-    // ✅ NOVO: Verificar dependência circular
-    fn tem_dependencia_circular(&self, classe_atual: &str, classe_pai: &str) -> bool {
-        let mut visitadas = std::collections::HashSet::new();
-        self.verificar_ciclo_recursivo(classe_pai, classe_atual, &mut visitadas)
-    }
-
-    fn verificar_ciclo_recursivo(
-        &self,
-        classe_verificando: &str,
-        classe_origem: &str,
-        visitadas: &mut std::collections::HashSet<String>,
-    ) -> bool {
-        if classe_verificando == classe_origem {
-            return true;
-        }
-
-        if visitadas.contains(classe_verificando) {
-            return false;
-        }
-
-        visitadas.insert(classe_verificando.to_string());
-
-        if let Some(classe_def) = self.classes.get(classe_verificando) {
-            if let Some(pai) = &classe_def.classe_pai {
-                return self.verificar_ciclo_recursivo(pai, classe_origem, visitadas);
-            }
-        }
-
-        false
-    }
-
-    // ✅ NOVO: Verificar método com herança
-    fn verificar_metodo_heranca(
+    fn verificar_declaracao(
         &mut self,
-        metodo: &MetodoClasse,
-        classe: &DeclaracaoClasse,
-        classe_pai: &str,
+        declaracao: &'a Declaracao,
+        namespace_atual: &str,
+        escopo_vars: &mut HashMap<String, Tipo>,
     ) {
-        if metodo.eh_override {
-            // Verificar se existe método redefinível na classe pai
-            if let Some(metodo_pai) = self.buscar_metodo_redefinivel_pai(classe_pai, &metodo.nome) {
-                // Verificar compatibilidade de assinatura
-                if !self.assinaturas_compativeis(metodo, metodo_pai) {
-                    self.erros.push(format!(
-                        "Método \"{}\" em classe \"{}\" sobrescreve método da classe pai \"{}\" mas as assinaturas são incompatíveis",
-                        metodo.nome, classe.nome, classe_pai
-                    ));
-                }
-            } else {
-                self.erros.push(format!(
-                    "Método \"{}\" marcado como \"sobrescreve\" mas não existe método \"redefinível\" na classe pai \"{}\"",
-                    metodo.nome, classe_pai
-                ));
-            }
-        }
-
-        // Verificar se método redefinível não pode ter corpo vazio em classe não abstrata
-        if metodo.eh_virtual && metodo.corpo.is_empty() && !classe.eh_abstrata {
-            self.erros.push(format!(
-                "Método redefinível \"{}\" deve ter implementação em classe não abstrata \"{}\"",
-                metodo.nome, classe.nome
-            ));
-        }
-    }
-
-    // ✅ NOVO: Verificar método sem herança (não pode ter sobrescreve)
-    fn verificar_metodo_sem_heranca(&mut self, metodo: &MetodoClasse, classe: &DeclaracaoClasse) {
-        if metodo.eh_override && classe.classe_pai.is_none() {
-            self.erros.push(format!(
-                "Método \"{}\" marcado como \"sobrescreve\" mas classe \"{}\" não tem classe pai",
-                metodo.nome, classe.nome
-            ));
-        }
-
-        if metodo.eh_virtual && metodo.eh_override {
-            self.erros.push(format!(
-                "Método \"{}\" não pode ser \"redefinível\" e \"sobrescreve\" ao mesmo tempo",
-                metodo.nome
-            ));
-        }
-    }
-
-    // ✅ NOVO: Buscar método redefinível na hierarquia pai
-    fn buscar_metodo_redefinivel_pai(&self, classe_pai: &str, nome_metodo: &str) -> Option<&'a MetodoClasse> {
-        let mut classe_atual = self.classes.get(classe_pai);
-
-        while let Some(def_classe) = classe_atual {
-            // Procurar método redefinível na classe atual
-            for metodo in &def_classe.metodos {
-                if metodo.nome == nome_metodo && metodo.eh_virtual {
-                    return Some(metodo);
-                }
-            }
-            // Ir para a classe pai
-            if let Some(pai_nome) = &def_classe.classe_pai {
-                classe_atual = self.classes.get(pai_nome);
-            } else {
-                classe_atual = None;
-            }
-        }
-
-        None
-    }
-
-    // ✅ NOVO: Verificar compatibilidade de assinaturas
-    fn assinaturas_compativeis(&self, metodo1: &MetodoClasse, metodo2: &MetodoClasse) -> bool {
-        // Verificar tipo de retorno
-        if metodo1.tipo_retorno != metodo2.tipo_retorno {
-            return false;
-        }
-
-        // Verificar número de parâmetros
-        if metodo1.parametros.len() != metodo2.parametros.len() {
-            return false;
-        }
-
-        // Verificar tipos dos parâmetros
-        for (param1, param2) in metodo1.parametros.iter().zip(metodo2.parametros.iter()) {
-            if param1.tipo != param2.tipo {
-                return false;
-            }
-        }
-
-        true
-    }
-
-    fn verificar_declaracao(&mut self, declaracao: &'a Declaracao, namespace_atual: &str) {
+        println!(
+            "DEBUG: Verificando declaração em namespace '{}'. Escopo inicial: {:?}",
+            namespace_atual, escopo_vars
+        );
         match declaracao {
             Declaracao::DeclaracaoClasse(classe) => {
-                self.verificar_heranca_classe(classe, namespace_atual);
+                let fqn = if namespace_atual.is_empty() {
+                    classe.nome.clone()
+                } else {
+                    format!("{}.{}", namespace_atual, classe.nome)
+                };
+                println!(
+                    "DEBUG: Verificando classe '{}'. FQN: '{}'",
+                    classe.nome, fqn
+                );
                 for metodo in &classe.metodos {
+                    let mut metodo_vars = escopo_vars.clone();
+                    for param in &metodo.parametros {
+                        let resolved_param_type = match &param.tipo {
+                            Tipo::Classe(nome_classe) => Tipo::Classe(
+                                self.resolver_nome_classe(nome_classe, namespace_atual),
+                            ),
+                            _ => param.tipo.clone(),
+                        };
+                        metodo_vars.insert(param.nome.clone(), resolved_param_type);
+                    }
+                    println!(
+                        "DEBUG: Verificando método '{}'. Parâmetros no escopo: {:?}",
+                        metodo.nome, metodo_vars
+                    );
                     for comando in &metodo.corpo {
-                        self.verificar_comando(comando, namespace_atual);
+                        self.verificar_comando(
+                            comando,
+                            namespace_atual,
+                            Some(&fqn),
+                            &mut metodo_vars,
+                        );
                     }
                 }
             }
             Declaracao::DeclaracaoFuncao(funcao) => {
-                for comando in &funcao.corpo {
-                    self.verificar_comando(comando, namespace_atual);
-                    }
+                println!("DEBUG: Verificando função '{}'", funcao.nome);
+                let mut func_vars = escopo_vars.clone();
+                for param in &funcao.parametros {
+                    func_vars.insert(param.nome.clone(), param.tipo.clone());
                 }
-            Declaracao::Comando(cmd) => self.verificar_comando(cmd, namespace_atual),
+                println!(
+                    "DEBUG: Verificando função '{}'. Parâmetros no escopo: {:?}",
+                    funcao.nome, func_vars
+                );
+                for comando in &funcao.corpo {
+                    self.verificar_comando(comando, namespace_atual, None, &mut func_vars);
+                }
+            }
+            Declaracao::Comando(cmd) => {
+                println!("DEBUG: Verificando comando global: {:?}", cmd);
+                self.verificar_comando(cmd, namespace_atual, None, escopo_vars);
+            }
             _ => {}
         }
     }
 
-    fn verificar_comando(&mut self, comando: &Comando, namespace_atual: &str) {
+    fn verificar_comando(
+        &mut self,
+        comando: &Comando,
+        namespace_atual: &str,
+        classe_atual: Option<&String>,
+        escopo_vars: &mut HashMap<String, Tipo>,
+    ) {
+        println!(
+            "DEBUG: Verificando comando: {:?}. Escopo atual: {:?}",
+            comando, escopo_vars
+        );
         match comando {
-            Comando::Expressao(Expressao::Chamada(nome_funcao, _)) => {
-                let nome_resolvido = self.resolver_nome_funcao(nome_funcao, namespace_atual);
-                if !self.simbolos_namespaces.contains_key(&nome_resolvido) {
-                     self.erros.push(format!("Função \"{}\" não encontrada.", nome_funcao));
-                }
-            }
-            Comando::DeclaracaoVariavel(tipo, nome, opt_expr) => {
-                if let Some(expr) = opt_expr {
-                    if let Expressao::NovoObjeto(classe_nome, _) = expr {
-                        let nome_resolvido = self.resolver_nome_classe(classe_nome, namespace_atual);
-                        if let Some(classe_def) = self.classes.get(&nome_resolvido) {
-                            if classe_def.eh_estatica {
-                                self.erros.push(format!("A classe estática '{}' não pode ser instanciada.", classe_nome));
-                            }
+            Comando::DeclaracaoVariavel(tipo, nome, expr) => {
+                println!(
+                    "DEBUG: DeclaracaoVariavel: nome='{}', tipo={:?}",
+                    nome, tipo
+                );
+                let tipo_resolvido = match tipo {
+                    Tipo::Classe(nome_classe) => {
+                        Tipo::Classe(self.resolver_nome_classe(nome_classe, namespace_atual))
+                    }
+                    _ => tipo.clone(),
+                };
+                println!(
+                    "DEBUG: tipo_resolvido after resolution: {:?}",
+                    tipo_resolvido
+                );
+                if let Some(e) = expr {
+                    let tipo_expr =
+                        self.inferir_tipo_expressao(e, namespace_atual, classe_atual, escopo_vars);
+                    println!(
+                        "DEBUG: Tipo inferido para expressão de inicialização: {:?}",
+                        tipo_expr
+                    );
+                    if tipo_resolvido != tipo_expr && tipo_expr != Tipo::Inferido {
+                        if !(tipo_resolvido == Tipo::Decimal && tipo_expr == Tipo::Inteiro) {
+                            self.erros.push(format!("Tipo da expressão ({:?}) não corresponde ao tipo da variável '{}' ({:?}).", tipo_expr, nome, tipo_resolvido));
                         }
                     }
                 }
-
-                if let Tipo::Classe(nome_classe) = tipo {
-                    let nome_resolvido = self.resolver_nome_classe(nome_classe, namespace_atual);
-                    if !self.classes.contains_key(&nome_resolvido) {
-                        self.erros.push(format!("Tipo ou classe \"{}\" não encontrada.", nome_classe));
-                    }
-                }
-                self.variaveis.insert(nome.clone(), tipo.clone());
+                escopo_vars.insert(nome.clone(), tipo_resolvido.clone());
+                println!(
+                    "DEBUG: Variável '{}' adicionada ao escopo com tipo {:?}. Escopo atual: {:?}",
+                    nome, tipo_resolvido, escopo_vars
+                );
             }
-            Comando::Atribuicao(nome, _) => {
-                if !self.variaveis.contains_key(nome) {
-                    self.erros.push(format!("Variável \"{}\" não foi declarada", nome));
+            Comando::AtribuirPropriedade(obj_expr, prop_nome, val_expr) => {
+                println!(
+                    "DEBUG: AtribuirPropriedade: objeto_expr={:?}, prop_nome='{}', val_expr={:?}",
+                    obj_expr, prop_nome, val_expr
+                );
+                let obj_tipo = self.inferir_tipo_expressao(
+                    obj_expr,
+                    namespace_atual,
+                    classe_atual,
+                    escopo_vars,
+                );
+                println!(
+                    "DEBUG: Tipo do objeto para atribuição de propriedade: {:?}",
+                    obj_tipo
+                );
+                if let Tipo::Classe(nome_classe) = obj_tipo {
+                    if let Some(class_info) = self.resolved_classes.get(&nome_classe) {
+                        let prop_tipo = class_info
+                            .properties
+                            .iter()
+                            .find(|p| p.nome == *prop_nome)
+                            .map(|p| p.tipo.clone())
+                            .or_else(|| {
+                                class_info
+                                    .fields
+                                    .iter()
+                                    .find(|f| f.nome == *prop_nome)
+                                    .map(|f| f.tipo.clone())
+                            });
+
+                        if let Some(p_tipo) = prop_tipo {
+                            let val_tipo = self.inferir_tipo_expressao(
+                                val_expr,
+                                namespace_atual,
+                                classe_atual,
+                                escopo_vars,
+                            );
+                            println!(
+                                "DEBUG: Tipo da propriedade '{}': {:?}. Tipo do valor: {:?}",
+                                prop_nome, p_tipo, val_tipo
+                            );
+                            if p_tipo != val_tipo && val_tipo != Tipo::Inferido {
+                                if !((p_tipo == Tipo::Texto
+                                    && (val_tipo == Tipo::Inteiro
+                                        || val_tipo == Tipo::Decimal
+                                        || val_tipo == Tipo::Booleano))
+                                    || (p_tipo == Tipo::Decimal && val_tipo == Tipo::Inteiro))
+                                {
+                                    self.erros.push(format!("Atribuição de tipo inválido para propriedade '{}'. Esperado {:?}, recebido {:?}.", prop_nome, p_tipo, val_tipo));
+                                }
+                            }
+                        } else {
+                            self.erros.push(format!(
+                                "Propriedade '{}' não encontrada na classe '{}'.",
+                                prop_nome, nome_classe
+                            ));
+                        }
+                    } else {
+                        self.erros.push(format!(
+                            "Classe '{}' não encontrada para atribuição de propriedade.",
+                            nome_classe
+                        ));
+                    }
+                } else {
+                    self.erros
+                        .push("Atribuição de propriedade em algo que não é um objeto.".to_string());
                 }
             }
             Comando::Bloco(comandos) => {
+                println!("DEBUG: Verificando Bloco de comandos.");
+                let mut bloco_vars = escopo_vars.clone();
                 for cmd in comandos {
-                    self.verificar_comando(cmd, namespace_atual);
+                    self.verificar_comando(cmd, namespace_atual, classe_atual, &mut bloco_vars);
                 }
             }
-            _ => {}
+            _ => {
+                println!("DEBUG: Comando não tratado: {:?}", comando);
+            }
+        }
+    }
+
+    fn inferir_tipo_expressao(
+        &mut self,
+        expressao: &Expressao,
+        namespace_atual: &str,
+        classe_atual: Option<&String>,
+        escopo_vars: &HashMap<String, Tipo>,
+    ) -> Tipo {
+        match expressao {
+            Expressao::Inteiro(_) => Tipo::Inteiro,
+            Expressao::Decimal(_) => Tipo::Decimal,
+            Expressao::Texto(_) => Tipo::Texto,
+            Expressao::Booleano(_) => Tipo::Booleano,
+            Expressao::Este => {
+                classe_atual.map_or(Tipo::Inferido, |nome| Tipo::Classe(nome.clone()))
+            }
+            Expressao::Identificador(nome) => {
+                if let Some(tipo) = escopo_vars.get(nome) {
+                    return tipo.clone();
+                }
+                let fqn = self.resolver_nome_classe(nome, namespace_atual);
+                if self.classes.contains_key(&fqn) {
+                    return Tipo::Classe(fqn.clone());
+                }
+                self.erros
+                    .push(format!("Identificador '{}' não encontrado.", nome));
+                Tipo::Inferido
+            }
+            Expressao::AcessoMembro(obj_expr, membro_nome) => {
+                let obj_tipo = self.inferir_tipo_expressao(
+                    obj_expr,
+                    namespace_atual,
+                    classe_atual,
+                    escopo_vars,
+                );
+                if let Tipo::Classe(nome_classe) = obj_tipo {
+                    if let Some(class_info) = self.resolved_classes.get(&nome_classe) {
+                        if let Some(prop) = class_info
+                            .properties
+                            .iter()
+                            .find(|p| p.nome == *membro_nome)
+                        {
+                            return prop.tipo.clone();
+                        }
+                        if let Some(field) =
+                            class_info.fields.iter().find(|f| f.nome == *membro_nome)
+                        {
+                            return field.tipo.clone();
+                        }
+                    }
+                }
+                Tipo::Inferido
+            }
+            Expressao::NovoObjeto(nome_classe, _) => {
+                Tipo::Classe(self.resolver_nome_classe(nome_classe, namespace_atual))
+            }
+            Expressao::Aritmetica(_, esq, dir) => {
+                let te =
+                    self.inferir_tipo_expressao(esq, namespace_atual, classe_atual, escopo_vars);
+                let td =
+                    self.inferir_tipo_expressao(dir, namespace_atual, classe_atual, escopo_vars);
+                if te == Tipo::Decimal || td == Tipo::Decimal {
+                    Tipo::Decimal
+                } else {
+                    Tipo::Inteiro
+                }
+            }
+            Expressao::Comparacao(_, _, _) => Tipo::Booleano,
+            Expressao::Logica(_, _, _) => Tipo::Booleano,
+            _ => Tipo::Inferido,
         }
     }
 }

@@ -24,6 +24,7 @@ impl InferenciaTipos {
             Expressao::Inteiro(_) => Ok(Tipo::Inteiro),
             Expressao::Texto(_) => Ok(Tipo::Texto),
             Expressao::Booleano(_) => Ok(Tipo::Booleano),
+            Expressao::Decimal(_) => Ok(Tipo::Decimal),
             Expressao::NovoObjeto(c, _) => Ok(Tipo::Classe(c.clone())),
 
             Expressao::Aritmetica(op, esq, dir) => {

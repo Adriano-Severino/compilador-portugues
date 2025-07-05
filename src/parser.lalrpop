@@ -275,20 +275,20 @@ MetodoClasse: ast::MetodoClasse = {
    CONSTRUTOR DE CLASSE
    ------------------------------------------------------------------ */
 ConstrutorDecl: ast::ConstrutorClasse = {
-    <m:ModificadorAcesso?>               // publico | privado | protegido
-    <nome:IdentificadorSimples>          // nome da classe
-    "(" <p:InnerParamList>               // ❶ abre parêntese e delega
-    // ❷ opcional  : base(arg1, arg2 …)
-    ( ":" "base" "(" <InnerArgList> )?   // ‘InnerArgList’ já fecha ‘)’
-    <b:BlocoComando>                     // ❸ corpo { … }
+    <m:ModificadorAcesso?>
+    <nome:IdentificadorSimples>
+    "(" <p:InnerParamList>
+    <chamada_pai:(":" "base" "(" InnerArgList ")")?>
+    <b:BlocoComando>
     => {
         ast::ConstrutorClasse {
             parametros: p,
             modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
             corpo: b,
+            chamada_pai: chamada_pai.map(|(_, _, _, args, _)| args),
             nome_escrito: Some(nome),
         }
-    },
+    }
 };
 
 #[inline]                     // argumentos de chamada
