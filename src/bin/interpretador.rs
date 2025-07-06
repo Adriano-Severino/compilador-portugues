@@ -34,6 +34,8 @@ struct ClasseInfo {
     construtor: Option<Vec<String>>,
     nome_classe_pai: Option<String>, // Adicionado para herança
     construtor_params: Vec<String>,
+    base_construtor_args: Vec<String>,
+    constructor_body: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -116,32 +118,92 @@ impl VM {
         }
     }
 
-    fn criar_objeto(&mut self, nome_classe: &str, argumentos: Vec<Valor>) -> Result<Valor, String> {
-        let classe = self
-            .classes
-            .get(nome_classe)
-            .ok_or_else(|| format!("Classe '{}' não encontrada", nome_classe))?
-            .clone();
+    let objeto_rc = Rc::new(RefCell::new(campos_map)); // Use a new Rc for the object's fields
+        let objeto = Valor::Objeto {
+            nome_classe: nome_classe.to_string(),
+            campos: objeto_rc.clone(),
+            metodos: classe.metodos.clone(),
+        };
 
-        let mut campos_map = HashMap::new();
+        // Execute parent constructor if applicable
+        if let Some(parent_name) = &classe.nome_classe_pai {
+            if let Some(parent_class_info) = self.classes.get(parent_name) {
+                let mut parent_constructor_vm = VM {
+                    pilha: Vec::new(),
+                    variaveis: HashMap::new(),
+                    bytecode: parent_class_info.constructor_body.clone(),
+                    ip: 0,
+                    classes: self.classes.clone(),
+                    functions: self.functions.clone(),
+                    loaded_modules: self.loaded_modules.clone(),
+                    base_dir: self.base_dir.clone(),
+                };
 
-        // Inicializar todos os campos da classe com Nulo
-        for campo_nome in classe.campos.iter() {
-            campos_map.insert(campo_nome.clone(), Valor::Nulo);
-        }
+                let mut parent_args_values = Vec::new();
+                for arg_str in &classe.base_construtor_args {
+                    if let Ok(int_val) = arg_str.parse::<i64>() {
+                        parent_args_values.push(Valor::Inteiro(int_val));
+                    } else if let Ok(bool_val) = arg_str.parse::<bool>() {
+                        parent_args_values.push(Valor::Booleano(bool_val));
+                    } else if arg_str.starts_with("Texto(") && arg_str.ends_with(")") {
+                        parent_args_values.push(Valor::Texto(arg_str[7..arg_str.len()-2].to_string()));
+                    } else if arg_str.starts_with("Inteiro(") && arg_str.ends_with(")") {
+                        let int_str = &arg_str[8..arg_str.len()-1];
+                        if let Ok(int_val) = int_str.parse::<i64>() {
+                            parent_args_values.push(Valor::Inteiro(int_val));
+                        } else {
+                            parent_args_values.push(Valor::Nulo);
+                        }
+                    } else if arg_str.starts_with("Booleano(") && arg_str.ends_with(")") {
+                        let bool_str = &arg_str[9..arg_str.len()-1];
+                        if let Ok(bool_val) = bool_str.parse::<bool>() {
+                            parent_args_values.push(Valor::Booleano(bool_val));
+                        } else {
+                            parent_args_values.push(Valor::Nulo);
+                        }
+                    } else {
+                        parent_args_values.push(Valor::Nulo);
+                    }
+                }
 
-        // Atribuir argumentos do construtor aos campos
-        for (i, param_name) in classe.construtor_params.iter().enumerate() {
-            if let Some(arg_val) = argumentos.get(i) {
-                campos_map.insert(param_name.clone(), arg_val.clone());
+                for (i, param_name) in parent_class_info.construtor_params.iter().enumerate() {
+                    if let Some(arg_val) = parent_args_values.get(i) {
+                        parent_constructor_vm.variaveis.insert(param_name.clone(), arg_val.clone());
+                    }
+                }
+
+                parent_constructor_vm.variaveis.insert("este".to_string(), objeto.clone());
+
+                parent_constructor_vm.run()?;
             }
         }
 
-        let objeto = Valor::Objeto {
-            nome_classe: nome_classe.to_string(),
-            campos: Rc::new(RefCell::new(campos_map)),
-            metodos: classe.metodos.clone(),
+        for (i, param_name) in classe.construtor_params.iter().enumerate() {
+            if let Some(arg_val) = argumentos.get(i) {
+                objeto_rc.borrow_mut().insert(param_name.clone(), arg_val.clone());
+            }
+        }
+
+        let mut constructor_vm = VM {
+            pilha: Vec::new(),
+            variaveis: HashMap::new(),
+            bytecode: classe.constructor_body.clone(),
+            ip: 0,
+            classes: self.classes.clone(),
+            functions: self.functions.clone(),
+            loaded_modules: self.loaded_modules.clone(),
+            base_dir: self.base_dir.clone(),
         };
+
+        for (i, param_name) in classe.construtor_params.iter().enumerate() {
+            if let Some(arg_val) = argumentos.get(i) {
+                constructor_vm.variaveis.insert(param_name.clone(), arg_val.clone());
+            }
+        }
+
+        constructor_vm.variaveis.insert("este".to_string(), objeto.clone());
+
+        constructor_vm.run()?;
 
         Ok(objeto)
     }
@@ -281,6 +343,8 @@ impl VM {
                     let parts: Vec<&str> = props_and_constructor_str.split('|').collect();
                     let campos: Vec<String> = parts.get(0).map_or(Vec::new(), |s| s.split_whitespace().map(String::from).collect());
                     let construtor_params: Vec<String> = parts.get(1).map_or(Vec::new(), |s| s.split_whitespace().map(String::from).collect());
+                    let base_construtor_args: Vec<String> = parts.get(2).map_or(Vec::new(), |s| s.split_whitespace().map(String::from).collect());
+                    let constructor_body: Vec<String> = parts.get(3).map_or(Vec::new(), |s| s.split(';').filter(|line| !line.trim().is_empty()).map(String::from).collect());
 
                     let all_campos = if let Some(parent_name) = &parent_class {
                         if let Some(parent_info) = self.classes.get(parent_name) {
@@ -303,6 +367,8 @@ impl VM {
                         construtor: None,
                         nome_classe_pai: parent_class,
                         construtor_params,
+                        base_construtor_args,
+                        constructor_body,
                     });
                     i += 1;
                 },
@@ -665,16 +731,20 @@ impl VM {
                                 if let Some(_class_info) = self.classes.get(&c_name) {
                                     // Check if the property exists in the current class's fields
                                     if let Some(valor) = campos.borrow().get(*nome_propriedade) {
-                                    valor_encontrado = Some(valor.clone());
-                                    break;
-                                }
+                                        valor_encontrado = Some(valor.clone());
+                                        break;
+                                    }
                                     current_class_name = self.classes.get(&c_name).and_then(|ci| ci.nome_classe_pai.clone());
                                 } else {
                                     current_class_name = None;
                                 }
                             }
-
-                            self.pilha.push(valor_encontrado.unwrap_or(Valor::Nulo));
+                            // Ensure the correct type is pushed for boolean values
+                            if let Some(Valor::Booleano(b)) = valor_encontrado {
+                                self.pilha.push(Valor::Booleano(b));
+                            } else {
+                                self.pilha.push(valor_encontrado.unwrap_or(Valor::Nulo));
+                            }
                         }
                         _ => return Err("GET_PROPERTY requer um objeto".to_string()),
                     }

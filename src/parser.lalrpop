@@ -278,14 +278,19 @@ ConstrutorDecl: ast::ConstrutorClasse = {
     <m:ModificadorAcesso?>
     <nome:IdentificadorSimples>
     "(" <p:InnerParamList>
-    <chamada_pai:(":" "base" "(" InnerArgList ")")?>
+    <chamada_pai:(":" "base" "(" InnerArgList)?>
     <b:BlocoComando>
     => {
+        let base_args = if let Some((_, _, _, args)) = chamada_pai {
+            Some(args)
+        } else {
+            None
+        };
         ast::ConstrutorClasse {
             parametros: p,
             modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
             corpo: b,
-            chamada_pai: chamada_pai.map(|(_, _, _, args, _)| args),
+            chamada_pai: base_args,
             nome_escrito: Some(nome),
         }
     }

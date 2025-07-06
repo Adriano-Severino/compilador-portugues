@@ -8,6 +8,7 @@ pub struct BytecodeGenerator<'a> {
     namespace_path: String,
     bytecode_instructions: Vec<String>,
     props_por_classe: HashMap<String, Vec<String>>,
+    construtor_params_por_classe: HashMap<String, Vec<String>>,
     current_class_name: Option<String>,
 }
 
@@ -30,6 +31,7 @@ impl<'a> BytecodeGenerator<'a> {
             namespace_path: String::new(),
             bytecode_instructions: Vec::new(),
             props_por_classe: HashMap::new(),
+            construtor_params_por_classe: HashMap::new(),
             current_class_name: None,
         }
     }
@@ -58,6 +60,7 @@ impl<'a> BytecodeGenerator<'a> {
             namespace_path: self.namespace_path.clone(),
             bytecode_instructions: Vec::new(),
             props_por_classe: self.props_por_classe.clone(),
+            construtor_params_por_classe: self.construtor_params_por_classe.clone(),
             current_class_name: Some(nome_classe.to_string()),
         };
         let mut corpo = sub.generate();
@@ -98,6 +101,8 @@ impl<'a> BytecodeGenerator<'a> {
                     namespace_path: new_path,
                     bytecode_instructions: Vec::new(),
                     props_por_classe: self.props_por_classe.clone(),
+                    construtor_params_por_classe: self.construtor_params_por_classe.clone(),
+                    current_class_name: None,
                 };
                 self.bytecode_instructions.extend(sub.generate());
             }
@@ -123,28 +128,74 @@ impl<'a> BytecodeGenerator<'a> {
                 }
 
                 let props_str = propriedades.join(" ");
-                let constructor_params_str =
-                    classe_def.construtores.first().map_or("".to_string(), |c| {
-                        c.parametros
-                            .iter()
-                            .map(|p| p.nome.clone())
-                            .collect::<Vec<String>>()
-                            .join(" ")
-                    });
 
-                self.props_por_classe
-                    .insert(classe_def.nome.clone(), propriedades.clone());
-                // ------------- 2. DEFINE_CLASS vem PRIMEIRO ---------------------------
-                let full_class = self.qual(&classe_def.nome);
+                let current_class_constructor_params: Vec<String> = classe_def.construtores.first().map_or(Vec::new(), |c| {
+                    c.parametros
+                        .iter()
+                        .map(|p| p.nome.clone())
+                        .collect()
+                });
+
                 let parent_class_name = if let Some(parent) = &classe_def.classe_pai {
                     self.type_checker
                         .resolver_nome_classe(parent, &self.namespace_path)
                 } else {
                     "NULO".to_string() // Usar uma string especial para indicar ausência de pai
                 };
+
+                let mut all_constructor_params = Vec::new();
+                if let Some(parent_name) = &classe_def.classe_pai {
+                    if let Some(parent_constructor_params) = self.construtor_params_por_classe.get(parent_name) {
+                        all_constructor_params.extend(parent_constructor_params.clone());
+                    }
+                }
+                all_constructor_params.extend(current_class_constructor_params.clone());
+
+                // Store all constructor parameters for this class (including inherited ones)
+                self.construtor_params_por_classe
+                    .insert(classe_def.nome.clone(), all_constructor_params.clone());
+
+                // The constructor_params_str for DEFINE_CLASS should only contain the current class's parameters
+                let constructor_params_str = current_class_constructor_params.join(" ");
+
+                // Get base constructor arguments
+                let base_constructor_args_str = classe_def.construtores.first().map_or("".to_string(), |c| {
+                    c.chamada_pai.as_ref().map_or("".to_string(), |args| {
+                        args.iter().map(|arg| format!("{:?}", arg)).collect::<Vec<String>>().join(" ")
+                    })
+                });
+
+                // Generate constructor body bytecode
+                let constructor_body_bytecode = if let Some(ctor) = classe_def.construtores.first() {
+                    let sub_prog = ast::Programa {
+                        usings: vec![],
+                        namespaces: vec![],
+                        declaracoes: vec![ast::Declaracao::Comando(ast::Comando::Bloco(
+                            ctor.corpo.clone(),
+                        ))],
+                    };
+                    let mut sub = BytecodeGenerator {
+                        programa: &sub_prog,
+                        type_checker: self.type_checker,
+                        namespace_path: self.namespace_path.clone(),
+                        bytecode_instructions: Vec::new(),
+                        props_por_classe: self.props_por_classe.clone(),
+                        construtor_params_por_classe: self.construtor_params_por_classe.clone(),
+                        current_class_name: Some(classe_def.nome.clone()),
+                    };
+                    sub.generate().join(";") // Join with semicolon to keep it a single string
+                } else {
+                    "".to_string()
+                };
+
+                self.props_por_classe
+                    .insert(classe_def.nome.clone(), propriedades.clone());
+
+                // ------------- 2. DEFINE_CLASS vem PRIMEIRO ---------------------------
+                let full_class = self.qual(&classe_def.nome);
                 self.bytecode_instructions.push(format!(
-                    "DEFINE_CLASS {} {} {}|{}",
-                    full_class, parent_class_name, props_str, constructor_params_str
+                    "DEFINE_CLASS {} {} {}|{}|{}|{}",
+                    full_class, parent_class_name, props_str, constructor_params_str, base_constructor_args_str, constructor_body_bytecode
                 ));
 
                 for metodo in &classe_def.metodos {
@@ -170,6 +221,8 @@ impl<'a> BytecodeGenerator<'a> {
                     namespace_path: self.namespace_path.clone(),
                     bytecode_instructions: Vec::new(),
                     props_por_classe: self.props_por_classe.clone(),
+                    construtor_params_por_classe: self.construtor_params_por_classe.clone(),
+                    current_class_name: None,
                 };
                 let mut corpo = sub.generate(); // inclui HALT
                 if !matches!(corpo.last(), Some(op) if op == "RETURN") {
@@ -217,6 +270,8 @@ impl<'a> BytecodeGenerator<'a> {
             namespace_path: self.namespace_path.clone(),
             bytecode_instructions: Vec::new(),
             props_por_classe: self.props_por_classe.clone(),
+            construtor_params_por_classe: self.construtor_params_por_classe.clone(),
+            current_class_name: None,
         };
         let mut corpo = sub.generate();
 
@@ -246,16 +301,18 @@ impl<'a> BytecodeGenerator<'a> {
         for namespace in &self.programa.namespaces {
             // Cria gerador dedicado com o caminho do namespace
             let mut sub = BytecodeGenerator {
-                programa: &ast::Programa {
-                    usings: vec![],
-                    namespaces: vec![],
-                    declaracoes: namespace.declaracoes.clone(),
-                },
-                type_checker: self.type_checker,
-                namespace_path: namespace.nome.clone(),
-                bytecode_instructions: Vec::new(),
-                props_por_classe: self.props_por_classe.clone(),
-            };
+            programa: &ast::Programa {
+                usings: vec![],
+                namespaces: vec![],
+                declaracoes: namespace.declaracoes.clone(),
+            },
+            type_checker: self.type_checker,
+            namespace_path: namespace.nome.clone(),
+            bytecode_instructions: Vec::new(),
+            props_por_classe: self.props_por_classe.clone(),
+            construtor_params_por_classe: self.construtor_params_por_classe.clone(),
+            current_class_name: None,
+        };
             self.bytecode_instructions.extend(sub.generate());
         }
 
