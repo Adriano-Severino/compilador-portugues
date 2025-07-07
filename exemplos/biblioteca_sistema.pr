@@ -325,7 +325,7 @@ espaco BibliotecaDigital.Sistema
     }
 }
 
-publico função Princiapl()
+publico função Principal()
 {
     demonstrarSistema();
 }
