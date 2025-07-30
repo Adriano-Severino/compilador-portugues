@@ -3,6 +3,18 @@ use crate::lexer::Token;
 
 grammar<'input>();
 
+Caminho: ast::Caminho = {
+    <partes:DotSeparated<TIdentificador>> => ast::Caminho { partes },
+};
+
+DotSeparated<T>: Vec<T> = {
+    <v:T> => vec![v],
+    <mut v:DotSeparated<T>> "." <e:T> => {
+        v.push(e);
+        v
+    }
+};
+
 
 
 pub Arquivo: ast::Programa = {
@@ -357,13 +369,7 @@ ComandoSimplesSemSe: ast::Comando = {     // Tudo que está em ComandoSimples ex
 ComandosBasicos: ast::Comando = {
     // obj.metodo(arg1, …);
     <obj:ExpressaoAtomo> "." <metodo:IdentificadorSimples> "(" <args:InnerArgList> ";" => {
-        match obj {
-            ast::Expressao::Identificador(nome) =>
-                ast::Comando::ChamarMetodo(nome, metodo, args),
-            ast::Expressao::Este =>
-                ast::Comando::ChamarMetodo("este".to_string(), metodo, args),
-            _ => panic!("Esperava um identificador simples ou 'este'")
-        }
+        ast::Comando::ChamarMetodo(Box::new(obj), metodo, args)
     },
 
     // obj.propriedade = expr;
@@ -391,6 +397,7 @@ Tipo: ast::Tipo = {
     "inteiro" => ast::Tipo::Inteiro,
     "texto" => ast::Tipo::Texto,
     "booleano" => ast::Tipo::Booleano,
+    "decimal" => ast::Tipo::Decimal,
     "vazio" => ast::Tipo::Vazio,
     <nome:TIdentificador> => ast::Tipo::Classe(nome),
 };
@@ -434,13 +441,7 @@ ComandoSimples: ast::Comando = {
 ChamadaMetodoOuBloco: ast::Comando = {
     // obj.metodo(arg1, arg2 …);
     <obj:ExpressaoAtomo> "." <metodo:IdentificadorSimples> "(" <args:InnerArgList> ";" => {
-        match obj {
-            ast::Expressao::Identificador(nome) =>
-                ast::Comando::ChamarMetodo(nome, metodo, args),
-            ast::Expressao::Este =>
-                ast::Comando::ChamarMetodo("este".to_string(), metodo, args),
-            _ => panic!("Esperava um identificador simples ou 'este'")
-        }
+        ast::Comando::ChamarMetodo(Box::new(obj), metodo, args)
     },
     
     <bloco:BlocoComando> => ast::Comando::Bloco(bloco),
@@ -584,6 +585,7 @@ ExpressaoLiteral: ast::Expressao = {
     <s:TStringInterpolada> => crate::interpolacao::parse_string_interpolada(&s).unwrap(),
     <t:TString>            => ast::Expressao::Texto(t),
     <n:TInteiro>           => ast::Expressao::Inteiro(n),
+    <d:TDecimal>           => ast::Expressao::Decimal(d),
 };
 
 // === ARGUMENTOS ===
@@ -629,6 +631,7 @@ extern {
         "inteiro" => Token::TTipoInteiro,
         "texto" => Token::TTipoTexto,
         "booleano" => Token::TTipoBooleano,
+        "decimal" => Token::TTipoDecimal,
         "vazio" => Token::TTipoVazio,
         "verdadeiro" => Token::TVerdadeiro,
         "falso" => Token::TFalso,
@@ -677,7 +680,9 @@ extern {
         TString => Token::TString(<String>),
         TIdentificador => Token::TIdentificador(<String>),
         TInteiro => Token::TInteiro(<i64>),
-        TDoisPontos => Token::TDoisPontos,
+        TDecimal => Token::TDecimal(<String>),
+        // === CAMINHOS ===
+
         TStringInterpolada => Token::TStringInterpolada(<String>),
 
     }

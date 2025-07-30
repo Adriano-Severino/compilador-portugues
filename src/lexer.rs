@@ -33,6 +33,8 @@ pub enum Token {
     TTipoTexto,
     #[token("booleano")]
     TTipoBooleano,
+    #[token("decimal")]
+    TTipoDecimal,
     #[token("vazio")]
     TTipoVazio,
     #[token("verdadeiro")]
@@ -131,6 +133,8 @@ pub enum Token {
     TStringInterpolada(String),
     #[regex(r#""([^"\\]|\\.)*""#, |lex| lex.slice()[1..lex.slice().len()-1].to_string())]
     TString(String),
+    #[regex(r"[0-9]+\.[0-9]+[mM]", |lex| lex.slice().to_string())]
+    TDecimal(String),
     #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().unwrap())]
     TInteiro(i64),
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
@@ -203,5 +207,12 @@ mod tests {
         assert_eq!(lex.next(), Some(Ok(Token::TObter)));
         assert_eq!(lex.next(), Some(Ok(Token::TDefinir)));
         assert_eq!(lex.next(), Some(Ok(Token::TEstatica)));
+    }
+
+    #[test]
+    fn test_decimal_type() {
+        let codigo = "decimal";
+        let mut lex = Token::lexer(codigo);
+        assert_eq!(lex.next(), Some(Ok(Token::TTipoDecimal)));
     }
 }

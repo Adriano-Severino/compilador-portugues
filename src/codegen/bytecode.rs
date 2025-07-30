@@ -1,5 +1,26 @@
 use crate::ast;
 use std::collections::HashMap;
+use std::fmt;
+
+impl fmt::Display for ast::Expressao {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ast::Expressao::Identificador(s) => write!(f, "{}", s),
+            ast::Expressao::Este => write!(f, "este"),
+            _ => write!(f, "<expressao>"),
+        }
+    }
+}
+
+fn get_expr_name(expr: &ast::Expressao) -> Option<String> {
+    match expr {
+        ast::Expressao::Identificador(s) => Some(s.clone()),
+        ast::Expressao::Este => Some("este".to_string()),
+        _ => None,
+    }
+}
+
+/// O gerador de código para o alvo Bytecode.
 
 /// O gerador de código para o alvo Bytecode.
 pub struct BytecodeGenerator<'a> {
@@ -13,6 +34,21 @@ pub struct BytecodeGenerator<'a> {
 }
 
 impl<'a> BytecodeGenerator<'a> {
+    fn spawn_child(&self) -> Self {
+        BytecodeGenerator {
+            programa: self.programa,
+            type_checker: self.type_checker,
+            namespace_path: self.namespace_path.clone(),
+            bytecode_instructions: Vec::new(),
+            props_por_classe: self.props_por_classe.clone(),
+            construtor_params_por_classe: self.construtor_params_por_classe.clone(),
+            current_class_name: self.current_class_name.clone(),
+        }
+    }
+    fn get_class_declaration(&self, class_name: &str) -> Option<&'a ast::DeclaracaoClasse> {
+        self.type_checker.classes.get(class_name).copied()
+    }
+
     fn qual(&self, local: &str) -> String {
         if self.namespace_path.is_empty() {
             local.to_owned()
@@ -46,7 +82,6 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn gerar_construtor(&mut self, ctor: &ast::ConstrutorClasse, nome_classe: &str) {
-        // reaproveita a lógica de gerar corpo
         let sub_prog = ast::Programa {
             usings: vec![],
             namespaces: vec![],
@@ -64,17 +99,37 @@ impl<'a> BytecodeGenerator<'a> {
             current_class_name: Some(nome_classe.to_string()),
         };
         let mut corpo = sub.generate();
-        if !matches!(corpo.last(), Some(op) if op == "RETURN") {
-            corpo.push("LOAD_CONST_NULL".into());
-            corpo.push("RETURN".into());
+        let mut corpo_com_defaults = Vec::new();
+        if let Some(base_args) = &ctor.chamada_pai {
+            let mut temp_gen = self.spawn_child();
+            for arg in base_args {
+                temp_gen.generate_expressao(arg);
+            }
+            corpo_com_defaults.extend(temp_gen.bytecode_instructions);
+            corpo_com_defaults.push(format!("CALL_BASE_CONSTRUCTOR {}", base_args.len()));
         }
-        let params: Vec<String> = ctor.parametros.iter().map(|p| p.nome.clone()).collect();
 
-        //  o nome do método deve ser exatamente o da classe
+        for p in &ctor.parametros {
+            if let Some(default_expr) = &p.valor_padrao {
+                let mut temp_gen = self.spawn_child();
+                temp_gen.generate_expressao(default_expr);
+                corpo_com_defaults.push(format!("SET_DEFAULT {} {}", p.nome, temp_gen.bytecode_instructions.join(" ")));
+            }
+        }
+        corpo_com_defaults.extend(corpo);
+        let corpo = corpo_com_defaults;
+        let params: Vec<String> = ctor.parametros.iter().map(|p| {
+            let mut param_str = p.nome.clone();
+            if let Some(default_expr) = &p.valor_padrao {
+                param_str.push_str(&format!("={}", default_expr));
+            }
+            param_str
+        }).collect();
+
         self.bytecode_instructions.push(format!(
             "DEFINE_METHOD {} {} {} {}",
             nome_classe,
-            nome_classe, // método == classe
+            "construtor",
             corpo.len(),
             params.join(" ")
         ));
@@ -109,99 +164,80 @@ impl<'a> BytecodeGenerator<'a> {
 
             // ✅ Reconhece e processa a declaração de classe
             ast::Declaracao::DeclaracaoClasse(classe_def) => {
-                // ------------- 1. coleta as propriedades (campos + props) -------------
-                let mut propriedades: Vec<String> = classe_def
-                    .propriedades
-                    .iter()
-                    .map(|p| p.nome.clone())
-                    .chain(classe_def.campos.iter().map(|c| c.nome.clone()))
-                    .collect();
+                let full_class_name = self.qual(&classe_def.nome);
+                let parent_class_name = classe_def.classe_pai.as_ref().map_or("NULO".to_string(), |p| self.type_checker.resolver_nome_classe(p, &self.namespace_path));
 
-                if let Some(pai) = &classe_def.classe_pai {
-                    if let Some(props_pai) = self.props_por_classe.get(pai) {
-                        propriedades = props_pai
-                            .clone()
-                            .into_iter()
-                            .chain(propriedades.into_iter())
-                            .collect();
-                    }
-                }
+                let mut all_props = self.props_por_classe.get(&parent_class_name).cloned().unwrap_or_default();
+                all_props.extend(classe_def.propriedades.iter().map(|p| p.nome.clone()));
+                all_props.extend(classe_def.campos.iter().map(|c| c.nome.clone()));
+                self.props_por_classe.insert(full_class_name.clone(), all_props.clone());
 
-                let props_str = propriedades.join(" ");
+                // Utilize vírgula como separador para evitar que "split_whitespace" quebre o token na carga do interpretador
+                let props_str = all_props.join(",");
 
-                let current_class_constructor_params: Vec<String> = classe_def.construtores.first().map_or(Vec::new(), |c| {
-                    c.parametros
-                        .iter()
-                        .map(|p| p.nome.clone())
-                        .collect()
-                });
-
-                let parent_class_name = if let Some(parent) = &classe_def.classe_pai {
-                    self.type_checker
-                        .resolver_nome_classe(parent, &self.namespace_path)
+                // Coleta informações do primeiro construtor (se existir) para exportar metadados
+                let (params_str, base_args_str) = if let Some(ctor) = classe_def.construtores.first() {
+                    let params: Vec<String> = ctor.parametros.iter().map(|p| p.nome.clone()).collect();
+                    let base_args: Vec<String> = ctor
+                        .chamada_pai
+                        .as_ref()
+                        .map(|args| args.iter().filter_map(get_expr_name).collect())
+                        .unwrap_or_else(Vec::new);
+                    (params.join(","), base_args.join(","))
                 } else {
-                    "NULO".to_string() // Usar uma string especial para indicar ausência de pai
+                    (String::new(), String::new())
                 };
 
-                let mut all_constructor_params = Vec::new();
-                if let Some(parent_name) = &classe_def.classe_pai {
-                    if let Some(parent_constructor_params) = self.construtor_params_por_classe.get(parent_name) {
-                        all_constructor_params.extend(parent_constructor_params.clone());
-                    }
-                }
-                all_constructor_params.extend(current_class_constructor_params.clone());
+                // Monta o campo combinado separado por '|': propriedades|params|baseArgs|corpo (vazio)
+                let meta_str = format!("{}|{}|{}|", props_str, params_str, base_args_str);
 
-                // Store all constructor parameters for this class (including inherited ones)
-                self.construtor_params_por_classe
-                    .insert(classe_def.nome.clone(), all_constructor_params.clone());
-
-                // The constructor_params_str for DEFINE_CLASS should only contain the current class's parameters
-                let constructor_params_str = current_class_constructor_params.join(" ");
-
-                // Get base constructor arguments
-                let base_constructor_args_str = classe_def.construtores.first().map_or("".to_string(), |c| {
-                    c.chamada_pai.as_ref().map_or("".to_string(), |args| {
-                        args.iter().map(|arg| format!("{:?}", arg)).collect::<Vec<String>>().join(" ")
-                    })
-                });
-
-                // Generate constructor body bytecode
-                let constructor_body_bytecode = if let Some(ctor) = classe_def.construtores.first() {
-                    let sub_prog = ast::Programa {
-                        usings: vec![],
-                        namespaces: vec![],
-                        declaracoes: vec![ast::Declaracao::Comando(ast::Comando::Bloco(
-                            ctor.corpo.clone(),
-                        ))],
-                    };
-                    let mut sub = BytecodeGenerator {
-                        programa: &sub_prog,
-                        type_checker: self.type_checker,
-                        namespace_path: self.namespace_path.clone(),
-                        bytecode_instructions: Vec::new(),
-                        props_por_classe: self.props_por_classe.clone(),
-                        construtor_params_por_classe: self.construtor_params_por_classe.clone(),
-                        current_class_name: Some(classe_def.nome.clone()),
-                    };
-                    sub.generate().join(";") // Join with semicolon to keep it a single string
-                } else {
-                    "".to_string()
-                };
-
-                self.props_por_classe
-                    .insert(classe_def.nome.clone(), propriedades.clone());
-
-                // ------------- 2. DEFINE_CLASS vem PRIMEIRO ---------------------------
-                let full_class = self.qual(&classe_def.nome);
                 self.bytecode_instructions.push(format!(
-                    "DEFINE_CLASS {} {} {}|{}|{}|{}",
-                    full_class, parent_class_name, props_str, constructor_params_str, base_constructor_args_str, constructor_body_bytecode
+                    "DEFINE_CLASS {} {} {}",
+                    full_class_name,
+                    parent_class_name,
+                    meta_str
                 ));
 
-                for metodo in &classe_def.metodos {
-                    self.gerar_metodo(metodo, &full_class);
+                for ctor in &classe_def.construtores {
+                    self.gerar_construtor(ctor, &full_class_name);
                 }
+
+                for metodo in &classe_def.metodos {
+                    self.gerar_metodo(metodo, &full_class_name);
+                }
+
+                // Marca o fim da declaração da classe
                 self.bytecode_instructions.push("END_CLASS".to_string());
+
+                // ===== Inicializadores de propriedades/campos estáticos =====
+                for campo in &classe_def.campos {
+                    if campo.eh_estatica {
+                        if let Some(expr) = &campo.valor_inicial {
+                            // Gera código para empilhar valor inicial
+                            let mut temp_gen = self.spawn_child();
+                            temp_gen.generate_expressao(expr);
+                            self.bytecode_instructions.extend(temp_gen.bytecode_instructions);
+                            // Executa atribuição no tempo de inicialização
+                            self.bytecode_instructions.push(format!(
+                                "SET_STATIC_PROPERTY {} {}",
+                                full_class_name, campo.nome
+                            ));
+                        }
+                    }
+                }
+                for prop in &classe_def.propriedades {
+                    if prop.eh_estatica {
+                        if let Some(expr) = &prop.valor_inicial {
+                            let mut temp_gen = self.spawn_child();
+                            temp_gen.generate_expressao(expr);
+                            self.bytecode_instructions.extend(temp_gen.bytecode_instructions);
+                            self.bytecode_instructions.push(format!(
+                                "SET_STATIC_PROPERTY {} {}",
+                                full_class_name, prop.nome
+                            ));
+                        }
+                    }
+                }
             }
 
             ast::Declaracao::DeclaracaoFuncao(func_def) => {
@@ -234,7 +270,7 @@ impl<'a> BytecodeGenerator<'a> {
                 let params: Vec<String> =
                     func_def.parametros.iter().map(|p| p.nome.clone()).collect();
                 // let full_fn = self.type_checker.resolver_nome_funcao(&func_def.nome, &self.namespace_path);
-                let full_fn = &func_def.nome;
+                let full_fn = self.qual(&func_def.nome);
                 self.bytecode_instructions.push(format!(
                     "DEFINE_FUNCTION {} {} {}",
                     full_fn,
@@ -256,7 +292,7 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn gerar_metodo(&mut self, metodo: &ast::MetodoClasse, nome_classe: &str) {
-        let sub_programa = ast::Programa {
+        let sub_prog = ast::Programa {
             usings: vec![],
             namespaces: vec![],
             declaracoes: vec![ast::Declaracao::Comando(ast::Comando::Bloco(
@@ -265,13 +301,13 @@ impl<'a> BytecodeGenerator<'a> {
         };
 
         let mut sub = BytecodeGenerator {
-            programa: &sub_programa,
+            programa: &sub_prog,
             type_checker: self.type_checker,
             namespace_path: self.namespace_path.clone(),
             bytecode_instructions: Vec::new(),
             props_por_classe: self.props_por_classe.clone(),
             construtor_params_por_classe: self.construtor_params_por_classe.clone(),
-            current_class_name: None,
+            current_class_name: Some(nome_classe.to_string()),
         };
         let mut corpo = sub.generate();
 
@@ -280,9 +316,79 @@ impl<'a> BytecodeGenerator<'a> {
             corpo.push("RETURN".to_string());
         }
 
-        let params: Vec<String> = metodo.parametros.iter().map(|p| p.nome.clone()).collect();
+        let mut corpo_com_defaults = Vec::new();
+        for p in &metodo.parametros {
+            if let Some(default_expr) = &p.valor_padrao {
+                let mut temp_gen = self.spawn_child();
+                temp_gen.generate_expressao(default_expr);
+                corpo_com_defaults.push(format!("SET_DEFAULT {} {}", p.nome, temp_gen.bytecode_instructions.join(" ")));
+            }
+        }
+        corpo_com_defaults.extend(corpo);
+        let corpo = corpo_com_defaults;
+
+        let params: Vec<String> = metodo.parametros.iter().map(|p| {
+            let mut param_str = p.nome.clone();
+            if let Some(default_expr) = &p.valor_padrao {
+                param_str.push_str(&format!("={}", default_expr));
+            }
+            param_str
+        }).collect();
         self.bytecode_instructions.push(format!(
             "DEFINE_METHOD {} {} {} {}",
+            nome_classe,
+            metodo.nome,
+            corpo.len(),
+            params.join(" ")
+        ));
+        self.bytecode_instructions.extend(corpo);
+    }
+
+    fn gerar_metodo_estatico(&mut self, metodo: &ast::MetodoClasse, nome_classe: &str) {
+        let sub_prog = ast::Programa {
+            usings: vec![],
+            namespaces: vec![],
+            declaracoes: vec![ast::Declaracao::Comando(ast::Comando::Bloco(
+                metodo.corpo.clone(),
+            ))],
+        };
+
+        let mut sub = BytecodeGenerator {
+            programa: &sub_prog,
+            type_checker: self.type_checker,
+            namespace_path: self.namespace_path.clone(),
+            bytecode_instructions: Vec::new(),
+            props_por_classe: self.props_por_classe.clone(),
+            construtor_params_por_classe: self.construtor_params_por_classe.clone(),
+            current_class_name: Some(nome_classe.to_string()),
+        };
+        let mut corpo = sub.generate();
+
+        if !matches!(corpo.last(), Some(op) if op == "RETURN") {
+            corpo.push("LOAD_CONST_NULL".to_string());
+            corpo.push("RETURN".to_string());
+        }
+
+        let mut corpo_com_defaults = Vec::new();
+        for p in &metodo.parametros {
+            if let Some(default_expr) = &p.valor_padrao {
+                let mut temp_gen = self.spawn_child();
+                temp_gen.generate_expressao(default_expr);
+                corpo_com_defaults.push(format!("SET_DEFAULT {} {}", p.nome, temp_gen.bytecode_instructions.join(" ")));
+            }
+        }
+        corpo_com_defaults.extend(corpo);
+        let corpo = corpo_com_defaults;
+
+        let params: Vec<String> = metodo.parametros.iter().map(|p| {
+            let mut param_str = p.nome.clone();
+            if let Some(default_expr) = &p.valor_padrao {
+                param_str.push_str(&format!("={}", default_expr));
+            }
+            param_str
+        }).collect();
+        self.bytecode_instructions.push(format!(
+            "DEFINE_STATIC_METHOD {} {} {} {}",
             nome_classe,
             metodo.nome,
             corpo.len(),
@@ -324,25 +430,35 @@ impl<'a> BytecodeGenerator<'a> {
         match comando {
             ast::Comando::DeclaracaoVar(nome, expr) => {
                 self.generate_expressao(expr);
-                if let Some(class_name) = &self.current_class_name {
-                    self.bytecode_instructions.push(format!("SET_PROPERTY {}", nome));
-                } else {
-                    self.bytecode_instructions.push(format!("STORE_VAR {}", nome));
-                }
+                self.bytecode_instructions.push(format!("STORE_VAR {}", nome));
             }
             ast::Comando::DeclaracaoVariavel(_, nome, Some(expr)) => {
                 self.generate_expressao(expr);
-                if let Some(class_name) = &self.current_class_name {
-                    self.bytecode_instructions.push(format!("SET_PROPERTY {}", nome));
-                } else {
-                    self.bytecode_instructions.push(format!("STORE_VAR {}", nome));
-                }
+                self.bytecode_instructions.push(format!("STORE_VAR {}", nome));
             }
             ast::Comando::Atribuicao(nome, expr) => {
-                self.generate_expressao(expr);
+                let mut is_prop = false;
                 if let Some(class_name) = &self.current_class_name {
+                    if let Some(class_info) = self.type_checker.classes.get(class_name) {
+                        // Verifica as propriedades da classe atual e das classes pai
+                        let mut current_class = Some(*class_info);
+                        while let Some(class_decl) = current_class {
+                            if class_decl.propriedades.iter().any(|p| p.nome == *nome) || class_decl.campos.iter().any(|f| f.nome == *nome) {
+                                is_prop = true;
+                                break;
+                            }
+                            current_class = class_decl.classe_pai.as_ref().and_then(|parent_name| self.type_checker.classes.get(parent_name).copied());
+                        }
+                    }
+                }
+
+                if is_prop {
+                    self.bytecode_instructions.push(format!("LOAD_VAR {}", "este")); // Empilha 'este'
+                    self.generate_expressao(expr); // Empilha o valor
                     self.bytecode_instructions.push(format!("SET_PROPERTY {}", nome));
+                    self.bytecode_instructions.push("POP".to_string()); // Remove o objeto da pilha
                 } else {
+                    self.generate_expressao(expr);
                     self.bytecode_instructions.push(format!("STORE_VAR {}", nome));
                 }
             }
@@ -379,131 +495,98 @@ impl<'a> BytecodeGenerator<'a> {
 
             // Adicionado: Comando 'se'
             ast::Comando::Se(condicao, bloco_if, bloco_else) => {
-                self.generate_expressao(condicao); // Gera código para a condição
+                self.generate_expressao(condicao);
+                let jump_if_false_placeholder = self.bytecode_instructions.len();
+                self.bytecode_instructions.push("JUMP_IF_FALSE 0".to_string());
 
-                let jump_if_false_placeholder_ip = self.bytecode_instructions.len();
-                self.bytecode_instructions
-                    .push("JUMP_IF_FALSE 0".to_string()); // Placeholder para o salto
+                self.generate_comando(bloco_if);
 
-                self.generate_comando(bloco_if); // Gera código para o bloco 'se'
+                if let Some(else_bloco) = bloco_else {
+                    let jump_to_end_placeholder = self.bytecode_instructions.len();
+                    self.bytecode_instructions.push("JUMP 0".to_string());
 
-                if let Some(bloco_else) = bloco_else {
-                    let jump_to_end_placeholder_ip = self.bytecode_instructions.len();
-                    self.bytecode_instructions.push("JUMP 0".to_string()); // Salta sobre o bloco 'senão'
+                    let else_start_pos = self.bytecode_instructions.len();
+                    self.bytecode_instructions[jump_if_false_placeholder] = format!("JUMP_IF_FALSE {}", else_start_pos);
 
-                    let else_start_ip = self.bytecode_instructions.len();
-                    // Patching: Se houver 'senão', o JUMP_IF_FALSE salta para o início do bloco 'senão'
-                    self.bytecode_instructions[jump_if_false_placeholder_ip] =
-                        format!("JUMP_IF_FALSE {}", else_start_ip);
+                    self.generate_comando(else_bloco);
 
-                    self.generate_comando(bloco_else); // Gera código para o bloco 'senão'
-
-                    let end_if_else_ip = self.bytecode_instructions.len();
-                    // Patching: O JUMP sobre o bloco 'senão' salta para o final de tudo
-                    self.bytecode_instructions[jump_to_end_placeholder_ip] =
-                        format!("JUMP {}", end_if_else_ip);
+                    let end_pos = self.bytecode_instructions.len();
+                    self.bytecode_instructions[jump_to_end_placeholder] = format!("JUMP {}", end_pos);
                 } else {
-                    let end_if_ip = self.bytecode_instructions.len();
-                    // Patching: Se não houver 'senão', o JUMP_IF_FALSE salta para o final do comando 'se'
-                    self.bytecode_instructions[jump_if_false_placeholder_ip] =
-                        format!("JUMP_IF_FALSE {}", end_if_ip);
+                    let end_pos = self.bytecode_instructions.len();
+                    self.bytecode_instructions[jump_if_false_placeholder] = format!("JUMP_IF_FALSE {}", end_pos);
                 }
             }
 
-            ast::Comando::CriarObjeto(var_nome, classe, argumentos) => {
-                // Gerar argumentos
-                for arg in argumentos {
-                    self.generate_expressao(arg);
-                }
-
-                // Criar objeto
+            ast::Comando::CriarObjeto(var_nome, classe, argumentos_chamada) => {
                 let nome_completo = self
                     .type_checker
                     .resolver_nome_classe(classe, &self.namespace_path);
+
+                for arg in argumentos_chamada {
+                    self.generate_expressao(arg);
+                }
+
                 self.bytecode_instructions.push(format!(
                     "NEW_OBJECT {} {}",
                     nome_completo,
-                    argumentos.len()
+                    argumentos_chamada.len()
                 ));
                 self.bytecode_instructions
                     .push(format!("STORE_VAR {}", var_nome));
-            }
+            },
 
             ast::Comando::AtribuirPropriedade(objeto_expr, prop_nome, expr) => {
-                if let ast::Expressao::Identificador(class_name) = &**objeto_expr {
-                    let full_class_name = self
-                        .type_checker
-                        .resolver_nome_classe(class_name, &self.namespace_path);
-                    // if self.type_checker.is_static_class(&full_class_name) {
-                    if false {
-                        // Static property assignment
-                        self.generate_expressao(expr);
+                self.generate_expressao(objeto_expr); // 1. Empilha o objeto
+                self.generate_expressao(expr); // 2. Empilha o valor
+                self.bytecode_instructions
+                    .push(format!("SET_PROPERTY {}", prop_nome)); // 3. Executa a atribuição
+                self.bytecode_instructions.push("POP".to_string()); // 4. Remove o objeto da pilha
+            },
+
+            ast::Comando::ChamarMetodo(objeto_expr, metodo, argumentos) => {
+                if let ast::Expressao::Identificador(ident) = &**objeto_expr {
+                    let full_class_name = self.type_checker.resolver_nome_classe(ident, &self.namespace_path);
+                    if self.type_checker.is_static_class(&full_class_name) {
+                        // Static method call
+                        for arg in argumentos {
+                            self.generate_expressao(arg);
+                        }
                         self.bytecode_instructions.push(format!(
-                            "SET_STATIC_PROPERTY {} {}",
-                            full_class_name, prop_nome
+                            "CALL_STATIC_METHOD {} {} {}",
+                            full_class_name,
+                            metodo,
+                            argumentos.len()
                         ));
+                        self.bytecode_instructions.push("POP".to_string());
                         return;
                     }
                 }
 
-                // Instance property assignment
+                // Instance method call
                 self.generate_expressao(objeto_expr);
-                self.generate_expressao(expr);
-                self.bytecode_instructions
-                    .push(format!("SET_PROPERTY {}", prop_nome));
-            }
-
-            ast::Comando::ChamarMetodo(objeto_nome, metodo, argumentos) => {
-                let full_class_name = self
-                    .type_checker
-                    .resolver_nome_classe(objeto_nome, &self.namespace_path);
-
-                // if self.type_checker.is_static_class(&full_class_name) {
-                if false {
-                    // Static method call
-                    for arg in argumentos {
-                        self.generate_expressao(arg);
-                    }
-                    self.bytecode_instructions.push(format!(
-                        "CALL_STATIC_METHOD {} {} {}",
-                        full_class_name,
-                        metodo,
-                        argumentos.len()
-                    ));
-                } else {
-                    // Instance method call
-                    self.bytecode_instructions
-                        .push(format!("LOAD_VAR {}", objeto_nome));
-
-                    for arg in argumentos {
-                        self.generate_expressao(arg);
-                    }
-
-                    self.bytecode_instructions.push(format!(
-                        "CALL_METHOD {} {}",
-                        metodo,
-                        argumentos.len()
-                    ));
+                for arg in argumentos {
+                    self.generate_expressao(arg);
                 }
-            }
+                let instrucao = format!("CALL_METHOD {} {}", metodo, argumentos.len());
+                self.bytecode_instructions.push(instrucao);
+                self.bytecode_instructions.push("POP".to_string());
+            },
 
             ast::Comando::Retorne(expr_opt) => {
-                // (1) Se houver expressão, gera o bytecode que coloca o valor na pilha
                 if let Some(expr) = expr_opt {
                     self.generate_expressao(expr);
                 } else {
-                    // empilha Nulo para métodos void
                     self.bytecode_instructions
                         .push("LOAD_CONST_NULL".to_string());
                 }
-                // (2) encerra o frame
                 self.bytecode_instructions.push("RETURN".to_string());
             }
 
             ast::Comando::Expressao(e) => {
                 self.generate_expressao(e);
                 self.bytecode_instructions.push("POP".into());
-            }
+            },
 
             // Para outros comandos não implementados, remova a linha de comentário e implemente se necessário
             _ => { /* Fazer nada ou adicionar tratamento para outros comandos */ }
@@ -521,18 +604,32 @@ impl<'a> BytecodeGenerator<'a> {
             ast::Expressao::Booleano(b) => self
                 .bytecode_instructions
                 .push(format!("LOAD_CONST_BOOL {}", b)),
+            ast::Expressao::Decimal(lit) => {
+                let s = lit.trim_end_matches('m');
+                self.bytecode_instructions
+                    .push(format!("LOAD_CONST_DECIMAL {}", s))
+            }
             ast::Expressao::Identificador(nome) => {
                 if let Some(class_name) = &self.current_class_name {
-                    self.bytecode_instructions.push(format!("GET_PROPERTY {}", nome));
-                } else {
-                    self.bytecode_instructions.push(format!("LOAD_VAR {}", nome));
+                    if let Some(class_info) = self.type_checker.classes.get(class_name) {
+                        let mut current_class = Some(*class_info);
+                        while let Some(class_decl) = current_class {
+                            if class_decl.propriedades.iter().any(|p| p.nome == *nome) || class_decl.campos.iter().any(|f| f.nome == *nome) {
+                                self.bytecode_instructions.push(format!("LOAD_VAR {}", "este"));
+                                self.bytecode_instructions.push(format!("GET_PROPERTY {}", nome));
+                                return;
+                            }
+                            current_class = class_decl.classe_pai.as_ref().and_then(|parent_name| self.type_checker.classes.get(parent_name).copied());
+                        }
+                    }
                 }
+                self.bytecode_instructions.push(format!("LOAD_VAR {}", nome));
             }
 
             ast::Expressao::Este => {
                 // empilha o objeto atual do método
                 self.bytecode_instructions
-                    .push("LOAD_VAR este ".to_string());
+                    .push(format!("LOAD_VAR {}", "este"));
             }
 
             ast::Expressao::AcessoMembro(obj_expr, membro) => {
@@ -541,7 +638,7 @@ impl<'a> BytecodeGenerator<'a> {
                         .type_checker
                         .resolver_nome_classe(class_name, &self.namespace_path);
                     // if self.type_checker.is_static_class(&full_class_name) {
-                    if false {
+                    if self.type_checker.is_static_class(&full_class_name) {
                         // Acesso a membro estático
                         self.bytecode_instructions.push(format!(
                             "GET_STATIC_PROPERTY {} {}",
@@ -559,19 +656,42 @@ impl<'a> BytecodeGenerator<'a> {
 
             // Expressão para criar um novo objeto
             ast::Expressao::NovoObjeto(classe_nome, argumentos) => {
-                // Primeiro, gera o bytecode para cada argumento, colocando-os na pilha
-                for arg in argumentos {
-                    self.generate_expressao(arg);
-                }
-                // Em seguida, emite a instrução para criar um novo objeto
-                // ✅ NOVO: Resolve o nome completo da classe usando o verificador de tipos
                 let nome_completo = self
                     .type_checker
                     .resolver_nome_classe(classe_nome, &self.namespace_path);
+
+                let mut final_args_count = 0;
+                if let Some(class_decl) = self.get_class_declaration(&nome_completo) {
+                    if let Some(constructor) = class_decl.construtores.first() {
+                        let mut arg_idx = 0;
+                        for param in &constructor.parametros {
+                            if let Some(arg_expr) = argumentos.get(arg_idx) {
+                                self.generate_expressao(arg_expr);
+                                arg_idx += 1;
+                            } else if let Some(default_val_expr) = &param.valor_padrao {
+                                self.generate_expressao(default_val_expr);
+                            } else {
+                                self.bytecode_instructions.push("LOAD_CONST_NULL".to_string());
+                            }
+                            final_args_count += 1;
+                        }
+                    } else {
+                        for arg in argumentos {
+                            self.generate_expressao(arg);
+                            final_args_count += 1;
+                        }
+                    }
+                } else {
+                    for arg in argumentos {
+                        self.generate_expressao(arg);
+                        final_args_count += 1;
+                    }
+                }
+
                 self.bytecode_instructions.push(format!(
                     "NEW_OBJECT {} {}",
                     nome_completo,
-                    argumentos.len()
+                    final_args_count
                 ));
             }
 
@@ -581,13 +701,7 @@ impl<'a> BytecodeGenerator<'a> {
                 self.generate_expressao(dir);
                 match op {
                     ast::OperadorAritmetico::Soma => {
-                        // Idealmente, haveria verificação de tipo aqui, ou um operador polimórfico.
-
-                        if Self::is_string_expr(esq) || Self::is_string_expr(dir) {
-                            self.bytecode_instructions.push("CONCAT 2".to_string());
-                        } else {
-                            self.bytecode_instructions.push("ADD".to_string());
-                        }
+                        self.bytecode_instructions.push("ADD".to_string());
                     }
                     ast::OperadorAritmetico::Subtracao => {
                         self.bytecode_instructions.push("SUB".to_string())
@@ -665,48 +779,23 @@ impl<'a> BytecodeGenerator<'a> {
                 for arg in argumentos {
                     self.generate_expressao(arg);
                 }
-                // ✅ CORRIGIDO: Resolve o nome completo da função usando o type_checker
-                // let nome_completo = self.type_checker.resolver_nome_funcao(nome_funcao, &self.namespace_path);
-                let nome_completo = nome_funcao;
+                let nome_completo = self.type_checker.resolver_nome_funcao(nome_funcao, &self.namespace_path);
                 self.bytecode_instructions.push(format!(
                     "CALL_FUNCTION {} {}",
                     nome_completo,
                     argumentos.len()
                 ));
-            }
+            },
 
             ast::Expressao::ChamadaMetodo(objeto_expr, nome_metodo, argumentos) => {
-                if let ast::Expressao::Identificador(class_name) = &**objeto_expr {
-                    let full_class_name = self
-                        .type_checker
-                        .resolver_nome_classe(class_name, &self.namespace_path);
-                    // if self.type_checker.is_static_class(&full_class_name) {
-                    if false {
-                        // Static method call
-                        for arg in argumentos {
-                            self.generate_expressao(arg);
-                        }
-                        self.bytecode_instructions.push(format!(
-                            "CALL_STATIC_METHOD {} {} {}",
-                            full_class_name,
-                            nome_metodo,
-                            argumentos.len()
-                        ));
-                        return;
-                    }
-                }
-
                 // Instance method call
                 self.generate_expressao(objeto_expr);
                 for arg in argumentos {
                     self.generate_expressao(arg);
                 }
-                self.bytecode_instructions.push(format!(
-                    "CALL_METHOD {} {}",
-                    nome_metodo,
-                    argumentos.len()
-                ));
-            }
+                let instrucao = format!("CALL_METHOD {} {}", nome_metodo, argumentos.len());
+self.bytecode_instructions.push(instrucao);
+            },
 
             // Para outras expressões não implementadas, remova a linha de comentário e implemente se necessário
             _ => { /* Fazer nada ou adicionar tratamento para outras expressões */ }

@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 /* ========================================================================== */
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Tipo {
-    Inteiro,
-    Texto,
-    Decimal,
     Booleano,
+    Texto,
+    Inteiro,
+    Decimal,
     Vazio,
     Lista(Box<Tipo>),
     Classe(String), // Stores FQN
@@ -16,6 +16,20 @@ pub enum Tipo {
     Generico(String),
     Opcional(Box<Tipo>),
     Inferido,
+}
+
+/* ========================================================================== */
+/* CAMINHOS                                                                   */
+/* ========================================================================== */
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Caminho {
+    pub partes: Vec<String>,
+}
+
+impl ToString for Caminho {
+    fn to_string(&self) -> String {
+        self.partes.join(".")
+    }
 }
 
 /* ========================================================================== */
@@ -257,19 +271,19 @@ pub enum Comando {
     Retorne(Option<Expressao>),
     Expressao(Expressao),
     CriarObjeto(String, String, Vec<Expressao>),
-    ChamarMetodo(String, String, Vec<Expressao>),
+    ChamarMetodo(Box<Expressao>, String, Vec<Expressao>),
     AcessarCampo(String, String),
 }
 
 /* ========================================================================== */
 /* EXPRESSÕES                                                                 */
 /* ========================================================================== */
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum Expressao {
     Inteiro(i64),
     Texto(String),
     Booleano(bool),
-    Decimal(f64),
+    Decimal(String),
     Identificador(String),
     Aritmetica(OperadorAritmetico, Box<Expressao>, Box<Expressao>),
     Comparacao(OperadorComparacao, Box<Expressao>, Box<Expressao>),
@@ -283,19 +297,19 @@ pub enum Expressao {
     Este,
     }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OperadorUnario {
     NegacaoLogica,
     NegacaoNumerica,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PartStringInterpolada {
     Texto(String),
     Expressao(Expressao),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OperadorAritmetico {
     Soma,
     Subtracao,
@@ -304,7 +318,7 @@ pub enum OperadorAritmetico {
     Modulo,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OperadorComparacao {
     Igual,
     Diferente,
@@ -314,7 +328,7 @@ pub enum OperadorComparacao {
     MaiorIgual,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OperadorLogico {
     E,
     Ou,

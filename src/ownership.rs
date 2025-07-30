@@ -1,5 +1,14 @@
+use crate::ast;
 use crate::ast::*;
 use std::collections::HashMap;
+
+fn get_expr_name(expr: &ast::Expressao) -> Option<String> {
+    match expr {
+        ast::Expressao::Identificador(s) => Some(s.clone()),
+        ast::Expressao::Este => Some("este".to_string()),
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StatusOwnership {
@@ -220,26 +229,28 @@ impl AnalisadorOwnership {
                 }
             }
 
-            Comando::ChamarMetodo(objeto_nome, metodo, argumentos) => {
-                // ✅ NOVO: Análise especial para métodos redefiníveis
-                if let Some(info) = self.variaveis.get_mut(objeto_nome) {
-                    info.ultimo_uso = Some(self.instrucao_atual);
-                    
-                    // ✅ NOVO: Verificar se método existe na hierarquia
-                    if let Some(classe_obj) = self.obter_classe_objeto(objeto_nome) {
-                        if !self.metodo_existe_na_hierarquia(&classe_obj, metodo) {
-                            self.warnings.push(format!(
-                                "Método '{}' pode não existir na hierarquia da classe '{}'",
-                                metodo, classe_obj
-                            ));
-                        }
+            Comando::ChamarMetodo(objeto_expr, metodo, argumentos) => {
+                if let Some(objeto_nome) = get_expr_name(objeto_expr) {
+                    // ✅ NOVO: Análise especial para métodos redefiníveis
+                    if let Some(info) = self.variaveis.get_mut(&objeto_nome) {
+                        info.ultimo_uso = Some(self.instrucao_atual);
                         
-                        // ✅ NOVO: Verificar se é método polimórfico
-                        if self.eh_metodo_polimorfismo(&classe_obj, metodo) {
-                            self.warnings.push(format!(
-                                "Chamada polimórfica detectada: '{}.{}'",
-                                objeto_nome, metodo
-                            ));
+                        // ✅ NOVO: Verificar se método existe na hierarquia
+                        if let Some(classe_obj) = self.obter_classe_objeto(objeto_expr) {
+                            if !self.metodo_existe_na_hierarquia(&classe_obj, metodo) {
+                                self.warnings.push(format!(
+                                    "Método '{}' pode não existir na hierarquia da classe '{}'",
+                                    metodo, classe_obj
+                                ));
+                            }
+                            
+                            // ✅ NOVO: Verificar se é método polimórfico
+                            if self.eh_metodo_polimorfismo(&classe_obj, metodo) {
+                                self.warnings.push(format!(
+                                    "Chamada polimórfica detectada: '{}.{}'",
+                                    objeto_nome, metodo
+                                ));
+                            }
                         }
                     }
                 }
@@ -247,7 +258,7 @@ impl AnalisadorOwnership {
                 for arg in argumentos {
                     self.analisar_expressao(arg);
                 }
-            }
+            },
 
             Comando::AcessarCampo(objeto_nome, _campo) => {
                 if let Some(info) = self.variaveis.get_mut(objeto_nome) {
@@ -298,8 +309,8 @@ impl AnalisadorOwnership {
                 self.analisar_expressao(obj);
                 
                 // ✅ NOVO: Verificar acesso a membro herdado
-                if let Expressao::Identificador(obj_nome) = obj.as_ref() {
-                    if let Some(classe_obj) = self.obter_classe_objeto(obj_nome) {
+                if let Some(obj_nome) = get_expr_name(obj) {
+                    if let Some(classe_obj) = self.obter_classe_objeto(obj) {
                         if !self.membro_existe_na_hierarquia(&classe_obj, membro) {
                             self.warnings.push(format!(
                                 "Membro '{}' pode não existir na hierarquia da classe '{}'",
@@ -308,14 +319,14 @@ impl AnalisadorOwnership {
                         }
                     }
                 }
-            }
+            },
 
             Expressao::ChamadaMetodo(obj, metodo, args) => {
                 self.analisar_expressao(obj);
                 
                 // ✅ NOVO: Análise de método polimórfico
-                if let Expressao::Identificador(obj_nome) = obj.as_ref() {
-                    if let Some(classe_obj) = self.obter_classe_objeto(obj_nome) {
+                if let Some(obj_nome) = get_expr_name(obj) {
+                    if let Some(classe_obj) = self.obter_classe_objeto(obj) {
                         if self.eh_metodo_redefinivel(&classe_obj, metodo) {
                             self.warnings.push(format!(
                                 "Chamada a método redefinível '{}' - comportamento pode variar",
@@ -570,10 +581,16 @@ impl AnalisadorOwnership {
     }
 
     // ✅ NOVO: Obter classe de um objeto
-    fn obter_classe_objeto(&self, objeto_nome: &str) -> Option<String> {
-        // Implementação simplificada - em versão completa, buscaria no tipo da variável
-        if let Some(_info) = self.variaveis.get(objeto_nome) {
-            Some("Objeto".to_string()) // Fallback genérico
+    fn obter_classe_objeto(&self, objeto_expr: &Expressao) -> Option<String> {
+        if let Some(objeto_nome) = get_expr_name(objeto_expr) {
+            if let Some(info) = self.variaveis.get(&objeto_nome) {
+                // Em uma implementação completa, você inferiria o tipo da variável
+                // e retornaria o nome da classe desse tipo.
+                // Por enquanto, um fallback genérico.
+                Some("ObjetoGenerico".to_string()) 
+            } else {
+                None
+            }
         } else {
             None
         }

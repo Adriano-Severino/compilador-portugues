@@ -4,6 +4,7 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use std::fmt;
+use std::process::Command;
 
 // Declaração dos módulos do projeto
 mod ast;
@@ -111,8 +112,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let caminhos_arquivos: Vec<String> = args.iter()
         .skip(1)
-        .filter(|arg| arg.ends_with(".pr"))
-        .cloned()
+        .filter(|arg| arg.trim_matches('"').ends_with(".pr"))
+        .map(|arg| arg.trim_matches('"').to_string())
         .collect();
 
     if caminhos_arquivos.is_empty() {
@@ -129,6 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "cil-bytecode" => TargetCompilacao::CilBytecode,
             "console" => TargetCompilacao::Console,
             "bytecode" => TargetCompilacao::Bytecode,
+            
             _ => TargetCompilacao::Universal,
         })
         .unwrap_or(TargetCompilacao::Universal);
@@ -193,10 +195,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nome_base = Path::new(&caminhos_arquivos[0]).file_stem().unwrap_or_default().to_str().unwrap_or("saida");
     match target {
         TargetCompilacao::Universal => compilar_universal(&programa_final, &type_checker, nome_base),
-        TargetCompilacao::LlvmIr => compilar_para_llvm_ir(&programa_final, &type_checker, nome_base),
+        TargetCompilacao::LlvmIr => {
+            compilar_para_llvm_ir(&programa_final, &type_checker, nome_base)?;
+            println!("Compilando com clang...");
+            let clang_command = format!("clang {}.ll -o {}", nome_base, nome_base);
+            let output = Command::new("clang")
+                .arg(format!("{}.ll", nome_base))
+                .arg("-o")
+                .arg(nome_base)
+                .output()
+                .map_err(|e| Box::new(CompilerError(format!("Falha ao executar clang: {}", e))))?;
+
+            if !output.status.success() {
+                return Err(Box::new(CompilerError(format!(
+                    "Erro ao compilar LLVM IR com clang:\n{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                ))));
+            }
+            println!("Executável gerado: ./{}", nome_base);
+            Ok(())
+        },
         TargetCompilacao::CilBytecode => compilar_para_cil_bytecode(&programa_final, &type_checker, nome_base),
         TargetCompilacao::Console => compilar_para_console(&programa_final, &type_checker, nome_base),
         TargetCompilacao::Bytecode => compilar_para_bytecode(&programa_final, &type_checker, nome_base),
+    
     }
 }
 

@@ -115,7 +115,7 @@ espaco BibliotecaDigital.Sistema
             TipoUsuario       = tipo;
             LimiteEmprestimos = limite;
             LivrosEmprestados = 0;
-            NumeroCartao      = 1000 + (nome.tamanho() * 7);
+            NumeroCartao      = 1000 + (nome.comprimento() * 7);
         }
         
         publico vazio apresentarPerfil()

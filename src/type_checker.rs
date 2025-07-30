@@ -5,7 +5,7 @@ use std::collections::HashMap;
 pub struct VerificadorTipos<'a> {
     usings: Vec<String>,
     simbolos_namespaces: HashMap<String, &'a Declaracao>,
-    classes: HashMap<String, &'a DeclaracaoClasse>,
+    pub classes: HashMap<String, &'a DeclaracaoClasse>,
     resolved_classes: HashMap<String, ResolvedClassInfo<'a>>,
     erros: Vec<String>,
 }
@@ -134,6 +134,16 @@ impl<'a> VerificadorTipos<'a> {
         );
     }
 
+    pub fn is_static_class(&self, class_name: &str) -> bool {
+        if let Some(class_info) = self.resolved_classes.get(class_name) {
+            class_info.eh_estatica
+        } else if let Some(class_decl) = self.classes.get(class_name) {
+            class_decl.eh_estatica
+        } else {
+            false
+        }
+    }
+
     fn get_namespace_from_full_name(&self, full_name: &str) -> String {
         if let Some(pos) = full_name.rfind('.') {
             full_name[..pos].to_string()
@@ -151,7 +161,7 @@ impl<'a> VerificadorTipos<'a> {
 
     pub fn resolver_nome_classe(&self, nome_classe: &str, namespace_atual: &str) -> String {
         println!(
-            "DEBUG: Resolvendo nome de classe: '{}', namespace atual: '{}'",
+            "DEBUG: Resolvendo nome de classe: \"{}\", namespace atual: \"{}\"",
             nome_classe, namespace_atual
         );
         if nome_classe.contains('.') {
@@ -179,10 +189,38 @@ impl<'a> VerificadorTipos<'a> {
             return nome_classe.to_string();
         }
         println!(
-            "DEBUG: Classe '{}' não resolvida. Retornando nome original.",
+            "DEBUG: Classe \"{}\" não resolvida. Retornando nome original.",
             nome_classe
         );
         nome_classe.to_string()
+    }
+
+    pub fn resolver_nome_funcao(&self, nome_funcao: &str, namespace_atual: &str) -> String {
+        if nome_funcao.contains('.') {
+            return nome_funcao.to_string();
+        }
+        if !namespace_atual.is_empty() {
+            let fqn = format!("{}.{}", namespace_atual, nome_funcao);
+            if let Some(decl) = self.simbolos_namespaces.get(&fqn) {
+                if let Declaracao::DeclaracaoFuncao(_) = *decl {
+                    return fqn;
+                }
+            }
+        }
+        for using_path in &self.usings {
+            let fqn = format!("{}.{}", using_path, nome_funcao);
+            if let Some(decl) = self.simbolos_namespaces.get(&fqn) {
+                if let Declaracao::DeclaracaoFuncao(_) = *decl {
+                    return fqn;
+                }
+            }
+        }
+        if let Some(decl) = self.simbolos_namespaces.get(nome_funcao) {
+            if let Declaracao::DeclaracaoFuncao(_) = *decl {
+                return nome_funcao.to_string();
+            }
+        }
+        nome_funcao.to_string()
     }
 
     fn get_declaracao_nome(&self, declaracao: &Declaracao) -> String {
@@ -200,7 +238,7 @@ impl<'a> VerificadorTipos<'a> {
         escopo_vars: &mut HashMap<String, Tipo>,
     ) {
         println!(
-            "DEBUG: Verificando declaração em namespace '{}'. Escopo inicial: {:?}",
+            "DEBUG: Verificando declaração em namespace \"{}\". Escopo inicial: {:?}",
             namespace_atual, escopo_vars
         );
         match declaracao {
@@ -211,7 +249,7 @@ impl<'a> VerificadorTipos<'a> {
                     format!("{}.{}", namespace_atual, classe.nome)
                 };
                 println!(
-                    "DEBUG: Verificando classe '{}'. FQN: '{}'",
+                    "DEBUG: Verificando classe \"{}\". FQN: \"{}\"",
                     classe.nome, fqn
                 );
                 for metodo in &classe.metodos {
@@ -226,7 +264,7 @@ impl<'a> VerificadorTipos<'a> {
                         metodo_vars.insert(param.nome.clone(), resolved_param_type);
                     }
                     println!(
-                        "DEBUG: Verificando método '{}'. Parâmetros no escopo: {:?}",
+                        "DEBUG: Verificando método \"{}\". Parâmetros no escopo: {:?}",
                         metodo.nome, metodo_vars
                     );
                     for comando in &metodo.corpo {
@@ -240,13 +278,13 @@ impl<'a> VerificadorTipos<'a> {
                 }
             }
             Declaracao::DeclaracaoFuncao(funcao) => {
-                println!("DEBUG: Verificando função '{}'", funcao.nome);
+                println!("DEBUG: Verificando função \"{}\"", funcao.nome);
                 let mut func_vars = escopo_vars.clone();
                 for param in &funcao.parametros {
                     func_vars.insert(param.nome.clone(), param.tipo.clone());
                 }
                 println!(
-                    "DEBUG: Verificando função '{}'. Parâmetros no escopo: {:?}",
+                    "DEBUG: Verificando função \"{}\". Parâmetros no escopo: {:?}",
                     funcao.nome, func_vars
                 );
                 for comando in &funcao.corpo {
@@ -275,7 +313,7 @@ impl<'a> VerificadorTipos<'a> {
         match comando {
             Comando::DeclaracaoVariavel(tipo, nome, expr) => {
                 println!(
-                    "DEBUG: DeclaracaoVariavel: nome='{}', tipo={:?}",
+                    "DEBUG: DeclaracaoVariavel: nome=\"{}\", tipo={:?}",
                     nome, tipo
                 );
                 let tipo_resolvido = match tipo {
@@ -296,20 +334,20 @@ impl<'a> VerificadorTipos<'a> {
                         tipo_expr
                     );
                     if tipo_resolvido != tipo_expr && tipo_expr != Tipo::Inferido {
-                        if !(tipo_resolvido == Tipo::Decimal && tipo_expr == Tipo::Inteiro) {
-                            self.erros.push(format!("Tipo da expressão ({:?}) não corresponde ao tipo da variável '{}' ({:?}).", tipo_expr, nome, tipo_resolvido));
+                        if !(tipo_resolvido == Tipo::Texto && tipo_expr == Tipo::Inteiro) {
+                            self.erros.push(format!("Tipo da expressão ({:?}) não corresponde ao tipo da variável \"{}\" ({:?}).", tipo_expr, nome, tipo_resolvido));
                         }
                     }
                 }
                 escopo_vars.insert(nome.clone(), tipo_resolvido.clone());
                 println!(
-                    "DEBUG: Variável '{}' adicionada ao escopo com tipo {:?}. Escopo atual: {:?}",
+                    "DEBUG: Variável \"{}\" adicionada ao escopo com tipo {:?}. Escopo atual: {:?}",
                     nome, tipo_resolvido, escopo_vars
                 );
             }
             Comando::AtribuirPropriedade(obj_expr, prop_nome, val_expr) => {
                 println!(
-                    "DEBUG: AtribuirPropriedade: objeto_expr={:?}, prop_nome='{}', val_expr={:?}",
+                    "DEBUG: AtribuirPropriedade: objeto_expr={:?}, prop_nome=\"{}\", val_expr={:?}",
                     obj_expr, prop_nome, val_expr
                 );
                 let obj_tipo = self.inferir_tipo_expressao(
@@ -345,28 +383,26 @@ impl<'a> VerificadorTipos<'a> {
                                 escopo_vars,
                             );
                             println!(
-                                "DEBUG: Tipo da propriedade '{}': {:?}. Tipo do valor: {:?}",
+                                "DEBUG: Tipo da propriedade \"{}\": {:?}. Tipo do valor: {:?}",
                                 prop_nome, p_tipo, val_tipo
                             );
                             if p_tipo != val_tipo && val_tipo != Tipo::Inferido {
                                 if !((p_tipo == Tipo::Texto
                                     && (val_tipo == Tipo::Inteiro
-                                        || val_tipo == Tipo::Decimal
-                                        || val_tipo == Tipo::Booleano))
-                                    || (p_tipo == Tipo::Decimal && val_tipo == Tipo::Inteiro))
+                                        || val_tipo == Tipo::Booleano)))
                                 {
-                                    self.erros.push(format!("Atribuição de tipo inválido para propriedade '{}'. Esperado {:?}, recebido {:?}.", prop_nome, p_tipo, val_tipo));
+                                    self.erros.push(format!("Atribuição de tipo inválido para propriedade \"{}\". Esperado {:?}, recebido {:?}.", prop_nome, p_tipo, val_tipo));
                                 }
                             }
                         } else {
                             self.erros.push(format!(
-                                "Propriedade '{}' não encontrada na classe '{}'.",
+                                "Propriedade \"{}\" não encontrada na classe \"{}\".",
                                 prop_nome, nome_classe
                             ));
                         }
                     } else {
                         self.erros.push(format!(
-                            "Classe '{}' não encontrada para atribuição de propriedade.",
+                            "Classe \"{}\" não encontrada para atribuição de propriedade.",
                             nome_classe
                         ));
                     }
@@ -381,6 +417,72 @@ impl<'a> VerificadorTipos<'a> {
                 for cmd in comandos {
                     self.verificar_comando(cmd, namespace_atual, classe_atual, &mut bloco_vars);
                 }
+            }
+            Comando::DeclaracaoVar(nome, expr) => {
+                let tipo_expr =
+                    self.inferir_tipo_expressao(expr, namespace_atual, classe_atual, escopo_vars);
+                escopo_vars.insert(nome.clone(), tipo_expr);
+            }
+            Comando::Imprima(expr) => {
+                self.inferir_tipo_expressao(expr, namespace_atual, classe_atual, escopo_vars);
+            }
+            Comando::Retorne(expr) => {
+                if let Some(e) = expr {
+                    self.inferir_tipo_expressao(e, namespace_atual, classe_atual, escopo_vars);
+                }
+            }
+            Comando::Se(cond, corpo, senao) => {
+                self.inferir_tipo_expressao(cond, namespace_atual, classe_atual, escopo_vars);
+                self.verificar_comando(corpo, namespace_atual, classe_atual, escopo_vars);
+                if let Some(s) = senao {
+                    self.verificar_comando(s, namespace_atual, classe_atual, escopo_vars);
+                }
+            }
+            Comando::Enquanto(cond, corpo) => {
+                self.inferir_tipo_expressao(cond, namespace_atual, classe_atual, escopo_vars);
+                self.verificar_comando(corpo, namespace_atual, classe_atual, escopo_vars);
+            }
+            Comando::Expressao(expr) => {
+                self.inferir_tipo_expressao(expr, namespace_atual, classe_atual, escopo_vars);
+            }
+            Comando::Atribuicao(nome, expr) => {
+                if let Some(class_name) = classe_atual {
+                    if let Some(class_info) = self.resolved_classes.get(class_name) {
+                        if class_info.properties.iter().any(|p| p.nome == *nome) || class_info.fields.iter().any(|f| f.nome == *nome) {
+                            self.verificar_comando(&Comando::AtribuirPropriedade(Box::new(Expressao::Este), nome.clone(), expr.clone()), namespace_atual, classe_atual, escopo_vars);
+                            return;
+                        }
+                    }
+                }
+                let tipo_expr =
+                    self.inferir_tipo_expressao(expr, namespace_atual, classe_atual, escopo_vars);
+                if let Some(tipo_var) = escopo_vars.get(nome) {
+                    if *tipo_var != tipo_expr && tipo_expr != Tipo::Inferido {
+                        self.erros.push(format!(
+                            "Atribuição de tipo inválido para variável \"{}\". Esperado {:?}, recebido {:?}.",
+                            nome,
+                            tipo_var,
+                            tipo_expr
+                        ));
+                    }
+                } else {
+                    self.erros
+                        .push(format!("Variável \"{}\" não declarada.", nome));
+                }
+            }
+            Comando::ChamarMetodo(obj_expr, _, args) => {
+                self.inferir_tipo_expressao(obj_expr, namespace_atual, classe_atual, escopo_vars);
+                for arg in args {
+                    self.inferir_tipo_expressao(arg, namespace_atual, classe_atual, escopo_vars);
+                }
+            }
+            Comando::AcessarCampo(obj, _campo) => {
+                let _obj_tipo = self.inferir_tipo_expressao(
+                    &Expressao::Identificador(obj.clone()),
+                    namespace_atual,
+                    classe_atual,
+                    escopo_vars,
+                );
             }
             _ => {
                 println!("DEBUG: Comando não tratado: {:?}", comando);
@@ -397,7 +499,6 @@ impl<'a> VerificadorTipos<'a> {
     ) -> Tipo {
         match expressao {
             Expressao::Inteiro(_) => Tipo::Inteiro,
-            Expressao::Decimal(_) => Tipo::Decimal,
             Expressao::Texto(_) => Tipo::Texto,
             Expressao::Booleano(_) => Tipo::Booleano,
             Expressao::Este => {
@@ -407,12 +508,22 @@ impl<'a> VerificadorTipos<'a> {
                 if let Some(tipo) = escopo_vars.get(nome) {
                     return tipo.clone();
                 }
+                if let Some(class_name) = classe_atual {
+                    if let Some(class_info) = self.resolved_classes.get(class_name) {
+                        if let Some(prop) = class_info.properties.iter().find(|p| p.nome == *nome) {
+                            return prop.tipo.clone();
+                        }
+                        if let Some(field) = class_info.fields.iter().find(|f| f.nome == *nome) {
+                            return field.tipo.clone();
+                        }
+                    }
+                }
                 let fqn = self.resolver_nome_classe(nome, namespace_atual);
                 if self.classes.contains_key(&fqn) {
                     return Tipo::Classe(fqn.clone());
                 }
                 self.erros
-                    .push(format!("Identificador '{}' não encontrado.", nome));
+                    .push(format!("Identificador \"{}\" não encontrado.", nome));
                 Tipo::Inferido
             }
             Expressao::AcessoMembro(obj_expr, membro_nome) => {
@@ -444,15 +555,11 @@ impl<'a> VerificadorTipos<'a> {
                 Tipo::Classe(self.resolver_nome_classe(nome_classe, namespace_atual))
             }
             Expressao::Aritmetica(_, esq, dir) => {
-                let te =
+                let _te =
                     self.inferir_tipo_expressao(esq, namespace_atual, classe_atual, escopo_vars);
-                let td =
+                let _td =
                     self.inferir_tipo_expressao(dir, namespace_atual, classe_atual, escopo_vars);
-                if te == Tipo::Decimal || td == Tipo::Decimal {
-                    Tipo::Decimal
-                } else {
-                    Tipo::Inteiro
-                }
+                Tipo::Inteiro
             }
             Expressao::Comparacao(_, _, _) => Tipo::Booleano,
             Expressao::Logica(_, _, _) => Tipo::Booleano,

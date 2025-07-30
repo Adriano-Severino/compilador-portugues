@@ -10,3 +10,9 @@ se (x < y) {
 se (x == 15) {
     imprima("x é igual a 15");
 }
+
+se (y != 20) {
+    imprima("y é diferente de 20");
+} senão {
+    imprima("y é igual a 20");
+}

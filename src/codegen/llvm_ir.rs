@@ -66,7 +66,8 @@ impl<'a> LlvmGenerator<'a> {
                 let (value_reg, value_type) = self.generate_expressao(expr);
                 let final_value_reg = self.ensure_string(value_reg, &value_type);
                 self.main_function_body.push_str(&format!(
-                    "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.println_fmt, i32 0, i32 0), i8* {}\n",
+                    "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.println_fmt, i32 0, i32 0), i8* {})
+",
                     final_value_reg
                 ));
             }
@@ -78,30 +79,43 @@ impl<'a> LlvmGenerator<'a> {
             ast::Comando::AtribuirPropriedade(objeto, propriedade, valor) => {
                 let (obj_reg, obj_type) = self.generate_expressao(objeto);
                 let (value_reg, value_type) = self.generate_expressao(valor);
-                // TODO: Implementar a atribuição de propriedade real
+                // TODO: Implementar a atribuição de propriedade Decimal
                 // Por enquanto, apenas um placeholder para evitar o panic
-                self.main_function_body.push_str(&format!("  ; Atribuição de propriedade simulada: {}.{} = {}\n", obj_reg, propriedade, value_reg));
+                self.main_function_body.push_str(&format!(
+                    "  ; Atribuição de propriedade simulada: {}.{} = {}\n",
+                    obj_reg, propriedade, value_reg
+                ));
             }
-            ast::Comando::ChamarMetodo(objeto_nome, metodo_nome, argumentos) => {
-                let (obj_reg, obj_type) = self.load_variable(objeto_nome);
-                // TODO: Implementar a chamada de método real, incluindo vtables para polimorfismo
-                // Por enquanto, apenas um placeholder para evitar o panic
-                self.main_function_body.push_str(&format!("  ; Chamada de método simulada: {}.{}\n", objeto_nome, metodo_nome));
+            ast::Comando::ChamarMetodo(objeto_expr, metodo_nome, argumentos) => {
+                let (obj_reg, _) = self.generate_expressao(objeto_expr);
+                for arg in argumentos {
+                    self.generate_expressao(arg);
+                }
+                self.main_function_body.push_str(&format!(
+                    "  ; Chamada de método simulada: {:?}.{}\n",
+                    objeto_expr, metodo_nome
+                ));
             }
             ast::Comando::Atribuicao(nome, expr) => {
                 let (value_reg, value_type) = self.generate_expressao(expr);
                 let (ptr_reg, _) = self.variables.get(nome).expect("Variável não declarada");
                 match value_type {
                     ast::Tipo::Inteiro => {
-                        self.main_function_body.push_str(&format!("  store i32 {}, i32* {}\n", value_reg, ptr_reg));
+                        self.main_function_body
+                            .push_str(&format!("  store i32 {}, i32* {}\n", value_reg, ptr_reg));
                     }
                     ast::Tipo::Texto => {
-                        self.main_function_body.push_str(&format!("  store i8* {}, i8** {}\n", value_reg, ptr_reg));
+                        self.main_function_body
+                            .push_str(&format!("  store i8* {}, i8** {}\n", value_reg, ptr_reg));
                     }
                     ast::Tipo::Classe(_) => {
-                        self.main_function_body.push_str(&format!("  store i8* {}, i8** {}\n", value_reg, ptr_reg));
+                        self.main_function_body
+                            .push_str(&format!("  store i8* {}, i8** {}\n", value_reg, ptr_reg));
                     }
-                    _ => panic!("Tipo de variável não suportado para atribuição: {:?}", value_type),
+                    _ => panic!(
+                        "Tipo de variável não suportado para atribuição: {:?}",
+                        value_type
+                    ),
                 }
             }
             ast::Comando::Expressao(expr) => {
@@ -112,8 +126,10 @@ impl<'a> LlvmGenerator<'a> {
                 let loop_body_label = self.get_unique_label("loop.body");
                 let loop_end_label = self.get_unique_label("loop.end");
 
-                self.main_function_body.push_str(&format!("  br label %{}\n", loop_cond_label));
-                self.main_function_body.push_str(&format!("{}:\n", loop_cond_label));
+                self.main_function_body
+                    .push_str(&format!("  br label %{}\n", loop_cond_label));
+                self.main_function_body
+                    .push_str(&format!("{}:\n", loop_cond_label));
 
                 let (cond_reg, _) = self.generate_expressao(cond);
                 self.main_function_body.push_str(&format!(
@@ -121,11 +137,14 @@ impl<'a> LlvmGenerator<'a> {
                     cond_reg, loop_body_label, loop_end_label
                 ));
 
-                self.main_function_body.push_str(&format!("{}:\n", loop_body_label));
+                self.main_function_body
+                    .push_str(&format!("{}:\n", loop_body_label));
                 self.generate_comando(body);
-                self.main_function_body.push_str(&format!("  br label %{}\n", loop_cond_label));
+                self.main_function_body
+                    .push_str(&format!("  br label %{}\n", loop_cond_label));
 
-                self.main_function_body.push_str(&format!("{}:\n", loop_end_label));
+                self.main_function_body
+                    .push_str(&format!("{}:\n", loop_end_label));
             }
             ast::Comando::Se(cond, then_block, else_block) => {
                 let (cond_reg, _) = self.generate_expressao(cond);
@@ -138,19 +157,27 @@ impl<'a> LlvmGenerator<'a> {
                     cond_reg, then_label, else_label
                 ));
 
-                self.main_function_body.push_str(&format!("{}:\n", then_label));
+                self.main_function_body
+                    .push_str(&format!("{}:\n", then_label));
                 self.generate_comando(then_block);
-                self.main_function_body.push_str(&format!("  br label %{}\n", end_label));
+                self.main_function_body
+                    .push_str(&format!("  br label %{}\n", end_label));
 
-                self.main_function_body.push_str(&format!("{}:\n", else_label));
+                self.main_function_body
+                    .push_str(&format!("{}:\n", else_label));
                 if let Some(else_cmd) = else_block {
                     self.generate_comando(else_cmd);
                 }
-                self.main_function_body.push_str(&format!("  br label %{}\n", end_label));
+                self.main_function_body
+                    .push_str(&format!("  br label %{}\n", end_label));
 
-                self.main_function_body.push_str(&format!("{}:\n", end_label));
+                self.main_function_body
+                    .push_str(&format!("{}:\n", end_label));
             }
-            _ => panic!("Comando não suportado para geração de LLVM IR: {:?}", comando),
+            _ => panic!(
+                "Comando não suportado para geração de LLVM IR: {:?}",
+                comando
+            ),
         }
     }
 
@@ -196,63 +223,94 @@ impl<'a> LlvmGenerator<'a> {
                             let right_str_reg = self.ensure_string(right_reg, &right_type);
                             let result_reg = self.concatenate_strings(left_str_reg, right_str_reg);
                             (result_reg, ast::Tipo::Texto)
-                        } else if left_type == ast::Tipo::Inteiro && right_type == ast::Tipo::Inteiro {
+                        } else if left_type == ast::Tipo::Inteiro
+                            && right_type == ast::Tipo::Inteiro
+                        {
                             let result_reg = self.get_unique_temp_name();
-                            self.main_function_body.push_str(&format!("  {} = add i32 {}, {}\n", result_reg, left_reg, right_reg));
+                            self.main_function_body.push_str(&format!(
+                                "  {} = add i32 {}, {}\n",
+                                result_reg, left_reg, right_reg
+                            ));
                             (result_reg, ast::Tipo::Inteiro)
                         } else {
-                            panic!("Operação de soma não suportada para tipos: {:?} e {:?}", left_type, right_type);
+                            panic!(
+                                "Operação de soma não suportada para tipos: {:?} e {:?}",
+                                left_type, right_type
+                            );
                         }
-                    },
+                    }
                     ast::OperadorAritmetico::Subtracao => {
                         if left_type == ast::Tipo::Inteiro && right_type == ast::Tipo::Inteiro {
                             let result_reg = self.get_unique_temp_name();
-                            self.main_function_body.push_str(&format!("  {} = sub i32 {}, {}\n", result_reg, left_reg, right_reg));
+                            self.main_function_body.push_str(&format!(
+                                "  {} = sub i32 {}, {}\n",
+                                result_reg, left_reg, right_reg
+                            ));
                             (result_reg, ast::Tipo::Inteiro)
                         } else {
-                            panic!("Operação de subtração não suportada para tipos: {:?} e {:?}", left_type, right_type);
+                            panic!(
+                                "Operação de subtração não suportada para tipos: {:?} e {:?}",
+                                left_type, right_type
+                            );
                         }
-                    },
+                    }
                     ast::OperadorAritmetico::Multiplicacao => {
                         if left_type == ast::Tipo::Inteiro && right_type == ast::Tipo::Inteiro {
                             let result_reg = self.get_unique_temp_name();
-                            self.main_function_body.push_str(&format!("  {} = mul i32 {}, {}\n", result_reg, left_reg, right_reg));
+                            self.main_function_body.push_str(&format!(
+                                "  {} = mul i32 {}, {}\n",
+                                result_reg, left_reg, right_reg
+                            ));
                             (result_reg, ast::Tipo::Inteiro)
+                        } else {
+                            panic!(
+                                "Operação de multiplicação não suportada para tipos: {:?} e {:?}",
+                                left_type, right_type
+                            );
                         }
-                        else {
-                            panic!("Operação de multiplicação não suportada para tipos: {:?} e {:?}", left_type, right_type);
-                        }
-                    },
+                    }
                     ast::OperadorAritmetico::Divisao => {
                         if left_type == ast::Tipo::Inteiro && right_type == ast::Tipo::Inteiro {
                             let result_reg = self.get_unique_temp_name();
-                            self.main_function_body.push_str(&format!("  {} = sdiv i32 {}, {}\n", result_reg, left_reg, right_reg));
+                            self.main_function_body.push_str(&format!(
+                                "  {} = sdiv i32 {}, {}\n",
+                                result_reg, left_reg, right_reg
+                            ));
                             (result_reg, ast::Tipo::Inteiro)
                         } else {
-                            panic!("Operação de divisão não suportada para tipos: {:?} e {:?}", left_type, right_type);
+                            panic!(
+                                "Operação de divisão não suportada para tipos: {:?} e {:?}",
+                                left_type, right_type
+                            );
                         }
-                    },
+                    }
                     ast::OperadorAritmetico::Modulo => {
                         if left_type == ast::Tipo::Inteiro && right_type == ast::Tipo::Inteiro {
                             let result_reg = self.get_unique_temp_name();
-                            self.main_function_body.push_str(&format!("  {} = srem i32 {}, {}\n", result_reg, left_reg, right_reg));
+                            self.main_function_body.push_str(&format!(
+                                "  {} = srem i32 {}, {}\n",
+                                result_reg, left_reg, right_reg
+                            ));
                             (result_reg, ast::Tipo::Inteiro)
+                        } else {
+                            panic!(
+                                "Operação de módulo não suportada para tipos: {:?} e {:?}",
+                                left_type, right_type
+                            );
                         }
-                        else {
-                            panic!("Operação de módulo não suportada para tipos: {:?} e {:?}", left_type, right_type);
-                        }
-                    },
+                    }
                 }
-            },
+            }
             ast::Expressao::NovoObjeto(nome_classe, _argumentos) => {
                 // Implementação básica: alocar memória para o objeto
                 // TODO: Chamar construtor e inicializar campos
                 let obj_ptr_reg = self.get_unique_temp_name();
                 // Para simplificar, vamos alocar um ponteiro nulo por enquanto.
-                // Em uma implementação real, você alocaria memória com `malloc` e chamaria o construtor.
-                self.main_function_body.push_str(&format!("  {} = inttoptr i64 0 to i8*\n", obj_ptr_reg));
+                // Em uma implementação Decimal, você alocaria memória com `malloc` e chamaria o construtor.
+                self.main_function_body
+                    .push_str(&format!("  {} = inttoptr i64 0 to i8*\n", obj_ptr_reg));
                 (obj_ptr_reg, ast::Tipo::Classe(nome_classe.clone()))
-            },
+            }
             ast::Expressao::Chamada(nome_funcao, argumentos) => {
                 let mut arg_regs = Vec::new();
                 let mut arg_types = Vec::new();
@@ -264,10 +322,13 @@ impl<'a> LlvmGenerator<'a> {
                 let args_str = arg_regs.join(", ");
                 let arg_types_str = arg_types.join(", ");
                 let result_reg = self.get_unique_temp_name();
-                self.main_function_body.push_str(&format!("  {} = call i32 @{}({})
-", result_reg, nome_funcao, args_str));
+                self.main_function_body.push_str(&format!(
+                    "  {} = call i32 @{}({})
+",
+                    result_reg, nome_funcao, args_str
+                ));
                 (result_reg, ast::Tipo::Inteiro) // Assuming i32 return for now
-            },
+            }
             ast::Expressao::Comparacao(op, esq, dir) => {
                 let (left_reg, left_type) = self.generate_expressao(esq);
                 let (right_reg, right_type) = self.generate_expressao(dir);
@@ -291,7 +352,7 @@ impl<'a> LlvmGenerator<'a> {
                     result_reg, op_str, left_reg, right_reg
                 ));
                 (result_reg, ast::Tipo::Booleano)
-            },
+            }
             _ => panic!("Expressão não suportada: {:?}", expr),
         }
     }
@@ -326,7 +387,10 @@ impl<'a> LlvmGenerator<'a> {
                 self.main_function_body
                     .push_str(&format!("  {} = load i8*, i8** {}\n", loaded_reg, &ptr_reg));
             }
-            _ => panic!("Tipo de variável não suportado para carregamento: {:?}", var_type),
+            _ => panic!(
+                "Tipo de variável não suportado para carregamento: {:?}",
+                var_type
+            ),
         }
         (loaded_reg, var_type)
     }
@@ -350,7 +414,8 @@ impl<'a> LlvmGenerator<'a> {
             buffer_ptr, buffer
         ));
         self.main_function_body.push_str(&format!(
-            "  call i32 (i8*, i8*, ...) @sprintf(i8* {}, i8* {}, i32 {}\n",
+            "  call i32 (i8*, i8*, ...) @sprintf(i8* {}, i8* {}, i32 {})
+",
             buffer_ptr, format_specifier, int_reg
         ));
         buffer_ptr
@@ -360,12 +425,14 @@ impl<'a> LlvmGenerator<'a> {
         let format_specifier = self.create_global_string("%s%s");
         let len1_reg = self.get_unique_temp_name();
         self.main_function_body.push_str(&format!(
-            "  {} = call i64 @strlen(i8* {}\n",
+            "  {} = call i64 @strlen(i8* {})
+",
             len1_reg, &str1_reg
         ));
         let len2_reg = self.get_unique_temp_name();
         self.main_function_body.push_str(&format!(
-            "  {} = call i64 @strlen(i8* {}\n",
+            "  {} = call i64 @strlen(i8* {})
+",
             len2_reg, &str2_reg
         ));
         let total_len_reg = self.get_unique_temp_name();
@@ -384,7 +451,8 @@ impl<'a> LlvmGenerator<'a> {
             buffer_reg, alloc_size_reg
         ));
         self.main_function_body.push_str(&format!(
-            "  call i32 (i8*, i8*, ...) @sprintf(i8* {}, i8* {}, i8* {}, i8* {}\n",
+            "  call i32 (i8*, i8*, ...) @sprintf(i8* {}, i8* {}, i8* {}, i8* {})
+",
             buffer_reg, format_specifier, &str1_reg, &str2_reg
         ));
         buffer_reg

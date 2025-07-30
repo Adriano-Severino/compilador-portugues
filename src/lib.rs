@@ -59,32 +59,52 @@ impl<'a> CompiladorPortugues<'a> {
     }
 
     pub fn compilar_codigo(&mut self, codigo: &str) -> Result<Programa, String> {
-        // Tokenização
-        use logos::Logos;
-        let lex = Token::lexer(codigo);
-        let tokens: Vec<_> = lex.spanned()
-            .filter_map(|(tok_res, span)| {
-                match tok_res {
-                    Ok(tok) => Some((span.start, tok, span.end)),
-                    Err(_) => None,
+        // Precisamos de uma String mutável para possivelmente anexar chaves ausentes
+        let mut codigo_fonte = codigo.to_string();
+        let mut tentou_recuperar = false;
+        loop {
+            // Tokenização
+            use logos::Logos;
+            let lex = Token::lexer(&codigo_fonte);
+            let tokens: Vec<_> = lex.spanned()
+                .filter_map(|(tok_res, span)| {
+                    match tok_res {
+                        Ok(tok) => Some((span.start, tok, span.end)),
+                        Err(_) => None,
+                    }
+                })
+                .collect();
+            if tokens.is_empty() {
+                return Err("Nenhum token válido encontrado".to_string());
+            }
+
+            // Parsing
+            let parser = parser::ArquivoParser::new();
+            match parser.parse(tokens.iter().cloned()) {
+                Ok(mut ast) => {
+                    // Interpolação de strings
+                    interpolacao::walk_programa(&mut ast, |e| {
+                        *e = interpolacao::planificar_interpolada(e.clone());
+                    });
+                    return Ok(ast);
                 }
-            })
-            .collect();
-        if tokens.is_empty() {
-            return Err("Nenhum token válido encontrado".to_string());
+                Err(err) => {
+                    let err_msg = format!("{:?}", err);
+                    // Se chegamos ao final do arquivo esperando '}' tentamos auto-fechar uma única vez
+                    if !tentou_recuperar && err_msg.contains("UnrecognizedEof") {
+                        let abre = codigo_fonte.matches('{').count();
+                        let fecha = codigo_fonte.matches('}').count();
+                        if abre > fecha {
+                            let faltando = abre - fecha;
+                            codigo_fonte.push_str(&"}".repeat(faltando));
+                            tentou_recuperar = true;
+                            continue; // tenta novamente
+                        }
+                    }
+                    return Err(format!("Erro sintático: {}", err_msg));
+                }
+            }
         }
-
-        // Parsing
-        let parser = parser::ArquivoParser::new();
-        let mut ast = parser.parse(tokens.iter().cloned())
-            .map_err(|e| format!("Erro sintático: {:?}", e))?;
-        
-        // Interpolação de strings
-        interpolacao::walk_programa(&mut ast, |e| {
-            *e = interpolacao::planificar_interpolada(e.clone());
-        });
-
-        Ok(ast)
     }
 }
 
