@@ -13,6 +13,13 @@ lalrpop-util = { version = "0.22.2", features = ["lexer"] }
 # ✅ CORREÇÃO: Adicionada a dependência do `serde` que estava faltando.
 # A feature "derive" é necessária para usar `#[derive(Serialize, Deserialize)]`.
 serde = { version = "1.0", features = ["derive"] }
+rust_decimal = { version = "1", features = ["serde"] }
+rust_decimal_macros = "1"
+
+# Test dependencies
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
 
 # Dependência necessária para o processo de build do parser
 [build-dependencies]
