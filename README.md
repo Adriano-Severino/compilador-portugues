@@ -459,7 +459,7 @@ espaco BibliotecaDigital.Sistema
             TipoUsuario       = tipo;
             LimiteEmprestimos = limite;
             LivrosEmprestados = 0;
-            NumeroCartao      = 1000 + (nome.tamanho() * 7);
+            NumeroCartao      = 1000 + (nome.comprimento() * 7);
         }
         
         publico vazio apresentarPerfil()
@@ -567,6 +567,7 @@ espaco BibliotecaDigital.Sistema
         imprima("");
         
         // Criando biblioteca
+        Biblioteca biblioteca = novo Biblioteca("Biblioteca Central");
         Livro livro1 = novo Livro("1984", "George Orwell", "978-85-250-4099-1", 1949, "Ficção Científica", 2);
         Livro livro2 = novo Livro("Clean Code", "Robert Martin", "978-0-13-235088-4", 2008, "Tecnologia");
         Livro livro3 = novo Livro("O Pequeno Príncipe", "Antoine de Saint-Exupéry", "978-85-325-2734-9");
@@ -603,7 +604,6 @@ espaco BibliotecaDigital.Sistema
         imprima("");
         livro2.apresentarDetalhes(falso);
         livro3.apresentarDetalhes(falso);
-        livro4.apresentarDetalhes(falso);
         imprima("");
         
         // Perfis
@@ -669,7 +669,7 @@ espaco BibliotecaDigital.Sistema
     }
 }
 
-publico função Princiapl()
+publico função Principal()
 {
     demonstrarSistema();
 }
