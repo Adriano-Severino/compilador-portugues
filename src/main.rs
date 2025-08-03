@@ -230,7 +230,7 @@ fn compilar_para_llvm_ir<'a>(
     nome_base: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Gerando LLVM IR...");
-    let mut gerador = codegen::llvm_ir::LlvmGenerator::new(programa, type_checker);
+    let mut gerador = codegen::llvm_ir::LlvmGenerator::new(programa, type_checker, &type_checker.resolved_classes);
     let llvm_ir = gerador.generate();
     fs::write(format!("{}.ll", nome_base), llvm_ir)?;
     println!("  ✓ {}.ll gerado.", nome_base);

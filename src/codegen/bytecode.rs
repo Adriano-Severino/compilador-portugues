@@ -21,8 +21,6 @@ fn get_expr_name(expr: &ast::Expressao) -> Option<String> {
 }
 
 /// O gerador de código para o alvo Bytecode.
-
-/// O gerador de código para o alvo Bytecode.
 pub struct BytecodeGenerator<'a> {
     programa: &'a ast::Programa,
     type_checker: &'a crate::type_checker::VerificadorTipos<'a>,
@@ -162,7 +160,7 @@ impl<'a> BytecodeGenerator<'a> {
                 self.bytecode_instructions.extend(sub.generate());
             }
 
-            // ✅ Reconhece e processa a declaração de classe
+            // Reconhece e processa a declaração de classe
             ast::Declaracao::DeclaracaoClasse(classe_def) => {
                 let full_class_name = self.qual(&classe_def.nome);
                 let parent_class_name = classe_def.classe_pai.as_ref().map_or("NULO".to_string(), |p| self.type_checker.resolver_nome_classe(p, &self.namespace_path));

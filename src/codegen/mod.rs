@@ -14,9 +14,27 @@ impl GeradorCodigo {
     }
 
     pub fn gerar_llvm_ir<'a>(&self, programa: &'a ast::Programa, type_checker: &'a mut crate::type_checker::VerificadorTipos<'a>, nome_base: &str) -> Result<(), String> {
-        let mut generator = llvm_ir::LlvmGenerator::new(programa, type_checker);
+        let mut generator = llvm_ir::LlvmGenerator::new(programa, type_checker, &type_checker.resolved_classes);
         let code = generator.generate();
-        fs::write(format!("{}.ll", nome_base), code).map_err(|e| e.to_string())
+        let ll_path = format!("{}.ll", nome_base);
+        fs::write(&ll_path, code).map_err(|e| e.to_string())?;
+
+        // Compila o LLVM IR para código de máquina usando clang
+        let output = std::process::Command::new("clang")
+            .arg(&ll_path)
+            .arg("-o")
+            .arg(nome_base)
+            .output()
+            .map_err(|e| format!("Falha ao executar o clang: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "Erro do Clang: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        Ok(())
     }
 
     pub fn gerar_cil(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
