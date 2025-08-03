@@ -6,6 +6,8 @@ use std::fs;
 use std::io::Read;
 use std::rc::Rc;
 
+use rust_decimal::Decimal;
+
 //cargo run --bin compilador -- teste.pr --target=bytecode
 //cargo run --bin interpretador -- teste.pbc
 
@@ -15,6 +17,7 @@ enum Valor {
     Inteiro(i64),
     Texto(String),
     Booleano(bool),
+    Decimal(Decimal),
     Nulo,
     Objeto {
         nome_classe: String,
@@ -52,6 +55,7 @@ impl fmt::Display for Valor {
             Valor::Inteiro(n) => write!(f, "{}", n),
             Valor::Texto(s) => write!(f, "{}", s),
             Valor::Booleano(b) => write!(f, "{}", if *b { "verdadeiro" } else { "falso" }),
+            Valor::Decimal(d) => write!(f, "{}", d),
             Valor::Nulo => write!(f, "nulo"),
 
             // ✅ NOVO: Display para objetos
@@ -96,12 +100,12 @@ struct VM {
     bytecode: Vec<String>,
     // Ponteiro da instrução atual (Instruction Pointer).
     ip: usize,
-    // ✅ NOVO: Registro de classes
+    // Registro de classes
     classes: HashMap<String, ClasseInfo>,
     functions: HashMap<String, FuncInfo>,
-    // ✅ NOVO: Rastreia módulos para evitar cargas duplicadas
+    // Rastreia módulos para evitar cargas duplicadas
     loaded_modules: std::collections::HashSet<String>,
-    // ✅ NOVO: Diretório base para resolver caminhos de módulos
+    // NOVO: Diretório base para resolver caminhos de módulos
     base_dir: std::path::PathBuf,
 }
 
@@ -572,6 +576,11 @@ impl VM {
                         .map_err(|e| format!("Valor inválido para LOAD_CONST_BOOL: {}", e))?;
                     self.pilha.push(Valor::Booleano(valor));
                 }
+                "LOAD_CONST_DECIMAL" => {
+                    let literal = partes.get(1).ok_or("LOAD_CONST_DECIMAL requer um argumento")?;
+                    let dec = literal.parse::<rust_decimal::Decimal>().map_err(|e| format!("Decimal inválido: {}", e))?;
+                    self.pilha.push(Valor::Decimal(dec));
+                }
                 "LOAD_CONST_NULL" => {
                     self.pilha.push(Valor::Nulo);
                 }
@@ -582,6 +591,9 @@ impl VM {
                     match (esq, dir) {
                         (Valor::Inteiro(a), Valor::Inteiro(b)) => {
                             self.pilha.push(Valor::Inteiro(a + b))
+                        }
+                        (Valor::Decimal(a), Valor::Decimal(b)) => {
+                            self.pilha.push(Valor::Decimal(a + b))
                         }
                         (Valor::Texto(a), Valor::Texto(b)) => {
                             self.pilha.push(Valor::Texto(format!("{} {}", a, b)))
@@ -604,6 +616,9 @@ impl VM {
                         (Valor::Inteiro(a), Valor::Inteiro(b)) => {
                             self.pilha.push(Valor::Inteiro(a - b))
                         }
+                        (Valor::Decimal(a), Valor::Decimal(b)) => {
+                            self.pilha.push(Valor::Decimal(a - b))
+                        }
                         _ => return Err("Tipos incompatíveis para SUB".to_string()),
                     }
                 }
@@ -613,6 +628,9 @@ impl VM {
                     match (esq, dir) {
                         (Valor::Inteiro(a), Valor::Inteiro(b)) => {
                             self.pilha.push(Valor::Inteiro(a * b))
+                        }
+                        (Valor::Decimal(a), Valor::Decimal(b)) => {
+                            self.pilha.push(Valor::Decimal(a * b))
                         }
                         _ => return Err("Tipos incompatíveis para MUL".to_string()),
                     }
@@ -626,6 +644,12 @@ impl VM {
                                 return Err("Divisão por zero".to_string());
                             }
                             self.pilha.push(Valor::Inteiro(a / b));
+                        }
+                        (Valor::Decimal(a), Valor::Decimal(b)) => {
+                            if b.is_zero() {
+                                return Err("Divisão por zero".to_string());
+                            }
+                            self.pilha.push(Valor::Decimal(a / b));
                         }
                         _ => return Err("Tipos incompatíveis para DIV".to_string()),
                     }
@@ -648,6 +672,7 @@ impl VM {
                     let val = self.pilha.pop().ok_or("Pilha vazia para NEGATE_INT")?;
                     match val {
                         Valor::Inteiro(n) => self.pilha.push(Valor::Inteiro(-n)),
+                        Valor::Decimal(d) => self.pilha.push(Valor::Decimal(-d)),
                         _ => return Err("Tipo incompatível para NEGATE_INT".to_string()),
                     }
                 }
@@ -678,6 +703,9 @@ impl VM {
                         (Valor::Inteiro(a), Valor::Inteiro(b)) => {
                             self.pilha.push(Valor::Booleano(a < b))
                         }
+                        (Valor::Decimal(a), Valor::Decimal(b)) => {
+                            self.pilha.push(Valor::Booleano(a < b))
+                        }
                         _ => return Err("Tipos incompatíveis para COMPARE_LT".to_string()),
                     }
                 }
@@ -686,6 +714,9 @@ impl VM {
                     let esq = self.pilha.pop().ok_or("Pilha vazia para COMPARE_GT")?;
                     match (esq, dir) {
                         (Valor::Inteiro(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Booleano(a > b))
+                        }
+                        (Valor::Decimal(a), Valor::Decimal(b)) => {
                             self.pilha.push(Valor::Booleano(a > b))
                         }
                         _ => return Err("Tipos incompatíveis para COMPARE_GT".to_string()),
@@ -698,6 +729,9 @@ impl VM {
                         (Valor::Inteiro(a), Valor::Inteiro(b)) => {
                             self.pilha.push(Valor::Booleano(a <= b))
                         }
+                        (Valor::Decimal(a), Valor::Decimal(b)) => {
+                            self.pilha.push(Valor::Booleano(a <= b))
+                        }
                         _ => return Err("Tipos incompatíveis para COMPARE_LE".to_string()),
                     }
                 }
@@ -707,6 +741,9 @@ impl VM {
                     let esq = self.pilha.pop().ok_or("Pilha vazia para COMPARE_GE")?;
                     match (esq, dir) {
                         (Valor::Inteiro(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Booleano(a >= b))
+                        }
+                        (Valor::Decimal(a), Valor::Decimal(b)) => {
                             self.pilha.push(Valor::Booleano(a >= b))
                         }
                         _ => return Err("Tipos incompatíveis para COMPARE_GE".to_string()),

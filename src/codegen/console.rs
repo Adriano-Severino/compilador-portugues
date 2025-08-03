@@ -58,6 +58,7 @@ impl<'a> ConsoleGenerator<'a> {
         match expr {
             ast::Expressao::Texto(s) => format!("{}", s),
             ast::Expressao::Inteiro(n) => n.to_string(),
+            ast::Expressao::Decimal(d) => format!("{}m", d),
             ast::Expressao::Identificador(name) => name.clone(),
             ast::Expressao::Aritmetica(ast::OperadorAritmetico::Soma, esq, dir) => {
                 format!(
@@ -75,6 +76,7 @@ impl<'a> ConsoleGenerator<'a> {
             ast::Tipo::Inteiro => "int",
             ast::Tipo::Texto => "string",
             ast::Tipo::Booleano => "bool",
+            ast::Tipo::Decimal => "decimal",
             _ => "object",
         }
     }

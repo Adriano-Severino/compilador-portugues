@@ -309,7 +309,7 @@ impl AnalisadorOwnership {
                 self.analisar_expressao(obj);
                 
                 // ✅ NOVO: Verificar acesso a membro herdado
-                if let Some(obj_nome) = get_expr_name(obj) {
+                if let Some(_obj_nome) = get_expr_name(obj) {
                     if let Some(classe_obj) = self.obter_classe_objeto(obj) {
                         if !self.membro_existe_na_hierarquia(&classe_obj, membro) {
                             self.warnings.push(format!(
@@ -583,7 +583,7 @@ impl AnalisadorOwnership {
     // ✅ NOVO: Obter classe de um objeto
     fn obter_classe_objeto(&self, objeto_expr: &Expressao) -> Option<String> {
         if let Some(objeto_nome) = get_expr_name(objeto_expr) {
-            if let Some(info) = self.variaveis.get(&objeto_nome) {
+            if let Some(_info) = self.variaveis.get(&objeto_nome) {
                 // Em uma implementação completa, você inferiria o tipo da variável
                 // e retornaria o nome da classe desse tipo.
                 // Por enquanto, um fallback genérico.

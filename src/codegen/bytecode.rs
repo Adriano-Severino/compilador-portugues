@@ -98,7 +98,7 @@ impl<'a> BytecodeGenerator<'a> {
             construtor_params_por_classe: self.construtor_params_por_classe.clone(),
             current_class_name: Some(nome_classe.to_string()),
         };
-        let mut corpo = sub.generate();
+        let corpo = sub.generate();
         let mut corpo_com_defaults = Vec::new();
         if let Some(base_args) = &ctor.chamada_pai {
             let mut temp_gen = self.spawn_child();

@@ -194,11 +194,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Fase 5: Geração de código.
     let nome_base = Path::new(&caminhos_arquivos[0]).file_stem().unwrap_or_default().to_str().unwrap_or("saida");
     match target {
-        TargetCompilacao::Universal => compilar_universal(&programa_final, &type_checker, nome_base),
+        TargetCompilacao::Universal => compilar_universal(&programa_final, &mut type_checker, nome_base),
         TargetCompilacao::LlvmIr => {
-            compilar_para_llvm_ir(&programa_final, &type_checker, nome_base)?;
+            compilar_para_llvm_ir(&programa_final, &mut type_checker, nome_base)?;
             println!("Compilando com clang...");
-            let clang_command = format!("clang {}.ll -o {}", nome_base, nome_base);
             let output = Command::new("clang")
                 .arg(format!("{}.ll", nome_base))
                 .arg("-o")
@@ -208,7 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             if !output.status.success() {
                 return Err(Box::new(CompilerError(format!(
-                    "Erro ao compilar LLVM IR com clang:\n{}\n{}",
+                    "Erro ao compilar LLVM IR com clang:\nstdout: {}\nstderr: {}",
                     String::from_utf8_lossy(&output.stdout),
                     String::from_utf8_lossy(&output.stderr)
                 ))));
@@ -216,35 +215,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Executável gerado: ./{}", nome_base);
             Ok(())
         },
-        TargetCompilacao::CilBytecode => compilar_para_cil_bytecode(&programa_final, &type_checker, nome_base),
-        TargetCompilacao::Console => compilar_para_console(&programa_final, &type_checker, nome_base),
-        TargetCompilacao::Bytecode => compilar_para_bytecode(&programa_final, &type_checker, nome_base),
+        TargetCompilacao::CilBytecode => compilar_para_cil_bytecode(&programa_final, nome_base),
+        TargetCompilacao::Console => compilar_para_console(&programa_final, nome_base),
+        TargetCompilacao::Bytecode => compilar_para_bytecode(&programa_final, &mut type_checker, nome_base),
     
     }
 }
 
-fn compilar_universal<'a>(
-    ast: &'a ast::Programa,
-    type_checker: &'a type_checker::VerificadorTipos,
-    nome_base: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    println!("\n🌍 Iniciando Compilação Universal...");
-    compilar_para_llvm_ir(ast, type_checker, nome_base)?;
-    compilar_para_cil_bytecode(ast, type_checker, nome_base)?;
-    compilar_para_console(ast, type_checker, nome_base)?;
-    compilar_para_bytecode(ast, type_checker, nome_base)?;
-    println!("\n🎉 Compilação Universal Concluída!");
-    Ok(())
-}
+fn compilar_universal<'a>(    ast: &'a ast::Programa,    type_checker: &'a mut type_checker::VerificadorTipos<'a>,    nome_base: &str,) -> Result<(), Box<dyn std::error::Error>> {    println!("\n🌍 Iniciando Compilação Universal...");    compilar_para_llvm_ir(ast, &mut type_checker.clone(), nome_base)?;    compilar_para_cil_bytecode(ast, nome_base)?;    compilar_para_console(ast, nome_base)?;    compilar_para_bytecode(ast, type_checker, nome_base)?;    println!("\n🎉 Compilação Universal Concluída!");    Ok(())}
 
 fn compilar_para_llvm_ir<'a>(
     programa: &'a ast::Programa,
-    _type_checker: &'a type_checker::VerificadorTipos, // Ainda não usado, mas necessário para a assinatura
+    type_checker: &'a mut type_checker::VerificadorTipos<'a>, 
     nome_base: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Gerando LLVM IR...");
-    let gerador = codegen::GeradorCodigo::new()?;
-    gerador.gerar_llvm_ir(programa, nome_base).map_err(|e| Box::new(CompilerError(e)))?;
+    let mut gerador = codegen::llvm_ir::LlvmGenerator::new(programa, type_checker);
+    let llvm_ir = gerador.generate();
+    fs::write(format!("{}.ll", nome_base), llvm_ir)?;
     println!("  ✓ {}.ll gerado.", nome_base);
     println!("  Para compilar: clang {0}.ll -o {0}", nome_base);
     println!("🎯 Pipeline LLVM: AST → LLVM IR → Código de Máquina");
@@ -254,7 +242,6 @@ fn compilar_para_llvm_ir<'a>(
 
 fn compilar_para_cil_bytecode<'a>(
     ast: &'a ast::Programa,
-    _type_checker: &'a type_checker::VerificadorTipos, // Ainda não usado
     nome_base: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Gerando CIL Bytecode...");
@@ -267,7 +254,6 @@ fn compilar_para_cil_bytecode<'a>(
 
 fn compilar_para_console<'a>(
     ast: &'a ast::Programa,
-    _type_checker: &'a type_checker::VerificadorTipos, // Ainda não usado
     nome_base: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Gerando Projeto de Console .NET...");
@@ -280,7 +266,7 @@ fn compilar_para_console<'a>(
 
 fn compilar_para_bytecode<'a>(
     ast: &'a ast::Programa,
-    type_checker: &'a type_checker::VerificadorTipos,
+    type_checker: &'a mut type_checker::VerificadorTipos,
     nome_base: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Gerando Bytecode Customizado...");

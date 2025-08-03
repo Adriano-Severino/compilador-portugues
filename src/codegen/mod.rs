@@ -13,8 +13,8 @@ impl GeradorCodigo {
         Ok(Self)
     }
 
-    pub fn gerar_llvm_ir(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
-        let mut generator = llvm_ir::LlvmGenerator::new(programa);
+    pub fn gerar_llvm_ir<'a>(&self, programa: &'a ast::Programa, type_checker: &'a mut crate::type_checker::VerificadorTipos<'a>, nome_base: &str) -> Result<(), String> {
+        let mut generator = llvm_ir::LlvmGenerator::new(programa, type_checker);
         let code = generator.generate();
         fs::write(format!("{}.ll", nome_base), code).map_err(|e| e.to_string())
     }
@@ -33,7 +33,7 @@ impl GeradorCodigo {
         fs::create_dir_all(&dir_projeto).map_err(|e| e.to_string())?;
 
         let csproj = format!(
-            r#"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <Nullable>enable</Nullable>\n  </PropertyGroup>\n</Project>"#
+            "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <Nullable>enable</Nullable>\n  </PropertyGroup>\n</Project>"
         );
         fs::write(format!("{}/{}.csproj", dir_projeto, nome_base), csproj)
             .map_err(|e| e.to_string())?;

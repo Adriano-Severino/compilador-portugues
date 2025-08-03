@@ -38,12 +38,19 @@ impl<'a> CilGenerator<'a> {
 
     fn generate_comando(&self, comando: &ast::Comando) -> String {
         match comando {
-            ast::Comando::Imprima(expr) => self.generate_expressao(expr),
+            ast::Comando::Imprima(expr) => self.generate_expressao(expr, true),
+            ast::Comando::DeclaracaoVariavel(_, nome, Some(expr)) => {
+                let mut code = String::new();
+                code.push_str(&format!("    .locals init (object {}\n)", nome));
+                code.push_str(&self.generate_expressao(expr, false));
+                code.push_str(&format!("    stloc.0 // {}", nome));
+                code
+            }
             _ => format!("    // Comando {:?} não implementado para CIL\n", comando),
         }
     }
 
-    fn generate_expressao(&self, expr: &ast::Expressao) -> String {
+    fn generate_expressao(&self, expr: &ast::Expressao, is_print: bool) -> String {
         let mut code = String::new();
         match expr {
             ast::Expressao::Texto(s) => {
@@ -52,7 +59,22 @@ impl<'a> CilGenerator<'a> {
             }
             ast::Expressao::Inteiro(n) => {
                 code.push_str(&format!("    ldc.i4 {}\n", n));
-                code.push_str("    call void [mscorlib]System.Console::WriteLine(int32)\n");
+                if is_print {
+                    code.push_str("    call void [mscorlib]System.Console::WriteLine(int32)\n");
+                }
+            }
+            ast::Expressao::Decimal(d) => {
+                code.push_str(&format!("    ldstr \"{}\"\n", d));
+                code.push_str("    call class [mscorlib]System.Decimal [mscorlib]System.Decimal::Parse(string)\n");
+                if is_print {
+                    code.push_str("    call void [mscorlib]System.Console::WriteLine(object)\n");
+                }
+            }
+            ast::Expressao::Identificador(nome) => {
+                code.push_str(&format!("    ldloc.0 // {}\n", nome));
+                if is_print {
+                    code.push_str("    call void [mscorlib]System.Console::WriteLine(object)\n");
+                }
             }
             ast::Expressao::Aritmetica(ast::OperadorAritmetico::Soma, _, _) => {
                 let parts = self.flatten_soma(expr);

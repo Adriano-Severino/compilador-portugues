@@ -2,11 +2,12 @@ use crate::ast;
 use crate::ast::*;
 use std::collections::HashMap;
 
+#[derive(Clone)]
 pub struct VerificadorTipos<'a> {
     usings: Vec<String>,
     simbolos_namespaces: HashMap<String, &'a Declaracao>,
     pub classes: HashMap<String, &'a DeclaracaoClasse>,
-    resolved_classes: HashMap<String, ResolvedClassInfo<'a>>,
+    pub resolved_classes: HashMap<String, ResolvedClassInfo<'a>>,
     erros: Vec<String>,
 }
 
@@ -221,6 +222,53 @@ impl<'a> VerificadorTipos<'a> {
             }
         }
         nome_funcao.to_string()
+    }
+
+    pub fn is_member_of_class(&self, class_name: &str, member_name: &str) -> bool {
+        if let Some(class_info) = self.resolved_classes.get(class_name) {
+            return class_info.fields.iter().any(|f| f.nome == member_name) || 
+                   class_info.properties.iter().any(|p| p.nome == member_name);
+        }
+        false
+    }
+
+    pub fn get_field_info(&self, class_name: &str, field_name: &str) -> Option<(u32, Tipo)> {
+        if let Some(class_info) = self.resolved_classes.get(class_name) {
+            if let Some(pos) = class_info.fields.iter().position(|f| f.nome == field_name) {
+                return Some((pos as u32, class_info.fields[pos].tipo.clone()));
+            }
+            if let Some(pos) = class_info.properties.iter().position(|p| p.nome == field_name) {
+                return Some((pos as u32, class_info.properties[pos].tipo.clone()));
+            }
+        }
+        None
+    }
+
+        pub fn get_function_return_type(&self, nome_funcao: &str, namespace_atual: &str) -> Option<Tipo> {
+        let fqn = self.resolver_nome_funcao(nome_funcao, namespace_atual);
+        if let Some(Declaracao::DeclaracaoFuncao(func_decl)) = self.simbolos_namespaces.get(&fqn) {
+            func_decl.tipo_retorno.clone()
+        } else {
+            None
+        }
+    }
+
+    pub fn get_variable_type(&self, name: &str, namespace_atual: &str) -> Option<Tipo> {
+        println!("DEBUG: get_variable_type: name='{}', namespace_atual='{}'", name, namespace_atual);
+        // Esta é uma implementação simplificada. Em um cenário real, você precisaria
+        // de uma tabela de símbolos mais robusta que rastreie os escopos.
+        // Por enquanto, vamos apenas verificar os símbolos globais.
+        let fqn = self.resolver_nome_funcao(name, namespace_atual);
+        if let Some(Declaracao::DeclaracaoFuncao(func_decl)) = self.simbolos_namespaces.get(&fqn) {
+            return func_decl.tipo_retorno.clone();
+        }
+
+        let fqn_class = self.resolver_nome_classe(name, namespace_atual);
+        if self.classes.contains_key(&fqn_class) {
+            return Some(Tipo::Classe(fqn_class));
+        }
+        
+        None
     }
 
     fn get_declaracao_nome(&self, declaracao: &Declaracao) -> String {
@@ -490,7 +538,7 @@ impl<'a> VerificadorTipos<'a> {
         }
     }
 
-    fn inferir_tipo_expressao(
+    pub fn inferir_tipo_expressao(
         &mut self,
         expressao: &Expressao,
         namespace_atual: &str,
@@ -505,16 +553,14 @@ impl<'a> VerificadorTipos<'a> {
                 classe_atual.map_or(Tipo::Inferido, |nome| Tipo::Classe(nome.clone()))
             }
             Expressao::Identificador(nome) => {
-                if let Some(tipo) = escopo_vars.get(nome) {
-                    return tipo.clone();
+                if escopo_vars.contains_key(nome) {
+                    return escopo_vars.get(nome).unwrap().clone();
                 }
                 if let Some(class_name) = classe_atual {
                     if let Some(class_info) = self.resolved_classes.get(class_name) {
-                        if let Some(prop) = class_info.properties.iter().find(|p| p.nome == *nome) {
-                            return prop.tipo.clone();
-                        }
-                        if let Some(field) = class_info.fields.iter().find(|f| f.nome == *nome) {
-                            return field.tipo.clone();
+                        if class_info.properties.iter().any(|p| p.nome == *nome) || 
+                           class_info.fields.iter().any(|f| f.nome == *nome) {
+                            return self.inferir_tipo_expressao(&Expressao::AcessoMembro(Box::new(Expressao::Este), nome.clone()), namespace_atual, classe_atual, escopo_vars);
                         }
                     }
                 }
@@ -542,8 +588,10 @@ impl<'a> VerificadorTipos<'a> {
                         {
                             return prop.tipo.clone();
                         }
-                        if let Some(field) =
-                            class_info.fields.iter().find(|f| f.nome == *membro_nome)
+                        if let Some(field) = class_info
+                            .fields
+                            .iter()
+                            .find(|f| f.nome == *membro_nome)
                         {
                             return field.tipo.clone();
                         }
