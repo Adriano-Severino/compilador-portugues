@@ -1,0 +1,626 @@
+DEFINE_FUNCTION Principal 4 
+CALL_FUNCTION BibliotecaDigital.Sistema.demonstrarSistema 0
+POP
+LOAD_CONST_NULL
+RETURN
+DEFINE_CLASS BibliotecaDigital.Sistema.Livro NULO Titulo,Autor,ISBN,AnoPublicacao,Categoria,QuantidadeTotal,QuantidadeDisponivel,Disponivel|titulo,autor,isbn,ano,categoria,quantidade||
+DEFINE_METHOD BibliotecaDigital.Sistema.Livro construtor 35 titulo autor isbn ano=<expressao> categoria=<expressao> quantidade=<expressao>
+SET_DEFAULT ano LOAD_CONST_INT 2024
+SET_DEFAULT categoria LOAD_CONST_STR Geral
+SET_DEFAULT quantidade LOAD_CONST_INT 1
+LOAD_VAR este
+LOAD_VAR titulo
+SET_PROPERTY Titulo
+POP
+LOAD_VAR este
+LOAD_VAR autor
+SET_PROPERTY Autor
+POP
+LOAD_VAR este
+LOAD_VAR isbn
+SET_PROPERTY ISBN
+POP
+LOAD_VAR este
+LOAD_VAR ano
+SET_PROPERTY AnoPublicacao
+POP
+LOAD_VAR este
+LOAD_VAR categoria
+SET_PROPERTY Categoria
+POP
+LOAD_VAR este
+LOAD_VAR quantidade
+SET_PROPERTY QuantidadeTotal
+POP
+LOAD_VAR este
+LOAD_VAR quantidade
+SET_PROPERTY QuantidadeDisponivel
+POP
+LOAD_VAR este
+LOAD_CONST_BOOL true
+SET_PROPERTY Disponivel
+POP
+DEFINE_METHOD BibliotecaDigital.Sistema.Livro apresentarDetalhes 71 completo=<expressao>
+SET_DEFAULT completo LOAD_CONST_BOOL true
+LOAD_VAR completo
+JUMP_IF_FALSE 46
+LOAD_CONST_STR 📚 LIVRO: 
+LOAD_VAR este
+GET_PROPERTY Titulo
+ADD
+PRINT
+LOAD_CONST_STR  Autor: 
+LOAD_VAR este
+GET_PROPERTY Autor
+ADD
+PRINT
+LOAD_CONST_STR  ISBN: 
+LOAD_VAR este
+GET_PROPERTY ISBN
+ADD
+PRINT
+LOAD_CONST_STR  Ano: 
+LOAD_VAR este
+GET_PROPERTY AnoPublicacao
+ADD
+PRINT
+LOAD_CONST_STR  Categoria: 
+LOAD_VAR este
+GET_PROPERTY Categoria
+ADD
+PRINT
+LOAD_CONST_STR  Disponível: 
+LOAD_VAR este
+GET_PROPERTY QuantidadeDisponivel
+ADD
+LOAD_CONST_STR /
+ADD
+LOAD_VAR este
+GET_PROPERTY QuantidadeTotal
+ADD
+PRINT
+LOAD_VAR este
+GET_PROPERTY Disponivel
+JUMP_IF_FALSE 43
+LOAD_CONST_STR  Status: Disponível
+PRINT
+JUMP 45
+LOAD_CONST_STR  Status: Indisponível
+PRINT
+JUMP 68
+LOAD_VAR este
+GET_PROPERTY Disponivel
+JUMP_IF_FALSE 59
+LOAD_CONST_STR 📚 
+LOAD_VAR este
+GET_PROPERTY Titulo
+LOAD_CONST_STR  - 
+LOAD_VAR este
+GET_PROPERTY Autor
+LOAD_CONST_STR  ✅
+CONCAT 5
+PRINT
+JUMP 68
+LOAD_CONST_STR 📚 
+LOAD_VAR este
+GET_PROPERTY Titulo
+LOAD_CONST_STR  - 
+LOAD_VAR este
+GET_PROPERTY Autor
+LOAD_CONST_STR  ❌
+CONCAT 5
+PRINT
+LOAD_CONST_NULL
+RETURN
+DEFINE_METHOD BibliotecaDigital.Sistema.Livro emprestar 25 
+LOAD_VAR este
+GET_PROPERTY QuantidadeDisponivel
+LOAD_CONST_INT 0
+COMPARE_GT
+JUMP_IF_FALSE 23
+LOAD_VAR este
+LOAD_VAR este
+GET_PROPERTY QuantidadeDisponivel
+LOAD_CONST_INT 1
+SUB
+SET_PROPERTY QuantidadeDisponivel
+POP
+LOAD_VAR este
+GET_PROPERTY QuantidadeDisponivel
+LOAD_CONST_INT 0
+COMPARE_EQ
+JUMP_IF_FALSE 21
+LOAD_VAR este
+LOAD_CONST_BOOL false
+SET_PROPERTY Disponivel
+POP
+LOAD_CONST_BOOL true
+RETURN
+LOAD_CONST_BOOL false
+RETURN
+DEFINE_METHOD BibliotecaDigital.Sistema.Livro devolver 18 
+LOAD_VAR este
+LOAD_VAR este
+GET_PROPERTY QuantidadeDisponivel
+LOAD_CONST_INT 1
+ADD
+SET_PROPERTY QuantidadeDisponivel
+POP
+LOAD_VAR este
+GET_PROPERTY QuantidadeDisponivel
+LOAD_CONST_INT 0
+COMPARE_GT
+JUMP_IF_FALSE 16
+LOAD_VAR este
+LOAD_CONST_BOOL true
+SET_PROPERTY Disponivel
+POP
+LOAD_CONST_NULL
+RETURN
+END_CLASS
+DEFINE_CLASS BibliotecaDigital.Sistema.Usuario NULO Nome,Email,Telefone,TipoUsuario,NumeroCartao,LimiteEmprestimos,LivrosEmprestados|nome,email,telefone,tipo,limite||
+DEFINE_METHOD BibliotecaDigital.Sistema.Usuario construtor 36 nome email telefone=<expressao> tipo=<expressao> limite=<expressao>
+SET_DEFAULT telefone LOAD_CONST_STR 
+SET_DEFAULT tipo LOAD_CONST_STR Comum
+SET_DEFAULT limite LOAD_CONST_INT 3
+LOAD_VAR este
+LOAD_VAR nome
+SET_PROPERTY Nome
+POP
+LOAD_VAR este
+LOAD_VAR email
+SET_PROPERTY Email
+POP
+LOAD_VAR este
+LOAD_VAR telefone
+SET_PROPERTY Telefone
+POP
+LOAD_VAR este
+LOAD_VAR tipo
+SET_PROPERTY TipoUsuario
+POP
+LOAD_VAR este
+LOAD_VAR limite
+SET_PROPERTY LimiteEmprestimos
+POP
+LOAD_VAR este
+LOAD_CONST_INT 0
+SET_PROPERTY LivrosEmprestados
+POP
+LOAD_VAR este
+LOAD_CONST_INT 1000
+LOAD_VAR nome
+CALL_METHOD comprimento 0
+LOAD_CONST_INT 7
+MUL
+ADD
+SET_PROPERTY NumeroCartao
+POP
+DEFINE_METHOD BibliotecaDigital.Sistema.Usuario apresentarPerfil 32 
+LOAD_CONST_STR 👤 USUÁRIO: 
+LOAD_VAR este
+GET_PROPERTY Nome
+ADD
+PRINT
+LOAD_CONST_STR  Email: 
+LOAD_VAR este
+GET_PROPERTY Email
+ADD
+PRINT
+LOAD_CONST_STR  Cartão: #
+LOAD_VAR este
+GET_PROPERTY NumeroCartao
+ADD
+PRINT
+LOAD_CONST_STR  Tipo: 
+LOAD_VAR este
+GET_PROPERTY TipoUsuario
+ADD
+PRINT
+LOAD_CONST_STR  Empréstimos: 
+LOAD_VAR este
+GET_PROPERTY LivrosEmprestados
+ADD
+LOAD_CONST_STR /
+ADD
+LOAD_VAR este
+GET_PROPERTY LimiteEmprestimos
+ADD
+PRINT
+LOAD_CONST_NULL
+RETURN
+DEFINE_METHOD BibliotecaDigital.Sistema.Usuario podeEmprestar 6 
+LOAD_VAR este
+GET_PROPERTY LivrosEmprestados
+LOAD_VAR este
+GET_PROPERTY LimiteEmprestimos
+COMPARE_LT
+RETURN
+END_CLASS
+DEFINE_CLASS BibliotecaDigital.Sistema.Biblioteca NULO Nome,Endereco,TotalLivros,TotalUsuarios|nome,endereco||
+DEFINE_METHOD BibliotecaDigital.Sistema.Biblioteca construtor 17 nome endereco=<expressao>
+SET_DEFAULT endereco LOAD_CONST_STR Endereço não informado
+LOAD_VAR este
+LOAD_VAR nome
+SET_PROPERTY Nome
+POP
+LOAD_VAR este
+LOAD_VAR endereco
+SET_PROPERTY Endereco
+POP
+LOAD_VAR este
+LOAD_CONST_INT 0
+SET_PROPERTY TotalLivros
+POP
+LOAD_VAR este
+LOAD_CONST_INT 0
+SET_PROPERTY TotalUsuarios
+POP
+DEFINE_METHOD BibliotecaDigital.Sistema.Biblioteca adicionarLivro 16 livro
+LOAD_VAR este
+LOAD_VAR este
+GET_PROPERTY TotalLivros
+LOAD_CONST_INT 1
+ADD
+SET_PROPERTY TotalLivros
+POP
+LOAD_CONST_STR ✅ Livro '
+LOAD_VAR livro
+GET_PROPERTY Titulo
+ADD
+LOAD_CONST_STR ' adicionado à biblioteca!
+ADD
+PRINT
+LOAD_CONST_NULL
+RETURN
+DEFINE_METHOD BibliotecaDigital.Sistema.Biblioteca cadastrarUsuario 21 usuario
+LOAD_VAR este
+LOAD_VAR este
+GET_PROPERTY TotalUsuarios
+LOAD_CONST_INT 1
+ADD
+SET_PROPERTY TotalUsuarios
+POP
+LOAD_CONST_STR ✅ Usuário '
+LOAD_VAR usuario
+GET_PROPERTY Nome
+ADD
+LOAD_CONST_STR ' cadastrado com sucesso!
+ADD
+PRINT
+LOAD_CONST_STR  Número do cartão: #
+LOAD_VAR usuario
+GET_PROPERTY NumeroCartao
+ADD
+PRINT
+LOAD_CONST_NULL
+RETURN
+DEFINE_METHOD BibliotecaDigital.Sistema.Biblioteca realizarEmprestimo 48 usuario livro
+LOAD_VAR usuario
+CALL_METHOD podeEmprestar 0
+JUMP_IF_FALSE 39
+LOAD_VAR livro
+CALL_METHOD emprestar 0
+JUMP_IF_FALSE 31
+LOAD_VAR usuario
+LOAD_VAR usuario
+GET_PROPERTY LivrosEmprestados
+LOAD_CONST_INT 1
+ADD
+SET_PROPERTY LivrosEmprestados
+POP
+LOAD_CONST_STR 📖 EMPRÉSTIMO REALIZADO:
+PRINT
+LOAD_CONST_STR  Livro: 
+LOAD_VAR livro
+GET_PROPERTY Titulo
+ADD
+PRINT
+LOAD_CONST_STR  Usuário: 
+LOAD_VAR usuario
+GET_PROPERTY Nome
+ADD
+PRINT
+LOAD_CONST_STR  Cartão: #
+LOAD_VAR usuario
+GET_PROPERTY NumeroCartao
+ADD
+PRINT
+JUMP 38
+LOAD_CONST_STR ❌ Livro '
+LOAD_VAR livro
+GET_PROPERTY Titulo
+ADD
+LOAD_CONST_STR ' não está disponível!
+ADD
+PRINT
+JUMP 46
+LOAD_CONST_STR ❌ Usuário '
+LOAD_VAR usuario
+GET_PROPERTY Nome
+ADD
+LOAD_CONST_STR ' atingiu o limite de empréstimos!
+ADD
+PRINT
+LOAD_CONST_NULL
+RETURN
+DEFINE_METHOD BibliotecaDigital.Sistema.Biblioteca realizarDevolucao 24 usuario livro
+LOAD_VAR livro
+CALL_METHOD devolver 0
+POP
+LOAD_VAR usuario
+LOAD_VAR usuario
+GET_PROPERTY LivrosEmprestados
+LOAD_CONST_INT 1
+SUB
+SET_PROPERTY LivrosEmprestados
+POP
+LOAD_CONST_STR 📥 DEVOLUÇÃO REALIZADA:
+PRINT
+LOAD_CONST_STR  Livro: 
+LOAD_VAR livro
+GET_PROPERTY Titulo
+ADD
+PRINT
+LOAD_CONST_STR  Usuário: 
+LOAD_VAR usuario
+GET_PROPERTY Nome
+ADD
+PRINT
+LOAD_CONST_NULL
+RETURN
+DEFINE_METHOD BibliotecaDigital.Sistema.Biblioteca gerarRelatorio 26 
+LOAD_CONST_STR 📊 ========== RELATÓRIO DA BIBLIOTECA ==========
+PRINT
+LOAD_CONST_STR 🏛️ Biblioteca: 
+LOAD_VAR este
+GET_PROPERTY Nome
+ADD
+PRINT
+LOAD_CONST_STR 📍 Endereço: 
+LOAD_VAR este
+GET_PROPERTY Endereco
+ADD
+PRINT
+LOAD_CONST_STR 📚 Total de Livros: 
+LOAD_VAR este
+GET_PROPERTY TotalLivros
+ADD
+PRINT
+LOAD_CONST_STR 👥 Total de Usuários: 
+LOAD_VAR este
+GET_PROPERTY TotalUsuarios
+ADD
+PRINT
+LOAD_CONST_STR ============================================
+PRINT
+LOAD_CONST_NULL
+RETURN
+DEFINE_METHOD BibliotecaDigital.Sistema.Biblioteca buscarLivrosPorCategoria 8 categoria
+LOAD_CONST_STR 🔍 Buscando livros da categoria: 
+LOAD_VAR categoria
+ADD
+PRINT
+LOAD_CONST_STR  (Simulação - em implementação real buscaria no banco de dados)
+PRINT
+LOAD_CONST_NULL
+RETURN
+END_CLASS
+DEFINE_FUNCTION BibliotecaDigital.Sistema.demonstrarSistema 217 
+LOAD_CONST_STR 🎯 ===== SISTEMA DE BIBLIOTECA DIGITAL =====
+PRINT
+LOAD_CONST_STR 
+PRINT
+LOAD_CONST_STR Biblioteca Central
+LOAD_CONST_STR Endereço não informado
+NEW_OBJECT BibliotecaDigital.Sistema.Biblioteca 2
+STORE_VAR biblioteca
+LOAD_CONST_STR 1984
+LOAD_CONST_STR George Orwell
+LOAD_CONST_STR 978-85-250-4099-1
+LOAD_CONST_INT 1949
+LOAD_CONST_STR Ficção Científica
+LOAD_CONST_INT 2
+NEW_OBJECT BibliotecaDigital.Sistema.Livro 6
+STORE_VAR livro1
+LOAD_CONST_STR Clean Code
+LOAD_CONST_STR Robert Martin
+LOAD_CONST_STR 978-0-13-235088-4
+LOAD_CONST_INT 2008
+LOAD_CONST_STR Tecnologia
+LOAD_CONST_INT 1
+NEW_OBJECT BibliotecaDigital.Sistema.Livro 6
+STORE_VAR livro2
+LOAD_CONST_STR O Pequeno Príncipe
+LOAD_CONST_STR Antoine de Saint-Exupéry
+LOAD_CONST_STR 978-85-325-2734-9
+LOAD_CONST_INT 2024
+LOAD_CONST_STR Geral
+LOAD_CONST_INT 1
+NEW_OBJECT BibliotecaDigital.Sistema.Livro 6
+STORE_VAR livro3
+LOAD_VAR biblioteca
+LOAD_VAR livro1
+CALL_METHOD adicionarLivro 1
+POP
+LOAD_VAR biblioteca
+LOAD_VAR livro2
+CALL_METHOD adicionarLivro 1
+POP
+LOAD_VAR biblioteca
+LOAD_VAR livro3
+CALL_METHOD adicionarLivro 1
+POP
+LOAD_CONST_STR 
+PRINT
+LOAD_CONST_STR Ana Silva
+LOAD_CONST_STR ana.silva@email.com
+LOAD_CONST_STR 11987654321
+LOAD_CONST_STR Premium
+LOAD_CONST_INT 5
+NEW_OBJECT BibliotecaDigital.Sistema.Usuario 5
+STORE_VAR usuario1
+LOAD_CONST_STR Joana Silva
+LOAD_CONST_STR joana@email.com
+LOAD_CONST_STR 11876543210
+LOAD_CONST_STR Comum
+LOAD_CONST_INT 3
+NEW_OBJECT BibliotecaDigital.Sistema.Usuario 5
+STORE_VAR usuario2
+LOAD_CONST_STR Maria Oliveira
+LOAD_CONST_STR maria@email.com
+LOAD_CONST_STR 
+LOAD_CONST_STR Comum
+LOAD_CONST_INT 3
+NEW_OBJECT BibliotecaDigital.Sistema.Usuario 5
+STORE_VAR usuario3
+LOAD_VAR biblioteca
+LOAD_VAR usuario1
+CALL_METHOD cadastrarUsuario 1
+POP
+LOAD_VAR biblioteca
+LOAD_VAR usuario2
+CALL_METHOD cadastrarUsuario 1
+POP
+LOAD_VAR biblioteca
+LOAD_VAR usuario3
+CALL_METHOD cadastrarUsuario 1
+POP
+LOAD_CONST_STR 
+PRINT
+LOAD_CONST_STR 📋 CATÁLOGO DE LIVROS:
+PRINT
+LOAD_VAR livro1
+CALL_METHOD apresentarDetalhes 0
+POP
+LOAD_CONST_STR 
+PRINT
+LOAD_VAR livro2
+LOAD_CONST_BOOL false
+CALL_METHOD apresentarDetalhes 1
+POP
+LOAD_VAR livro3
+LOAD_CONST_BOOL false
+CALL_METHOD apresentarDetalhes 1
+POP
+LOAD_CONST_STR 
+PRINT
+LOAD_CONST_STR 👥 USUÁRIOS CADASTRADOS:
+PRINT
+LOAD_VAR usuario1
+CALL_METHOD apresentarPerfil 0
+POP
+LOAD_CONST_STR 
+PRINT
+LOAD_VAR usuario2
+CALL_METHOD apresentarPerfil 0
+POP
+LOAD_CONST_STR 
+PRINT
+LOAD_CONST_STR 📖 REALIZANDO EMPRÉSTIMOS:
+PRINT
+LOAD_VAR biblioteca
+LOAD_VAR usuario1
+LOAD_VAR livro1
+CALL_METHOD realizarEmprestimo 2
+POP
+LOAD_VAR biblioteca
+LOAD_VAR usuario1
+LOAD_VAR livro2
+CALL_METHOD realizarEmprestimo 2
+POP
+LOAD_VAR biblioteca
+LOAD_VAR usuario2
+LOAD_VAR livro1
+CALL_METHOD realizarEmprestimo 2
+POP
+LOAD_VAR biblioteca
+LOAD_VAR usuario2
+LOAD_VAR livro3
+CALL_METHOD realizarEmprestimo 2
+POP
+LOAD_CONST_STR 
+PRINT
+LOAD_CONST_STR 📊 STATUS APÓS EMPRÉSTIMOS:
+PRINT
+LOAD_VAR livro1
+LOAD_CONST_BOOL false
+CALL_METHOD apresentarDetalhes 1
+POP
+LOAD_VAR livro2
+LOAD_CONST_BOOL false
+CALL_METHOD apresentarDetalhes 1
+POP
+LOAD_VAR livro3
+LOAD_CONST_BOOL false
+CALL_METHOD apresentarDetalhes 1
+POP
+LOAD_CONST_STR 
+PRINT
+LOAD_CONST_STR 📥 REALIZANDO DEVOLUÇÕES:
+PRINT
+LOAD_VAR biblioteca
+LOAD_VAR usuario1
+LOAD_VAR livro1
+CALL_METHOD realizarDevolucao 2
+POP
+LOAD_CONST_STR 
+PRINT
+LOAD_VAR livro1
+LOAD_CONST_BOOL false
+CALL_METHOD apresentarDetalhes 1
+POP
+LOAD_CONST_STR 
+PRINT
+LOAD_VAR biblioteca
+CALL_METHOD gerarRelatorio 0
+POP
+LOAD_VAR biblioteca
+LOAD_CONST_STR Literatura
+CALL_METHOD buscarLivrosPorCategoria 1
+POP
+LOAD_VAR biblioteca
+LOAD_CONST_STR Tecnologia
+CALL_METHOD buscarLivrosPorCategoria 1
+POP
+LOAD_CONST_STR 
+PRINT
+LOAD_CONST_STR ✨ Sistema funcionando perfeitamente!
+PRINT
+LOAD_CONST_INT 0
+STORE_VAR totalOperacoes
+LOAD_CONST_STR 🧮 CONTABILIZANDO OPERAÇÕES DO SISTEMA:
+PRINT
+LOAD_VAR totalOperacoes
+LOAD_CONST_INT 4
+ADD
+STORE_VAR totalOperacoes
+LOAD_VAR totalOperacoes
+LOAD_CONST_INT 3
+ADD
+STORE_VAR totalOperacoes
+LOAD_VAR totalOperacoes
+LOAD_CONST_INT 4
+ADD
+STORE_VAR totalOperacoes
+LOAD_VAR totalOperacoes
+LOAD_CONST_INT 1
+ADD
+STORE_VAR totalOperacoes
+LOAD_CONST_STR 📈 Total de operações realizadas: 
+LOAD_VAR totalOperacoes
+ADD
+PRINT
+LOAD_VAR totalOperacoes
+LOAD_CONST_INT 10
+COMPARE_GT
+JUMP_IF_FALSE 211
+LOAD_CONST_STR 🎯 Sistema com alta atividade!
+PRINT
+JUMP 213
+LOAD_CONST_STR 📊 Sistema com atividade moderada.
+PRINT
+LOAD_CONST_STR 🏁 ===== FIM DA DEMONSTRAÇÃO =====
+PRINT
+LOAD_CONST_NULL
+RETURN
