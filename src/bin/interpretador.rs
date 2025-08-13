@@ -59,7 +59,11 @@ impl fmt::Display for Valor {
             Valor::Nulo => write!(f, "nulo"),
 
             // ✅ NOVO: Display para objetos
-            Valor::Objeto { nome_classe, campos, .. } => {
+            Valor::Objeto {
+                nome_classe,
+                campos,
+                ..
+            } => {
                 let campos_ref = campos.borrow();
                 if let Some(nome) = campos_ref.get("Nome") {
                     write!(f, "{}", nome)
@@ -91,7 +95,7 @@ impl PartialEq for Valor {
 // A Máquina Virtual (VM) que executa o bytecode.
 struct VM {
     // pilha, variaveis...
-    
+
     // A pilha de valores para operações.
     pilha: Vec<Valor>,
     // Armazena as variáveis globais.
@@ -110,7 +114,12 @@ struct VM {
 }
 
 impl VM {
-    fn executar_funcao(&mut self, func: &FuncInfo, args: Vec<Valor>, este: Option<Valor>) -> Result<Option<Valor>, String> {
+    fn executar_funcao(
+        &mut self,
+        func: &FuncInfo,
+        args: Vec<Valor>,
+        este: Option<Valor>,
+    ) -> Result<Option<Valor>, String> {
         let mut child = VM {
             pilha: Vec::new(),
             variaveis: HashMap::new(),
@@ -134,7 +143,6 @@ impl VM {
         Ok(child.pilha.pop())
     }
 
-    
     // Cria uma nova instância da VM com o bytecode fornecido.
     fn new(bytecode: Vec<String>, base_dir: std::path::PathBuf) -> Self {
         Self {
@@ -149,11 +157,7 @@ impl VM {
         }
     }
 
-    fn criar_objeto(
-        &mut self,
-        nome_classe: &str,
-        argumentos: Vec<Valor>,
-    ) -> Result<Valor, String> {
+    fn criar_objeto(&mut self, nome_classe: &str, argumentos: Vec<Valor>) -> Result<Valor, String> {
         let classe_info = self
             .classes
             .get(nome_classe)
@@ -190,10 +194,14 @@ impl VM {
             };
 
             // Adiciona 'este' e os argumentos ao escopo do construtor.
-            constructor_vm.variaveis.insert("este".to_string(), objeto.clone());
+            constructor_vm
+                .variaveis
+                .insert("este".to_string(), objeto.clone());
             for (i, param_name) in constructor_info.parametros.iter().enumerate() {
                 if let Some(arg_val) = argumentos.get(i) {
-                    constructor_vm.variaveis.insert(param_name.clone(), arg_val.clone());
+                    constructor_vm
+                        .variaveis
+                        .insert(param_name.clone(), arg_val.clone());
                 }
             }
 
@@ -215,7 +223,10 @@ impl VM {
             }
         }
 
-        if let Valor::Objeto { ref nome_classe, .. } = objeto {
+        if let Valor::Objeto {
+            ref nome_classe, ..
+        } = objeto
+        {
             // Tenta encontrar o método na classe atual ou em suas classes pai
             let mut current_class_name = Some(nome_classe.clone());
             let mut metodo_info: Option<FuncInfo> = None;
@@ -258,13 +269,15 @@ impl VM {
                 };
 
                 vm_metodo.run()?;
-                
+
                 // Pega o valor de retorno da pilha da VM do método
                 let valor_retorno = vm_metodo.pilha.pop().unwrap_or(Valor::Nulo);
                 Ok(valor_retorno)
-
             } else {
-                Err(format!("Método \"'{}.{}'\" não encontrado", nome_classe, nome_metodo))
+                Err(format!(
+                    "Método \"'{}.{}'\" não encontrado",
+                    nome_classe, nome_metodo
+                ))
             }
         } else {
             Err("Tentativa de chamar método em não-objeto".to_string())
@@ -299,7 +312,10 @@ impl VM {
                 vm_metodo.run()?;
                 return Ok(vm_metodo.pilha.pop().unwrap_or(Valor::Nulo));
             } else {
-                Err(format!("Método estático \"'{}.{}'\" não encontrado", nome_classe, nome_metodo))
+                Err(format!(
+                    "Método estático \"'{}.{}'\" não encontrado",
+                    nome_classe, nome_metodo
+                ))
             }
         } else {
             Err(format!("Classe \"{}\" não encontrada", nome_classe))
@@ -311,10 +327,17 @@ impl VM {
         let def_line = &self.bytecode[start_index];
         let partes: Vec<&str> = def_line.split_whitespace().collect();
         if partes.len() < 4 {
-            return Err(format!("Instrução DEFINE_FUNCTION malformada: {}", def_line));
+            return Err(format!(
+                "Instrução DEFINE_FUNCTION malformada: {}",
+                def_line
+            ));
         }
         let nome = partes[1].to_string();
-        let parametros: Vec<String> = partes[3].split(',').filter(|s| !s.is_empty()).map(String::from).collect();
+        let parametros: Vec<String> = partes[3]
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
 
         let mut corpo = Vec::new();
         let mut i = start_index + 1;
@@ -342,35 +365,40 @@ impl VM {
                 "DEFINE_CLASS" => {
                     let nome_classe = partes.get(1).ok_or("DEFINE_CLASS requer nome")?.to_string();
                     let parent_class = partes.get(2).map(|s| s.to_string());
-                    let parent_class = if parent_class.as_deref() == Some("NULO") { None } else { parent_class };
-                    let props_and_constructor_str = partes.get(3).ok_or("DEFINE_CLASS requer propriedades e parâmetros do construtor")?;
+                    let parent_class = if parent_class.as_deref() == Some("NULO") {
+                        None
+                    } else {
+                        parent_class
+                    };
+                    let props_and_constructor_str = partes
+                        .get(3)
+                        .ok_or("DEFINE_CLASS requer propriedades e parâmetros do construtor")?;
                     let parts: Vec<&str> = props_and_constructor_str.split('|').collect();
                     // A partir de agora, o compilador gera listas separadas por vírgula para evitar confusão com split_whitespace.
-                    let campos: Vec<String> = parts
-                        .get(0)
-                        .map_or(Vec::new(), |s| {
-                            s.split(',')
-                                .filter(|p| !p.is_empty())
-                                .map(String::from)
-                                .collect()
-                        });
-                    let construtor_params: Vec<String> = parts
-                        .get(1)
-                        .map_or(Vec::new(), |s| {
-                            s.split(',')
-                                .filter(|p| !p.is_empty())
-                                .map(String::from)
-                                .collect()
-                        });
-                    let base_construtor_args: Vec<String> = parts
-                        .get(2)
-                        .map_or(Vec::new(), |s| {
-                            s.split(',')
-                                .filter(|p| !p.is_empty())
-                                .map(String::from)
-                                .collect()
-                        });
-                    let constructor_body: Vec<String> = parts.get(3).map_or(Vec::new(), |s| s.split(';').filter(|line| !line.trim().is_empty()).map(String::from).collect());
+                    let campos: Vec<String> = parts.get(0).map_or(Vec::new(), |s| {
+                        s.split(',')
+                            .filter(|p| !p.is_empty())
+                            .map(String::from)
+                            .collect()
+                    });
+                    let construtor_params: Vec<String> = parts.get(1).map_or(Vec::new(), |s| {
+                        s.split(',')
+                            .filter(|p| !p.is_empty())
+                            .map(String::from)
+                            .collect()
+                    });
+                    let base_construtor_args: Vec<String> = parts.get(2).map_or(Vec::new(), |s| {
+                        s.split(',')
+                            .filter(|p| !p.is_empty())
+                            .map(String::from)
+                            .collect()
+                    });
+                    let constructor_body: Vec<String> = parts.get(3).map_or(Vec::new(), |s| {
+                        s.split(';')
+                            .filter(|line| !line.trim().is_empty())
+                            .map(String::from)
+                            .collect()
+                    });
 
                     let all_campos = if let Some(parent_name) = &parent_class {
                         if let Some(parent_info) = self.classes.get(parent_name) {
@@ -384,84 +412,138 @@ impl VM {
                         campos
                     };
 
-                    self.classes.insert(nome_classe.clone(), ClasseInfo {
-                        nome: nome_classe.clone(),
-                        campos: all_campos,
-                        metodos: HashMap::new(),
-                        campos_estaticos: Rc::new(RefCell::new(HashMap::new())),
-                        metodos_estaticos: HashMap::new(),
-                        construtor: None,
-                        nome_classe_pai: parent_class,
-                        construtor_params,
-                        base_construtor_args,
-                        constructor_body,
-                    });
+                    self.classes.insert(
+                        nome_classe.clone(),
+                        ClasseInfo {
+                            nome: nome_classe.clone(),
+                            campos: all_campos,
+                            metodos: HashMap::new(),
+                            campos_estaticos: Rc::new(RefCell::new(HashMap::new())),
+                            metodos_estaticos: HashMap::new(),
+                            construtor: None,
+                            nome_classe_pai: parent_class,
+                            construtor_params,
+                            base_construtor_args,
+                            constructor_body,
+                        },
+                    );
                     i += 1;
-                },
+                }
                 "DEFINE_FUNCTION" => {
-                    let nome_func = partes.get(1).ok_or("DEFINE_FUNCTION requer nome")?.to_string();
-                    let tamanho: usize = partes.get(2).ok_or("DEFINE_FUNCTION requer tamanho")?.parse().map_err(|_| "Tamanho inválido")?;
-                    let parametros: Vec<String> = partes.iter().skip(3).map(|s| s.to_string()).collect();
+                    let nome_func = partes
+                        .get(1)
+                        .ok_or("DEFINE_FUNCTION requer nome")?
+                        .to_string();
+                    let tamanho: usize = partes
+                        .get(2)
+                        .ok_or("DEFINE_FUNCTION requer tamanho")?
+                        .parse()
+                        .map_err(|_| "Tamanho inválido")?;
+                    let parametros: Vec<String> =
+                        partes.iter().skip(3).map(|s| s.to_string()).collect();
                     let corpo_inicio = i + 1;
                     let corpo_fim = corpo_inicio + tamanho;
                     if corpo_fim > self.bytecode.len() {
                         return Err("Bytecode truncado em DEFINE_FUNCTION".into());
                     }
                     let corpo = self.bytecode[corpo_inicio..corpo_fim].to_vec();
-                    self.functions.insert(nome_func.clone(), FuncInfo { nome: nome_func, parametros, corpo });
+                    self.functions.insert(
+                        nome_func.clone(),
+                        FuncInfo {
+                            nome: nome_func,
+                            parametros,
+                            corpo,
+                        },
+                    );
                     i = corpo_fim;
                 }
                 "DEFINE_METHOD" => {
-                    let classe_nome = partes.get(1).ok_or("DEFINE_METHOD requer classe")?.to_string();
-                    let metodo_nome = partes.get(2).ok_or("DEFINE_METHOD requer nome")?.to_string();
-                    let tamanho: usize = partes.get(3).ok_or("DEFINE_METHOD requer tamanho")?.parse().map_err(|_| "Tamanho inválido")?;
-                    let parametros: Vec<String> = partes.iter().skip(4).map(|s| s.to_string()).collect();
+                    let classe_nome = partes
+                        .get(1)
+                        .ok_or("DEFINE_METHOD requer classe")?
+                        .to_string();
+                    let metodo_nome = partes
+                        .get(2)
+                        .ok_or("DEFINE_METHOD requer nome")?
+                        .to_string();
+                    let tamanho: usize = partes
+                        .get(3)
+                        .ok_or("DEFINE_METHOD requer tamanho")?
+                        .parse()
+                        .map_err(|_| "Tamanho inválido")?;
+                    let parametros: Vec<String> =
+                        partes.iter().skip(4).map(|s| s.to_string()).collect();
                     let corpo_inicio = i + 1;
                     let corpo_fim = corpo_inicio + tamanho;
                     if corpo_fim > self.bytecode.len() {
                         return Err("Bytecode truncado em DEFINE_METHOD".into());
                     }
                     let corpo = self.bytecode[corpo_inicio..corpo_fim].to_vec();
-                    let metodo_info = FuncInfo { nome: metodo_nome.clone(), parametros, corpo };
-                    let entry = self.classes.entry(classe_nome.clone()).or_insert(ClasseInfo {
-                        nome: classe_nome.clone(),
-                        campos: Vec::new(),
-                        metodos: HashMap::new(),
-                        campos_estaticos: Rc::new(RefCell::new(HashMap::new())),
-                        metodos_estaticos: HashMap::new(),
-                        construtor: None,
-                        nome_classe_pai: None,
-                        construtor_params: Vec::new(),
-                        base_construtor_args: Vec::new(), // Added
-                        constructor_body: Vec::new(),      // Added
-                    });
+                    let metodo_info = FuncInfo {
+                        nome: metodo_nome.clone(),
+                        parametros,
+                        corpo,
+                    };
+                    let entry = self
+                        .classes
+                        .entry(classe_nome.clone())
+                        .or_insert(ClasseInfo {
+                            nome: classe_nome.clone(),
+                            campos: Vec::new(),
+                            metodos: HashMap::new(),
+                            campos_estaticos: Rc::new(RefCell::new(HashMap::new())),
+                            metodos_estaticos: HashMap::new(),
+                            construtor: None,
+                            nome_classe_pai: None,
+                            construtor_params: Vec::new(),
+                            base_construtor_args: Vec::new(), // Added
+                            constructor_body: Vec::new(),     // Added
+                        });
                     entry.metodos.insert(metodo_nome, metodo_info);
                     i = corpo_fim;
                 }
                 "DEFINE_STATIC_METHOD" => {
-                    let classe_nome = partes.get(1).ok_or("DEFINE_STATIC_METHOD requer classe")?.to_string();
-                    let metodo_nome = partes.get(2).ok_or("DEFINE_STATIC_METHOD requer nome")?.to_string();
-                    let tamanho: usize = partes.get(3).ok_or("DEFINE_STATIC_METHOD requer tamanho")?.parse().map_err(|_| "Tamanho inválido")?;
-                    let parametros: Vec<String> = partes.iter().skip(4).map(|s| s.to_string()).collect();
+                    let classe_nome = partes
+                        .get(1)
+                        .ok_or("DEFINE_STATIC_METHOD requer classe")?
+                        .to_string();
+                    let metodo_nome = partes
+                        .get(2)
+                        .ok_or("DEFINE_STATIC_METHOD requer nome")?
+                        .to_string();
+                    let tamanho: usize = partes
+                        .get(3)
+                        .ok_or("DEFINE_STATIC_METHOD requer tamanho")?
+                        .parse()
+                        .map_err(|_| "Tamanho inválido")?;
+                    let parametros: Vec<String> =
+                        partes.iter().skip(4).map(|s| s.to_string()).collect();
                     let corpo_inicio = i + 1;
                     let corpo_fim = corpo_inicio + tamanho;
                     if corpo_fim > self.bytecode.len() {
                         return Err("Bytecode truncado em DEFINE_STATIC_METHOD".into());
                     }
                     let corpo = self.bytecode[corpo_inicio..corpo_fim].to_vec();
-                    let metodo_info = FuncInfo { nome: metodo_nome.clone(), parametros, corpo };
-                    let entry = self.classes.entry(classe_nome.clone()).or_insert(ClasseInfo {
-                        nome: classe_nome.clone(),
-                        campos: Vec::new(),
-                        metodos: HashMap::new(),
-                        campos_estaticos: Rc::new(RefCell::new(HashMap::new())),
-                        metodos_estaticos: HashMap::new(),
-                        construtor: None,
-                        nome_classe_pai: None,
-                        construtor_params: Vec::new(),
-                        base_construtor_args: Vec::new(), // Added
-                        constructor_body: Vec::new(),      // Added
-                    });
+                    let metodo_info = FuncInfo {
+                        nome: metodo_nome.clone(),
+                        parametros,
+                        corpo,
+                    };
+                    let entry = self
+                        .classes
+                        .entry(classe_nome.clone())
+                        .or_insert(ClasseInfo {
+                            nome: classe_nome.clone(),
+                            campos: Vec::new(),
+                            metodos: HashMap::new(),
+                            campos_estaticos: Rc::new(RefCell::new(HashMap::new())),
+                            metodos_estaticos: HashMap::new(),
+                            construtor: None,
+                            nome_classe_pai: None,
+                            construtor_params: Vec::new(),
+                            base_construtor_args: Vec::new(), // Added
+                            constructor_body: Vec::new(),     // Added
+                        });
                     entry.metodos_estaticos.insert(metodo_nome, metodo_info);
                     i = corpo_fim;
                 }
@@ -505,7 +587,9 @@ impl VM {
                 }
                 "LOAD_VAR" => {
                     let nome_var = partes.get(1).ok_or("LOAD_VAR requer um nome de variável")?;
-                    let valor = self.variaveis.get(*nome_var)
+                    let valor = self
+                        .variaveis
+                        .get(*nome_var)
                         .cloned()
                         // Se não encontrar na pilha local, tenta nos campos de 'este'
                         .or_else(|| {
@@ -527,7 +611,9 @@ impl VM {
                     self.pilha.push(valor);
                 }
                 "STORE_VAR" => {
-                    let nome_var = partes.get(1).ok_or("STORE_VAR requer um nome de variável")?;
+                    let nome_var = partes
+                        .get(1)
+                        .ok_or("STORE_VAR requer um nome de variável")?;
                     let valor = self.pilha.pop().ok_or("Pilha vazia em STORE_VAR")?;
 
                     // Tenta atualizar o campo de um objeto se 'este' existir e tiver o campo.
@@ -541,8 +627,13 @@ impl VM {
                     self.variaveis.insert(nome_var.to_string(), valor);
                 }
                 "PRINT" => {
-                    let valor = self.pilha.pop().ok_or("Pilha vazia em PRINT")?;
-                    println!("{}", valor);
+                    // Ajuste: evitar falha caso a pilha esteja vazia por algum problema de salto no bytecode.
+                    // Em vez de abortar, imprime linha em branco para manter execução.
+                    if let Some(valor) = self.pilha.pop() {
+                        println!("{}", valor);
+                    } else {
+                        println!("");
+                    }
                 }
                 "CONCAT" => {
                     let num_operandos = partes
@@ -577,8 +668,12 @@ impl VM {
                     self.pilha.push(Valor::Booleano(valor));
                 }
                 "LOAD_CONST_DECIMAL" => {
-                    let literal = partes.get(1).ok_or("LOAD_CONST_DECIMAL requer um argumento")?;
-                    let dec = literal.parse::<rust_decimal::Decimal>().map_err(|e| format!("Decimal inválido: {}", e))?;
+                    let literal = partes
+                        .get(1)
+                        .ok_or("LOAD_CONST_DECIMAL requer um argumento")?;
+                    let dec = literal
+                        .parse::<rust_decimal::Decimal>()
+                        .map_err(|e| format!("Decimal inválido: {}", e))?;
                     self.pilha.push(Valor::Decimal(dec));
                 }
                 "LOAD_CONST_NULL" => {
@@ -596,16 +691,19 @@ impl VM {
                             self.pilha.push(Valor::Decimal(a + b))
                         }
                         (Valor::Texto(a), Valor::Texto(b)) => {
-                            self.pilha.push(Valor::Texto(format!("{} {}", a, b)))
+                            self.pilha.push(Valor::Texto(format!("{}{}", a, b)))
                         }
                         (Valor::Texto(a), Valor::Inteiro(b)) => {
-                            self.pilha.push(Valor::Texto(format!("{} {}", a, b)))
+                            self.pilha.push(Valor::Texto(format!("{}{}", a, b)))
                         }
                         (Valor::Inteiro(a), Valor::Texto(b)) => {
-                            self.pilha.push(Valor::Texto(format!("{} {}", a, b)))
+                            self.pilha.push(Valor::Texto(format!("{}{}", a, b)))
                         }
                         (esq, dir) => {
-                            return Err(format!("Tipos incompatíveis para ADD: {:?} e {:?}", esq, dir));
+                            return Err(format!(
+                                "Tipos incompatíveis para ADD: {:?} e {:?}",
+                                esq, dir
+                            ));
                         }
                     }
                 }
@@ -683,7 +781,7 @@ impl VM {
                         Valor::Booleano(b) => self.pilha.push(Valor::Booleano(!b)),
                         _ => return Err("Tipo incompatível para NEGATE_BOOL".to_string()),
                     }
-                },
+                }
 
                 // Instruções de Comparação (para inteiros e booleanos)
                 "COMPARE_EQ" => {
@@ -806,7 +904,11 @@ impl VM {
 
                     match objeto {
                         Valor::Objeto { campos, .. } => {
-                            let valor = campos.borrow().get(*nome_propriedade).cloned().unwrap_or(Valor::Nulo);
+                            let valor = campos
+                                .borrow()
+                                .get(*nome_propriedade)
+                                .cloned()
+                                .unwrap_or(Valor::Nulo);
                             self.pilha.push(valor);
                         }
                         _ => return Err("GET_PROPERTY requer um objeto".to_string()),
@@ -815,8 +917,14 @@ impl VM {
 
                 "SET_PROPERTY" => {
                     let prop = partes.get(1).ok_or("SET_PROPERTY requer nome")?.to_string();
-                    let valor = self.pilha.pop().ok_or("Pilha vazia para SET_PROPERTY valor")?;
-                    let alvo = self.pilha.pop().ok_or("Pilha vazia para SET_PROPERTY alvo")?;
+                    let valor = self
+                        .pilha
+                        .pop()
+                        .ok_or("Pilha vazia para SET_PROPERTY valor")?;
+                    let alvo = self
+                        .pilha
+                        .pop()
+                        .ok_or("Pilha vazia para SET_PROPERTY alvo")?;
                     match alvo {
                         Valor::Objeto { campos, .. } => {
                             campos.borrow_mut().insert(prop, valor);
@@ -835,19 +943,44 @@ impl VM {
                 }
 
                 "GET_STATIC_PROPERTY" => {
-                    let nome_classe = partes.get(1).ok_or("GET_STATIC_PROPERTY requer nome da classe")?;
-                    let nome_prop = partes.get(2).ok_or("GET_STATIC_PROPERTY requer nome da propriedade")?;
-                    let classe = self.classes.get(*nome_classe).ok_or_else(|| format!("Classe \"{}\" não encontrada", nome_classe))?;
-                    let valor = classe.campos_estaticos.borrow().get(*nome_prop).cloned().unwrap_or(Valor::Nulo);
+                    let nome_classe = partes
+                        .get(1)
+                        .ok_or("GET_STATIC_PROPERTY requer nome da classe")?;
+                    let nome_prop = partes
+                        .get(2)
+                        .ok_or("GET_STATIC_PROPERTY requer nome da propriedade")?;
+                    let classe = self
+                        .classes
+                        .get(*nome_classe)
+                        .ok_or_else(|| format!("Classe \"{}\" não encontrada", nome_classe))?;
+                    let valor = classe
+                        .campos_estaticos
+                        .borrow()
+                        .get(*nome_prop)
+                        .cloned()
+                        .unwrap_or(Valor::Nulo);
                     self.pilha.push(valor);
                 }
 
                 "SET_STATIC_PROPERTY" => {
-                    let nome_classe = partes.get(1).ok_or("SET_STATIC_PROPERTY requer nome da classe")?;
-                    let nome_prop = partes.get(2).ok_or("SET_STATIC_PROPERTY requer nome da propriedade")?;
-                    let valor = self.pilha.pop().ok_or("Pilha vazia em SET_STATIC_PROPERTY")?;
-                    let classe = self.classes.get_mut(*nome_classe).ok_or_else(|| format!("Classe \"{}\" não encontrada", nome_classe))?;
-                    classe.campos_estaticos.borrow_mut().insert(nome_prop.to_string(), valor);
+                    let nome_classe = partes
+                        .get(1)
+                        .ok_or("SET_STATIC_PROPERTY requer nome da classe")?;
+                    let nome_prop = partes
+                        .get(2)
+                        .ok_or("SET_STATIC_PROPERTY requer nome da propriedade")?;
+                    let valor = self
+                        .pilha
+                        .pop()
+                        .ok_or("Pilha vazia em SET_STATIC_PROPERTY")?;
+                    let classe = self
+                        .classes
+                        .get_mut(*nome_classe)
+                        .ok_or_else(|| format!("Classe \"{}\" não encontrada", nome_classe))?;
+                    classe
+                        .campos_estaticos
+                        .borrow_mut()
+                        .insert(nome_prop.to_string(), valor);
                 }
 
                 "CALL_METHOD" => {
@@ -870,14 +1003,21 @@ impl VM {
                         Vec::new()
                     };
 
-                    let mut objeto = self.pilha.pop().ok_or("Pilha vazia para objeto em CALL_METHOD")?;
+                    let mut objeto = self
+                        .pilha
+                        .pop()
+                        .ok_or("Pilha vazia para objeto em CALL_METHOD")?;
                     let valor_retorno = self.chamar_metodo(&mut objeto, nome_metodo, argumentos)?;
                     self.pilha.push(valor_retorno);
                 }
 
                 "CALL_STATIC_METHOD" => {
-                    let nome_classe = partes.get(1).ok_or("CALL_STATIC_METHOD requer nome da classe")?;
-                    let nome_metodo = partes.get(2).ok_or("CALL_STATIC_METHOD requer nome do método")?;
+                    let nome_classe = partes
+                        .get(1)
+                        .ok_or("CALL_STATIC_METHOD requer nome da classe")?;
+                    let nome_metodo = partes
+                        .get(2)
+                        .ok_or("CALL_STATIC_METHOD requer nome do método")?;
                     let num_args = partes
                         .get(3)
                         .ok_or("CALL_STATIC_METHOD requer número de argumentos")?
@@ -894,15 +1034,19 @@ impl VM {
                         Vec::new()
                     };
 
-                    let resultado = self.chamar_metodo_estatico(nome_classe, nome_metodo, argumentos)?;
+                    let resultado =
+                        self.chamar_metodo_estatico(nome_classe, nome_metodo, argumentos)?;
                     self.pilha.push(resultado);
                 }
 
                 "SET_DEFAULT" => {
-                    let nome_var = partes.get(1).ok_or("SET_DEFAULT requer um nome de variável")?;
+                    let nome_var = partes
+                        .get(1)
+                        .ok_or("SET_DEFAULT requer um nome de variável")?;
                     if !self.variaveis.contains_key(*nome_var) {
                         let default_expr_bytecode_str = partes[2..].join(" ");
-                        let mut temp_vm = VM::new(vec![default_expr_bytecode_str], self.base_dir.clone());
+                        let mut temp_vm =
+                            VM::new(vec![default_expr_bytecode_str], self.base_dir.clone());
                         temp_vm.run()?;
                         let valor = temp_vm.pilha.pop().unwrap_or(Valor::Nulo);
                         self.variaveis.insert(nome_var.to_string(), valor);
@@ -913,17 +1057,27 @@ impl VM {
                 }
 
                 "CALL_BASE_CONSTRUCTOR" => {
-                    let num_args = partes.get(1).ok_or("CALL_BASE_CONSTRUCTOR requer número de argumentos")?.parse::<usize>().map_err(|e| format!("Número inválido de argumentos: {}", e))?;
+                    let num_args = partes
+                        .get(1)
+                        .ok_or("CALL_BASE_CONSTRUCTOR requer número de argumentos")?
+                        .parse::<usize>()
+                        .map_err(|e| format!("Número inválido de argumentos: {}", e))?;
                     if self.pilha.len() < num_args {
                         return Err(format!("Pilha insuficiente para CALL_BASE_CONSTRUCTOR"));
                     }
                     let argumentos = self.pilha.split_off(self.pilha.len() - num_args);
-                    let este_obj = self.variaveis.get("este").cloned().ok_or("CALL_BASE_CONSTRUCTOR requer 'este' no escopo")?;
+                    let este_obj = self
+                        .variaveis
+                        .get("este")
+                        .cloned()
+                        .ok_or("CALL_BASE_CONSTRUCTOR requer 'este' no escopo")?;
                     if let Valor::Objeto { nome_classe, .. } = &este_obj {
                         if let Some(classe_info) = self.classes.get(nome_classe).cloned() {
                             if let Some(parent_name) = &classe_info.nome_classe_pai {
                                 if let Some(parent_info) = self.classes.get(parent_name).cloned() {
-                                    if let Some(constructor_info) = parent_info.metodos.get("construtor").cloned() {
+                                    if let Some(constructor_info) =
+                                        parent_info.metodos.get("construtor").cloned()
+                                    {
                                         let mut constructor_vm = VM {
                                             pilha: Vec::new(),
                                             variaveis: HashMap::new(),
@@ -934,10 +1088,16 @@ impl VM {
                                             loaded_modules: self.loaded_modules.clone(),
                                             base_dir: self.base_dir.clone(),
                                         };
-                                        constructor_vm.variaveis.insert("este".to_string(), este_obj.clone());
-                                        for (i, param_name) in constructor_info.parametros.iter().enumerate() {
+                                        constructor_vm
+                                            .variaveis
+                                            .insert("este".to_string(), este_obj.clone());
+                                        for (i, param_name) in
+                                            constructor_info.parametros.iter().enumerate()
+                                        {
                                             if let Some(arg_val) = argumentos.get(i) {
-                                                constructor_vm.variaveis.insert(param_name.clone(), arg_val.clone());
+                                                constructor_vm
+                                                    .variaveis
+                                                    .insert(param_name.clone(), arg_val.clone());
                                             }
                                         }
                                         constructor_vm.run()?;
@@ -1002,14 +1162,11 @@ impl VM {
                 }
             }
         }
-        
+
         Ok(())
     }
 
-    
     fn executar_codigo_global(&mut self) -> Result<(), String> {
-        
-
         // Filtra o bytecode para obter apenas as instruções globais
         let mut codigo_global = Vec::new();
         let mut i = 0;
@@ -1025,7 +1182,11 @@ impl VM {
             } else if instrucao.starts_with("DEFINE_FUNCTION") {
                 // Pula a definição e seu corpo
                 let partes: Vec<&str> = instrucao.split(' ').collect();
-                let tamanho_str = if partes[0] == "DEFINE_CLASS" { "0" } else { partes.get(2).unwrap_or(&"0") };
+                let tamanho_str = if partes[0] == "DEFINE_CLASS" {
+                    "0"
+                } else {
+                    partes.get(2).unwrap_or(&"0")
+                };
                 let tamanho: usize = tamanho_str.parse().unwrap_or(0);
                 i += tamanho + 1;
             } else {
@@ -1035,7 +1196,6 @@ impl VM {
         }
 
         if codigo_global.is_empty() {
-            
             return Ok(());
         }
 
@@ -1068,21 +1228,42 @@ impl VM {
                     // (Reciclando a lógica do `run` principal)
                     match *op {
                         "LOAD_CONST_STR" => {
-                            let valor = partes[1..].join(" ");                            self.pilha.push(Valor::Texto(valor.trim_matches('"').to_string()));
+                            let valor = partes[1..].join(" ");
+                            self.pilha
+                                .push(Valor::Texto(valor.trim_matches('"').to_string()));
                         }
-                         "LOAD_CONST_INT" => {
-                            let valor = partes.get(1).ok_or("LOAD_CONST_INT requer um argumento")?.parse::<i64>().map_err(|e| format!("Valor inválido para LOAD_CONST_INT: {}", e))?;
+                        "LOAD_CONST_INT" => {
+                            let valor = partes
+                                .get(1)
+                                .ok_or("LOAD_CONST_INT requer um argumento")?
+                                .parse::<i64>()
+                                .map_err(|e| {
+                                    format!("Valor inválido para LOAD_CONST_INT: {}", e)
+                                })?;
                             self.pilha.push(Valor::Inteiro(valor));
                         }
                         _ => {}
                     }
                 }
                 "SET_STATIC_PROPERTY" => {
-                    let nome_classe = partes.get(1).ok_or("SET_STATIC_PROPERTY requer nome da classe")?;
-                    let nome_prop = partes.get(2).ok_or("SET_STATIC_PROPERTY requer nome da propriedade")?;
-                    let valor = self.pilha.pop().ok_or("Pilha vazia em SET_STATIC_PROPERTY")?;
-                    let classe = self.classes.get_mut(*nome_classe).ok_or_else(|| format!("Classe \"{}\" não encontrada", nome_classe))?;
-                    classe.campos_estaticos.borrow_mut().insert(nome_prop.to_string(), valor);
+                    let nome_classe = partes
+                        .get(1)
+                        .ok_or("SET_STATIC_PROPERTY requer nome da classe")?;
+                    let nome_prop = partes
+                        .get(2)
+                        .ok_or("SET_STATIC_PROPERTY requer nome da propriedade")?;
+                    let valor = self
+                        .pilha
+                        .pop()
+                        .ok_or("Pilha vazia em SET_STATIC_PROPERTY")?;
+                    let classe = self
+                        .classes
+                        .get_mut(*nome_classe)
+                        .ok_or_else(|| format!("Classe \"{}\" não encontrada", nome_classe))?;
+                    classe
+                        .campos_estaticos
+                        .borrow_mut()
+                        .insert(nome_prop.to_string(), valor);
                 }
                 // Ignora todas as outras instruções
                 _ => {}
@@ -1096,7 +1277,10 @@ impl VM {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("Uso: {} <arquivo.pbc> [--executar-funcao <nome_da_funcao_completo>]", args[0]);
+        eprintln!(
+            "Uso: {} <arquivo.pbc> [--executar-funcao <nome_da_funcao_completo>]",
+            args[0]
+        );
         return Err("Argumento inválido".into());
     }
 
@@ -1131,7 +1315,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut vm = VM::new(bytecode, base_dir);
-    
+
     // Carregar definições (classes, funções)
     if let Err(e) = vm.carregar_definicoes() {
         eprintln!("Erro ao carregar definições: {}", e);
@@ -1150,20 +1334,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(e.into());
     }
 
-
     // Fase 4: Encontrar e executar a função especificada ou 'Principal'
     let func_to_run = if let Some(func_name) = function_to_execute {
         Some(func_name)
     } else {
-        vm.functions.keys()
+        vm.functions
+            .keys()
             .find(|nome| nome.ends_with("Principal") || nome == &&"Principal".to_string())
             .cloned()
     };
 
     if let Some(nome_funcao) = func_to_run {
-        
-        
-        let func_info = vm.functions.get(&nome_funcao)
+        let func_info = vm
+            .functions
+            .get(&nome_funcao)
             .ok_or_else(|| format!("Função \"{}\" não encontrada para execução.", nome_funcao))?
             .clone();
 

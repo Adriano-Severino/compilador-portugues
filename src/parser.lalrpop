@@ -79,8 +79,8 @@ Identificador: String = {
 
 // === DECLARAÇÕES ===
 Declaracao: ast::Declaracao = {
-    <classe:DeclaracaoClasse> => ast::Declaracao::DeclaracaoClasse(classe),
     <funcao:DeclaracaoFuncao> => ast::Declaracao::DeclaracaoFuncao(funcao),
+    <classe:DeclaracaoClasse> => ast::Declaracao::DeclaracaoClasse(classe),
     <cmd:ComandoTopLevel> => ast::Declaracao::Comando(cmd),
 };
 

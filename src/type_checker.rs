@@ -614,4 +614,73 @@ impl<'a> VerificadorTipos<'a> {
             _ => Tipo::Inferido,
         }
     }
+
+    pub fn get_expr_type(&self, expressao: &Expressao, namespace_atual: &str, classe_atual: Option<&String>, escopo_vars: &HashMap<String, Tipo>) -> Tipo {
+        match expressao {
+            Expressao::Inteiro(_) => Tipo::Inteiro,
+            Expressao::Texto(_) => Tipo::Texto,
+            Expressao::Booleano(_) => Tipo::Booleano,
+            Expressao::Este => {
+                classe_atual.map_or(Tipo::Inferido, |nome| Tipo::Classe(nome.clone()))
+            }
+            Expressao::Identificador(nome) => {
+                if escopo_vars.contains_key(nome) {
+                    return escopo_vars.get(nome).unwrap().clone();
+                }
+                if let Some(class_name) = classe_atual {
+                    if let Some(class_info) = self.resolved_classes.get(class_name) {
+                        if class_info.properties.iter().any(|p| p.nome == *nome) || 
+                           class_info.fields.iter().any(|f| f.nome == *nome) {
+                            return self.get_expr_type(&Expressao::AcessoMembro(Box::new(Expressao::Este), nome.clone()), namespace_atual, classe_atual, escopo_vars);
+                        }
+                    }
+                }
+                let fqn = self.resolver_nome_classe(nome, namespace_atual);
+                if self.classes.contains_key(&fqn) {
+                    return Tipo::Classe(fqn.clone());
+                }
+                Tipo::Inferido
+            }
+            Expressao::AcessoMembro(obj_expr, membro_nome) => {
+                let obj_tipo = self.get_expr_type(
+                    obj_expr,
+                    namespace_atual,
+                    classe_atual,
+                    escopo_vars,
+                );
+                if let Tipo::Classe(nome_classe) = obj_tipo {
+                    if let Some(class_info) = self.resolved_classes.get(&nome_classe) {
+                        if let Some(prop) = class_info
+                            .properties
+                            .iter()
+                            .find(|p| p.nome == *membro_nome)
+                        {
+                            return prop.tipo.clone();
+                        }
+                        if let Some(field) = class_info
+                            .fields
+                            .iter()
+                            .find(|f| f.nome == *membro_nome)
+                        {
+                            return field.tipo.clone();
+                        }
+                    }
+                }
+                Tipo::Inferido
+            }
+            Expressao::NovoObjeto(nome_classe, _) => {
+                Tipo::Classe(self.resolver_nome_classe(nome_classe, namespace_atual))
+            }
+            Expressao::Aritmetica(_, esq, dir) => {
+                let _te =
+                    self.get_expr_type(esq, namespace_atual, classe_atual, escopo_vars);
+                let _td =
+                    self.get_expr_type(dir, namespace_atual, classe_atual, escopo_vars);
+                Tipo::Inteiro
+            }
+            Expressao::Comparacao(_, _, _) => Tipo::Booleano,
+            Expressao::Logica(_, _, _) => Tipo::Booleano,
+            _ => Tipo::Inferido,
+        }
+    }
 }

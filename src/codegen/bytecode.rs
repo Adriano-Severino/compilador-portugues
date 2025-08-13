@@ -492,7 +492,7 @@ impl<'a> BytecodeGenerator<'a> {
             }
 
             // Adicionado: Comando 'se'
-            ast::Comando::Se(condicao, bloco_if, bloco_else) => {
+                        ast::Comando::Se(condicao, bloco_if, bloco_else) => {
                 self.generate_expressao(condicao);
                 let jump_if_false_placeholder = self.bytecode_instructions.len();
                 self.bytecode_instructions.push("JUMP_IF_FALSE 0".to_string());
@@ -583,7 +583,6 @@ impl<'a> BytecodeGenerator<'a> {
 
             ast::Comando::Expressao(e) => {
                 self.generate_expressao(e);
-                self.bytecode_instructions.push("POP".into());
             },
 
             // Para outros comandos não implementados, remova a linha de comentário e implemente se necessário
