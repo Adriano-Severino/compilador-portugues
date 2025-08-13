@@ -15,7 +15,36 @@ if (!(Test-Path $interpretador)) {
     exit 1
 }
 
+$multi_file_script = ".\compile_fast_Multiplos_arquivos.sh"
+
+# Teste para programa_principal.pr e biblioteca.pr
+Write-Host "Testando programa_principal.pr e biblioteca.pr..."
+& $multi_file_script "exemplos/biblioteca.pr" "exemplos/programa_principal.pr"
+$compilou_multi = $LASTEXITCODE -eq 0
+
+if ($compilou_multi) {
+    Write-Host "Compilou OK. Testando interpretador..."
+    & $interpretador "biblioteca.pbc"
+    $executou_multi = $LASTEXITCODE -eq 0
+    if ($executou_multi) {
+        Write-Host "Interpretador OK.`n"
+        $resultados += [PSCustomObject]@{Arquivo="programa_principal.pr + biblioteca.pr"; Status="OK"; Detalhe="Compilou e interpretador OK"}
+    } else {
+        Write-Host "ERRO: Falha no interpretador para múltiplos arquivos.`n"
+        $resultados += [PSCustomObject]@{Arquivo="programa_principal.pr + biblioteca.pr"; Status="FALHOU"; Detalhe="Falha no interpretador para múltiplos arquivos"}
+    }
+} else {
+    Write-Host "ERRO: Falha na compilação para múltiplos arquivos.`n"
+    $resultados += [PSCustomObject]@{Arquivo="programa_principal.pr + biblioteca.pr"; Status="FALHOU"; Detalhe="Falha na compilação para múltiplos arquivos"}
+}
+
+# Testes para arquivos individuais
 foreach ($exemplo in $exemplos) {
+    # Ignorar programa_principal.pr e biblioteca.pr, pois já foram testados
+    if ($exemplo.Name -eq "programa_principal.pr" -or $exemplo.Name -eq "biblioteca.pr") {
+        continue
+    }
+
     Write-Host "Testando $($exemplo.Name)..."
     & $compilador $exemplo.FullName --target bytecode
     $compilou = $LASTEXITCODE -eq 0
