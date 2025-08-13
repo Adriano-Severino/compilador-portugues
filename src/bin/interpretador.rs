@@ -499,7 +499,19 @@ impl VM {
                             base_construtor_args: Vec::new(), // Added
                             constructor_body: Vec::new(),     // Added
                         });
-                    entry.metodos.insert(metodo_nome, metodo_info);
+                    if metodo_nome == "construtor" {
+                        if let Some(existing) = entry.metodos.get("construtor") {
+                            if existing.parametros.len() >= metodo_info.parametros.len() {
+                                // Mantém o existente (mais completo ou igual)
+                            } else {
+                                entry.metodos.insert(metodo_nome, metodo_info);
+                            }
+                        } else {
+                            entry.metodos.insert(metodo_nome, metodo_info);
+                        }
+                    } else {
+                        entry.metodos.insert(metodo_nome, metodo_info);
+                    }
                     i = corpo_fim;
                 }
                 "DEFINE_STATIC_METHOD" => {
