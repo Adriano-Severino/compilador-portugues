@@ -252,6 +252,21 @@ fn test_negative_circular_inheritance_should_fail() {
 }
 
 #[test]
+fn test_negative_override_without_virtual_should_fail() {
+    // Pai com método não virtual, filho usa 'sobrescreve' => erro
+    let temp_dir = repo_root().join("target").join("test-temp-override");
+    std::fs::create_dir_all(&temp_dir).ok();
+    let p = temp_dir.join("override_invalido.pr");
+    let src = r#"espaco T{ publico classe P{ publico vazio F(){ imprima("P"); } } publico classe C : P{ publico sobrescreve vazio F(){ imprima("C"); } } } publico função vazio Principal(){ var c = novo T.C(); c.F(); }"#;
+    std::fs::write(&p, src).unwrap();
+    let path_str = p.to_string_lossy().to_string();
+    let args = vec![path_str.as_str(), "--target=bytecode"];
+    let (code, _o, e) = run_compiler(&args);
+    assert_ne!(code, 0, "Deveria falhar: override sem virtual no pai");
+    assert!(e.to_lowercase().contains("sobrescreve") || e.to_lowercase().contains("override"));
+}
+
+#[test]
 fn test_negative_three_level_circular_inheritance_should_fail() {
     // A -> B -> C -> A
     let temp_dir = repo_root().join("target").join("test-temp-ciclo3");

@@ -106,6 +106,32 @@ impl<'a> VerificadorTipos<'a> {
         }
     }
 
+    fn assinatura_metodo(&self, m: &'a ast::MetodoClasse) -> (Option<Tipo>, Vec<Tipo>) {
+        let ret = m.tipo_retorno.clone().or(Some(Tipo::Vazio));
+        let params = m.parametros.iter().map(|p| p.tipo.clone()).collect();
+        (ret, params)
+    }
+
+    fn encontrar_metodo_na_base(
+        &self,
+        mut parent_name: Option<String>,
+        nome: &str,
+    ) -> Option<&'a ast::MetodoClasse> {
+        while let Some(pn) = parent_name {
+            if let Some(parent_decl) = self.classes.get(&pn) {
+                if let Some(found) = parent_decl.metodos.iter().find(|m| m.nome == nome) {
+                    return Some(found);
+                }
+                parent_name = parent_decl.classe_pai.clone().map(|simple| {
+                    self.resolver_nome_classe(&simple, &self.get_namespace_from_full_name(&pn))
+                });
+            } else {
+                break;
+            }
+        }
+        None
+    }
+
     fn resolve_class_hierarchy(&mut self, class_name: &str, class_decl: &'a DeclaracaoClasse) {
         let mut stack: Vec<String> = Vec::new();
         self.resolve_class_hierarchy_with_stack(class_name, class_decl, &mut stack);
@@ -439,6 +465,36 @@ impl<'a> VerificadorTipos<'a> {
                 }
                 for metodo in &classe.metodos {
                     let mut metodo_vars = escopo_vars.clone();
+                    // Validação de override/virtual
+                    if let Some(parent_simple) = &classe.classe_pai {
+                        let parent_fqn = self.resolver_nome_classe(parent_simple, namespace_atual);
+                        if metodo.eh_override {
+                            if let Some(base_m) = self
+                                .encontrar_metodo_na_base(Some(parent_fqn.clone()), &metodo.nome)
+                            {
+                                if !base_m.eh_virtual {
+                                    self.erros.push(format!(
+                                        "Método '{}' em '{}' usa 'sobrescreve' mas o método da classe base não é 'redefinível'",
+                                        metodo.nome, fqn
+                                    ));
+                                } else {
+                                    let (ret_c, params_c) = self.assinatura_metodo(metodo);
+                                    let (ret_b, params_b) = self.assinatura_metodo(base_m);
+                                    if ret_c != ret_b || params_c != params_b {
+                                        self.erros.push(format!(
+                                            "Assinatura incompatível no override de '{}.{}'",
+                                            fqn, metodo.nome
+                                        ));
+                                    }
+                                }
+                            } else {
+                                self.erros.push(format!(
+                                    "Método '{}' marcado como 'sobrescreve' mas não existe método correspondente na classe base de '{}'",
+                                    metodo.nome, fqn
+                                ));
+                            }
+                        }
+                    }
                     for param in &metodo.parametros {
                         let resolved_param_type = match &param.tipo {
                             Tipo::Classe(nome_classe) => {
