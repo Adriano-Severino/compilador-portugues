@@ -15,6 +15,8 @@ use rust_decimal::Decimal;
 #[derive(Clone, Debug)]
 enum Valor {
     Inteiro(i64),
+    Flutuante(f32),
+    Duplo(f64),
     Texto(String),
     Booleano(bool),
     Decimal(Decimal),
@@ -53,6 +55,8 @@ impl fmt::Display for Valor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Valor::Inteiro(n) => write!(f, "{}", n),
+            Valor::Flutuante(x) => write!(f, "{:.6}", *x as f64),
+            Valor::Duplo(x) => write!(f, "{:.6}", x),
             Valor::Texto(s) => write!(f, "{}", s),
             Valor::Booleano(b) => write!(f, "{}", if *b { "verdadeiro" } else { "falso" }),
             Valor::Decimal(d) => write!(f, "{}", d),
@@ -80,8 +84,11 @@ impl PartialEq for Valor {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Valor::Inteiro(a), Valor::Inteiro(b)) => a == b,
+            (Valor::Flutuante(a), Valor::Flutuante(b)) => a == b,
+            (Valor::Duplo(a), Valor::Duplo(b)) => a == b,
             (Valor::Texto(a), Valor::Texto(b)) => a == b,
             (Valor::Booleano(a), Valor::Booleano(b)) => a == b,
+            (Valor::Decimal(a), Valor::Decimal(b)) => a == b,
             (Valor::Nulo, Valor::Nulo) => true,
             (Valor::Objeto { campos: a, .. }, Valor::Objeto { campos: b, .. }) => {
                 // Compara os ponteiros dos `Rc` para verificar se são a mesma instância.
@@ -591,6 +598,22 @@ impl VM {
                         .map_err(|e| format!("Valor inválido para LOAD_CONST_INT: {}", e))?;
                     self.pilha.push(Valor::Inteiro(valor));
                 }
+                "LOAD_CONST_FLOAT" => {
+                    let valor = partes
+                        .get(1)
+                        .ok_or("LOAD_CONST_FLOAT requer um argumento")?
+                        .parse::<f32>()
+                        .map_err(|e| format!("Valor inválido para LOAD_CONST_FLOAT: {}", e))?;
+                    self.pilha.push(Valor::Flutuante(valor));
+                }
+                "LOAD_CONST_DOUBLE" => {
+                    let valor = partes
+                        .get(1)
+                        .ok_or("LOAD_CONST_DOUBLE requer um argumento")?
+                        .parse::<f64>()
+                        .map_err(|e| format!("Valor inválido para LOAD_CONST_DOUBLE: {}", e))?;
+                    self.pilha.push(Valor::Duplo(valor));
+                }
                 "LOAD_CONST_STR" => {
                     // Junta as partes da string, removendo as aspas.
                     let valor = partes[1..].join(" ");
@@ -702,20 +725,43 @@ impl VM {
                         (Valor::Decimal(a), Valor::Decimal(b)) => {
                             self.pilha.push(Valor::Decimal(a + b))
                         }
+                        (Valor::Flutuante(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Flutuante(a + b))
+                        }
+                        (Valor::Duplo(a), Valor::Duplo(b)) => self.pilha.push(Valor::Duplo(a + b)),
+                        // promoções
+                        (Valor::Inteiro(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Flutuante(a as f32 + b))
+                        }
+                        (Valor::Flutuante(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Flutuante(a + b as f32))
+                        }
+                        (Valor::Inteiro(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Duplo(a as f64 + b))
+                        }
+                        (Valor::Duplo(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Duplo(a + b as f64))
+                        }
+                        (Valor::Flutuante(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Duplo(a as f64 + b))
+                        }
+                        (Valor::Duplo(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Duplo(a + b as f64))
+                        }
                         (Valor::Texto(a), Valor::Texto(b)) => {
                             self.pilha.push(Valor::Texto(format!("{}{}", a, b)))
                         }
-                        (Valor::Texto(a), Valor::Inteiro(b)) => {
-                            self.pilha.push(Valor::Texto(format!("{}{}", a, b)))
+                        (Valor::Texto(a), v) => {
+                            self.pilha.push(Valor::Texto(format!("{}{}", a, v)))
                         }
-                        (Valor::Inteiro(a), Valor::Texto(b)) => {
-                            self.pilha.push(Valor::Texto(format!("{}{}", a, b)))
+                        (v, Valor::Texto(b)) => {
+                            self.pilha.push(Valor::Texto(format!("{}{}", v, b)))
                         }
                         (esq, dir) => {
                             return Err(format!(
                                 "Tipos incompatíveis para ADD: {:?} e {:?}",
                                 esq, dir
-                            ));
+                            ))
                         }
                     }
                 }
@@ -729,6 +775,28 @@ impl VM {
                         (Valor::Decimal(a), Valor::Decimal(b)) => {
                             self.pilha.push(Valor::Decimal(a - b))
                         }
+                        (Valor::Flutuante(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Flutuante(a - b))
+                        }
+                        (Valor::Duplo(a), Valor::Duplo(b)) => self.pilha.push(Valor::Duplo(a - b)),
+                        (Valor::Inteiro(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Flutuante(a as f32 - b))
+                        }
+                        (Valor::Flutuante(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Flutuante(a - b as f32))
+                        }
+                        (Valor::Inteiro(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Duplo(a as f64 - b))
+                        }
+                        (Valor::Duplo(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Duplo(a - b as f64))
+                        }
+                        (Valor::Flutuante(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Duplo(a as f64 - b))
+                        }
+                        (Valor::Duplo(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Duplo(a - b as f64))
+                        }
                         _ => return Err("Tipos incompatíveis para SUB".to_string()),
                     }
                 }
@@ -741,6 +809,28 @@ impl VM {
                         }
                         (Valor::Decimal(a), Valor::Decimal(b)) => {
                             self.pilha.push(Valor::Decimal(a * b))
+                        }
+                        (Valor::Flutuante(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Flutuante(a * b))
+                        }
+                        (Valor::Duplo(a), Valor::Duplo(b)) => self.pilha.push(Valor::Duplo(a * b)),
+                        (Valor::Inteiro(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Flutuante(a as f32 * b))
+                        }
+                        (Valor::Flutuante(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Flutuante(a * b as f32))
+                        }
+                        (Valor::Inteiro(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Duplo(a as f64 * b))
+                        }
+                        (Valor::Duplo(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Duplo(a * b as f64))
+                        }
+                        (Valor::Flutuante(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Duplo(a as f64 * b))
+                        }
+                        (Valor::Duplo(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Duplo(a * b as f64))
                         }
                         _ => return Err("Tipos incompatíveis para MUL".to_string()),
                     }
@@ -760,6 +850,54 @@ impl VM {
                                 return Err("Divisão por zero".to_string());
                             }
                             self.pilha.push(Valor::Decimal(a / b));
+                        }
+                        (Valor::Flutuante(a), Valor::Flutuante(b)) => {
+                            if b == 0.0 {
+                                return Err("Divisão por zero".to_string());
+                            }
+                            self.pilha.push(Valor::Flutuante(a / b));
+                        }
+                        (Valor::Duplo(a), Valor::Duplo(b)) => {
+                            if b == 0.0 {
+                                return Err("Divisão por zero".to_string());
+                            }
+                            self.pilha.push(Valor::Duplo(a / b));
+                        }
+                        (Valor::Inteiro(a), Valor::Flutuante(b)) => {
+                            if b == 0.0 {
+                                return Err("Divisão por zero".to_string());
+                            }
+                            self.pilha.push(Valor::Flutuante(a as f32 / b));
+                        }
+                        (Valor::Flutuante(a), Valor::Inteiro(b)) => {
+                            if b == 0 {
+                                return Err("Divisão por zero".to_string());
+                            }
+                            self.pilha.push(Valor::Flutuante(a / b as f32));
+                        }
+                        (Valor::Inteiro(a), Valor::Duplo(b)) => {
+                            if b == 0.0 {
+                                return Err("Divisão por zero".to_string());
+                            }
+                            self.pilha.push(Valor::Duplo(a as f64 / b));
+                        }
+                        (Valor::Duplo(a), Valor::Inteiro(b)) => {
+                            if b == 0 {
+                                return Err("Divisão por zero".to_string());
+                            }
+                            self.pilha.push(Valor::Duplo(a / b as f64));
+                        }
+                        (Valor::Flutuante(a), Valor::Duplo(b)) => {
+                            if b == 0.0 {
+                                return Err("Divisão por zero".to_string());
+                            }
+                            self.pilha.push(Valor::Duplo(a as f64 / b));
+                        }
+                        (Valor::Duplo(a), Valor::Flutuante(b)) => {
+                            if b == 0.0 {
+                                return Err("Divisão por zero".to_string());
+                            }
+                            self.pilha.push(Valor::Duplo(a / b as f64));
                         }
                         _ => return Err("Tipos incompatíveis para DIV".to_string()),
                     }
@@ -783,6 +921,8 @@ impl VM {
                     match val {
                         Valor::Inteiro(n) => self.pilha.push(Valor::Inteiro(-n)),
                         Valor::Decimal(d) => self.pilha.push(Valor::Decimal(-d)),
+                        Valor::Flutuante(x) => self.pilha.push(Valor::Flutuante(-x)),
+                        Valor::Duplo(x) => self.pilha.push(Valor::Duplo(-x)),
                         _ => return Err("Tipo incompatível para NEGATE_INT".to_string()),
                     }
                 }
@@ -816,6 +956,30 @@ impl VM {
                         (Valor::Decimal(a), Valor::Decimal(b)) => {
                             self.pilha.push(Valor::Booleano(a < b))
                         }
+                        (Valor::Flutuante(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Booleano(a < b))
+                        }
+                        (Valor::Duplo(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Booleano(a < b))
+                        }
+                        (Valor::Inteiro(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Booleano((a as f32) < b))
+                        }
+                        (Valor::Flutuante(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Booleano(a < (b as f32)))
+                        }
+                        (Valor::Inteiro(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Booleano((a as f64) < b))
+                        }
+                        (Valor::Duplo(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Booleano(a < (b as f64)))
+                        }
+                        (Valor::Flutuante(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Booleano((a as f64) < b))
+                        }
+                        (Valor::Duplo(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Booleano(a < (b as f64)))
+                        }
                         _ => return Err("Tipos incompatíveis para COMPARE_LT".to_string()),
                     }
                 }
@@ -828,6 +992,30 @@ impl VM {
                         }
                         (Valor::Decimal(a), Valor::Decimal(b)) => {
                             self.pilha.push(Valor::Booleano(a > b))
+                        }
+                        (Valor::Flutuante(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Booleano(a > b))
+                        }
+                        (Valor::Duplo(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Booleano(a > b))
+                        }
+                        (Valor::Inteiro(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Booleano((a as f32) > b))
+                        }
+                        (Valor::Flutuante(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Booleano(a > (b as f32)))
+                        }
+                        (Valor::Inteiro(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Booleano((a as f64) > b))
+                        }
+                        (Valor::Duplo(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Booleano(a > (b as f64)))
+                        }
+                        (Valor::Flutuante(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Booleano((a as f64) > b))
+                        }
+                        (Valor::Duplo(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Booleano(a > (b as f64)))
                         }
                         _ => return Err("Tipos incompatíveis para COMPARE_GT".to_string()),
                     }
@@ -842,6 +1030,30 @@ impl VM {
                         (Valor::Decimal(a), Valor::Decimal(b)) => {
                             self.pilha.push(Valor::Booleano(a <= b))
                         }
+                        (Valor::Flutuante(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Booleano(a <= b))
+                        }
+                        (Valor::Duplo(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Booleano(a <= b))
+                        }
+                        (Valor::Inteiro(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Booleano((a as f32) <= b))
+                        }
+                        (Valor::Flutuante(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Booleano(a <= (b as f32)))
+                        }
+                        (Valor::Inteiro(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Booleano((a as f64) <= b))
+                        }
+                        (Valor::Duplo(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Booleano(a <= (b as f64)))
+                        }
+                        (Valor::Flutuante(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Booleano((a as f64) <= b))
+                        }
+                        (Valor::Duplo(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Booleano(a <= (b as f64)))
+                        }
                         _ => return Err("Tipos incompatíveis para COMPARE_LE".to_string()),
                     }
                 }
@@ -855,6 +1067,30 @@ impl VM {
                         }
                         (Valor::Decimal(a), Valor::Decimal(b)) => {
                             self.pilha.push(Valor::Booleano(a >= b))
+                        }
+                        (Valor::Flutuante(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Booleano(a >= b))
+                        }
+                        (Valor::Duplo(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Booleano(a >= b))
+                        }
+                        (Valor::Inteiro(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Booleano((a as f32) >= b))
+                        }
+                        (Valor::Flutuante(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Booleano(a >= (b as f32)))
+                        }
+                        (Valor::Inteiro(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Booleano((a as f64) >= b))
+                        }
+                        (Valor::Duplo(a), Valor::Inteiro(b)) => {
+                            self.pilha.push(Valor::Booleano(a >= (b as f64)))
+                        }
+                        (Valor::Flutuante(a), Valor::Duplo(b)) => {
+                            self.pilha.push(Valor::Booleano((a as f64) >= b))
+                        }
+                        (Valor::Duplo(a), Valor::Flutuante(b)) => {
+                            self.pilha.push(Valor::Booleano(a >= (b as f64)))
                         }
                         _ => return Err("Tipos incompatíveis para COMPARE_GE".to_string()),
                     }
@@ -1235,7 +1471,8 @@ impl VM {
             self.ip += 1;
 
             match *op {
-                "LOAD_CONST_STR" | "LOAD_CONST_INT" | "LOAD_CONST_BOOL" | "LOAD_CONST_NULL" => {
+                "LOAD_CONST_STR" | "LOAD_CONST_INT" | "LOAD_CONST_BOOL" | "LOAD_CONST_NULL"
+                | "LOAD_CONST_FLOAT" | "LOAD_CONST_DOUBLE" => {
                     // Executa apenas as instruções de carregamento de constantes
                     // (Reciclando a lógica do `run` principal)
                     match *op {
@@ -1243,6 +1480,16 @@ impl VM {
                             let valor = partes[1..].join(" ");
                             self.pilha
                                 .push(Valor::Texto(valor.trim_matches('"').to_string()));
+                        }
+                        "LOAD_CONST_BOOL" => {
+                            let valor = partes
+                                .get(1)
+                                .ok_or("LOAD_CONST_BOOL requer um argumento")?
+                                .parse::<bool>()
+                                .map_err(|e| {
+                                    format!("Valor inválido para LOAD_CONST_BOOL: {}", e)
+                                })?;
+                            self.pilha.push(Valor::Booleano(valor));
                         }
                         "LOAD_CONST_INT" => {
                             let valor = partes
@@ -1253,6 +1500,26 @@ impl VM {
                                     format!("Valor inválido para LOAD_CONST_INT: {}", e)
                                 })?;
                             self.pilha.push(Valor::Inteiro(valor));
+                        }
+                        "LOAD_CONST_FLOAT" => {
+                            let valor = partes
+                                .get(1)
+                                .ok_or("LOAD_CONST_FLOAT requer um argumento")?
+                                .parse::<f32>()
+                                .map_err(|e| {
+                                    format!("Valor inválido para LOAD_CONST_FLOAT: {}", e)
+                                })?;
+                            self.pilha.push(Valor::Flutuante(valor));
+                        }
+                        "LOAD_CONST_DOUBLE" => {
+                            let valor = partes
+                                .get(1)
+                                .ok_or("LOAD_CONST_DOUBLE requer um argumento")?
+                                .parse::<f64>()
+                                .map_err(|e| {
+                                    format!("Valor inválido para LOAD_CONST_DOUBLE: {}", e)
+                                })?;
+                            self.pilha.push(Valor::Duplo(valor));
                         }
                         _ => {}
                     }
