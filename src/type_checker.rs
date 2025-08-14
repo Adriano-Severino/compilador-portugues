@@ -107,13 +107,35 @@ impl<'a> VerificadorTipos<'a> {
     }
 
     fn resolve_class_hierarchy(&mut self, class_name: &str, class_decl: &'a DeclaracaoClasse) {
+        let mut stack: Vec<String> = Vec::new();
+        self.resolve_class_hierarchy_with_stack(class_name, class_decl, &mut stack);
+    }
+
+    fn resolve_class_hierarchy_with_stack(
+        &mut self,
+        class_name: &str,
+        class_decl: &'a DeclaracaoClasse,
+        stack: &mut Vec<String>,
+    ) {
         if self.resolved_classes.contains_key(class_name) {
             return;
         }
 
+        if stack.contains(&class_name.to_string()) {
+            // ciclo direto (auto-referência) — reporte e pare
+            let mut ciclo = stack.clone();
+            ciclo.push(class_name.to_string());
+            self.erros.push(format!(
+                "Herança circular detectada: {}",
+                ciclo.join(" -> ")
+            ));
+            return;
+        }
+
+        stack.push(class_name.to_string());
+
         // Para herança correta no backend LLVM, os membros do pai devem vir primeiro
         // no layout da classe, seguidos pelos membros específicos do filho (base-prefix layout).
-        // Por isso, começamos vazios e inserimos os membros do pai antes dos do filho.
         let mut properties: Vec<&'a ast::PropriedadeClasse> = Vec::new();
         let mut fields: Vec<&'a ast::CampoClasse> = Vec::new();
         let mut methods: HashMap<String, &'a ast::MetodoClasse> = class_decl
@@ -127,10 +149,20 @@ impl<'a> VerificadorTipos<'a> {
                 parent_name_simple,
                 &self.get_namespace_from_full_name(class_name),
             );
-            if let Some(parent_decl) = self.classes.get(&parent_name).copied() {
-                self.resolve_class_hierarchy(&parent_name, parent_decl);
+
+            if parent_name == class_name || stack.contains(&parent_name) {
+                // Detecta ciclo A -> ... -> B -> A
+                let mut ciclo = stack.clone();
+                ciclo.push(parent_name.clone());
+                self.erros.push(format!(
+                    "Herança circular detectada: {}",
+                    ciclo.join(" -> ")
+                ));
+            } else if let Some(parent_decl) = self.classes.get(&parent_name).copied() {
+                // Resolve pai primeiro (DFS)
+                self.resolve_class_hierarchy_with_stack(&parent_name, parent_decl, stack);
                 if let Some(parent_info) = self.resolved_classes.get(&parent_name) {
-                    // Primeiro, herda totalmente os membros do pai, preservando ordem
+                    // Herda membros do pai, preservando ordem
                     properties.extend(parent_info.properties.iter().cloned());
                     fields.extend(parent_info.fields.iter().cloned());
                     // Métodos do pai entram se não forem sobrescritos pelo filho
@@ -138,6 +170,8 @@ impl<'a> VerificadorTipos<'a> {
                         methods.entry(name.clone()).or_insert(method);
                     }
                 }
+            } else {
+                // Pai não encontrado — deixe outros checks tratarem (ou poderíamos emitir erro aqui)
             }
         }
 
@@ -165,6 +199,8 @@ impl<'a> VerificadorTipos<'a> {
                 eh_abstrata: class_decl.eh_abstrata,
             },
         );
+
+        stack.pop();
     }
 
     pub fn is_static_class(&self, class_name: &str) -> bool {
