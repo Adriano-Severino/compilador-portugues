@@ -63,7 +63,7 @@ pub enum Token {
     TRedefinivel,
     #[token("sobrescreve")]
     TSobrescreve,
-    #[token("abstrato")]
+    #[token("abstrata")]
     TAbstrato,
     #[token("novo")]
     TNovo,
@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_palavras_chave_oop() {
-        let codigo = "classe construtor publico privado protegido base redefinível sobrescreve abstrato novo este obter definir estática";
+        let codigo = "classe construtor publico privado protegido base redefinível sobrescreve abstrata novo este obter definir estática";
         let mut lex = Token::lexer(codigo);
 
         assert_eq!(lex.next(), Some(Ok(Token::TClasse)));

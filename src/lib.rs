@@ -11,27 +11,28 @@
 //! - Geração de código LLVM
 
 // Declarar módulos principais
-pub mod lexer;
 pub mod ast;
+pub mod lexer;
 // pub mod runtime; // Comentado se não estiver em uso
 pub mod codegen;
-pub mod type_checker;
-pub mod ownership;
 pub mod inferencia_tipos;
-pub mod module_system;
-pub mod stdlib;
 pub mod interpolacao;
+pub mod jit;
+pub mod module_system;
+pub mod ownership;
+pub mod stdlib;
+pub mod type_checker;
 
 // Parser usando LALRPOP
 use lalrpop_util::lalrpop_mod;
 lalrpop_mod!(pub parser);
 
 // Re-exportações básicas
-pub use ast::{Programa, Declaracao, DeclaracaoClasse, MetodoClasse, Comando, Expressao, Tipo};
-pub use lexer::Token;
-pub use type_checker::VerificadorTipos;
-pub use ownership::AnalisadorOwnership;
+pub use ast::{Comando, Declaracao, DeclaracaoClasse, Expressao, MetodoClasse, Programa, Tipo};
 pub use inferencia_tipos::InferenciaTipos;
+pub use lexer::Token;
+pub use ownership::AnalisadorOwnership;
+pub use type_checker::VerificadorTipos;
 
 // ✅ CORREÇÃO: Removida a importação do `BackendType`, que não é mais público.
 pub use codegen::GeradorCodigo;
@@ -66,12 +67,11 @@ impl<'a> CompiladorPortugues<'a> {
             // Tokenização
             use logos::Logos;
             let lex = Token::lexer(&codigo_fonte);
-            let tokens: Vec<_> = lex.spanned()
-                .filter_map(|(tok_res, span)| {
-                    match tok_res {
-                        Ok(tok) => Some((span.start, tok, span.end)),
-                        Err(_) => None,
-                    }
+            let tokens: Vec<_> = lex
+                .spanned()
+                .filter_map(|(tok_res, span)| match tok_res {
+                    Ok(tok) => Some((span.start, tok, span.end)),
+                    Err(_) => None,
                 })
                 .collect();
             if tokens.is_empty() {

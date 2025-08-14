@@ -288,8 +288,9 @@ impl<'a> LlvmGenerator<'a> {
             format!("{}.{}", namespace, class.nome)
         };
         self.classe_atual = Some(fqn);
-        // Métodos
+        // Métodos (pula abstratos)
         for metodo in &class.metodos {
+            if metodo.eh_abstrato { continue; }
             self.generate_metodo(metodo);
         }
         // Construtores
@@ -1040,6 +1041,12 @@ impl<'a> LlvmGenerator<'a> {
                 let fqn = self
                     .type_checker
                     .resolver_nome_classe(nome_classe, &self.namespace_path);
+                // Bloquear instanciação de classe abstrata
+                if let Some(class_decl) = self.type_checker.classes.get(&fqn) {
+                    if class_decl.eh_abstrata {
+                        panic!("Não é possível instanciar classe abstrata: {}", fqn);
+                    }
+                }
                 let sanitized_fqn = fqn.replace('.', "_");
                 let struct_type = format!("%class.{0}", sanitized_fqn);
                 let struct_ptr_type = format!("%class.{0}*", sanitized_fqn);

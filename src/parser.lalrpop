@@ -93,7 +93,7 @@ ModificadorAcesso: ast::ModificadorAcesso = {
 
 // === CLASSES ===
 DeclaracaoClasse: ast::DeclaracaoClasse = {
-    <modificador:ModificadorAcesso?> <estatica:("estática")?> "classe" <nome:IdentificadorSimples> <heranca:(":" <IdentificadorSimples>)?> "{" <membros:MembroClasse*> "}" => {
+    <modificador:ModificadorAcesso?> <classe_abstrata:("abstrata")?> <estatica:("estática")?> "classe" <nome:IdentificadorSimples> <heranca:(":" <IdentificadorSimples>)?> "{" <membros:MembroClasse*> "}" => {
         let mut campos = Vec::new();
         let mut propriedades = Vec::new();
         let mut metodos = Vec::new();
@@ -116,7 +116,7 @@ DeclaracaoClasse: ast::DeclaracaoClasse = {
             propriedades,
             metodos,
             construtores,
-            eh_abstrata: false,
+            eh_abstrata: classe_abstrata.is_some(),
             eh_estatica: estatica.is_some(),
         }
     }
@@ -264,6 +264,7 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
 MetodoClasse: ast::MetodoClasse = {
     <m:ModificadorAcesso?>            // publico | privado | protegido
     <estatica:("estática")?>
+    <abstrato:("abstrata")?>
     <redefinivel:("redefinível")?> 
     <sobrescreve:("sobrescreve")?> 
     <ret:Tipo>                       // inteiro | texto | Classe ...
@@ -278,9 +279,29 @@ MetodoClasse: ast::MetodoClasse = {
             corpo: b,
             eh_virtual: redefinivel.is_some(),
             eh_override: sobrescreve.is_some(),
-            eh_abstrato: false,
+            eh_abstrato: abstrato.is_some(),
             eh_estatica: estatica.is_some(),
         },
+
+    // Versão abstrata: sem corpo, termina com ';' (exige 'abstrata')
+    <m:ModificadorAcesso?>
+    <estatica:("estática")?>
+    "abstrata"
+    <redefinivel:("redefinível")?> 
+    <sobrescreve:("sobrescreve")?> 
+    <ret:Tipo>
+    <nome:IdentificadorSimples>
+    "(" <p:InnerParamList> ";" => ast::MetodoClasse {
+        nome,
+        parametros: p,
+        tipo_retorno: if ret == ast::Tipo::Vazio { None } else { Some(ret) },
+        modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
+        corpo: vec![],
+        eh_virtual: redefinivel.is_some(),
+        eh_override: sobrescreve.is_some(),
+        eh_abstrato: true, // requer palavra 'abstrato' via regra acima, mas reforçamos aqui
+        eh_estatica: estatica.is_some(),
+    },
 };
 
 /* ------------------------------------------------------------------
@@ -646,8 +667,9 @@ extern {
         "publico" => Token::TPublico,
         "privado" => Token::TPrivado,
         "protegido" => Token::TProtegido,
-        "redefinível" => Token::TRedefinivel,
-        "sobrescreve" => Token::TSobrescreve,
+    "redefinível" => Token::TRedefinivel,
+    "sobrescreve" => Token::TSobrescreve,
+    "abstrata" => Token::TAbstrato,
         "estática" => Token::TEstatica,
         "novo" => Token::TNovo,
         "este" => Token::TEste,

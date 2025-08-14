@@ -19,6 +19,8 @@ pub struct ResolvedClassInfo<'a> {
     pub fields: Vec<&'a ast::CampoClasse>,
     pub methods: HashMap<String, &'a ast::MetodoClasse>,
     pub eh_estatica: bool,
+    // nova flag não essencial para layout, mas útil para checks em codegen/semântica
+    pub eh_abstrata: bool,
 }
 
 impl<'a> VerificadorTipos<'a> {
@@ -150,6 +152,7 @@ impl<'a> VerificadorTipos<'a> {
                 fields,
                 methods,
                 eh_estatica: class_decl.eh_estatica,
+                eh_abstrata: class_decl.eh_abstrata,
             },
         );
     }
@@ -330,6 +333,37 @@ impl<'a> VerificadorTipos<'a> {
                     "DEBUG: Verificando classe \"{}\". FQN: \"{}\"",
                     classe.nome, fqn
                 );
+                // Regras de abstracao
+                // 1) Nao pode haver metodo abstrato em classe nao-abstrata
+                for m in &classe.metodos {
+                    if m.eh_abstrato && !classe.eh_abstrata {
+                        self.erros.push(format!(
+                            "Método abstrato '{}' em classe não abstrata '{}'",
+                            m.nome, fqn
+                        ));
+                    }
+                    // 2) método abstrato não pode ter corpo
+                    if m.eh_abstrato && !m.corpo.is_empty() {
+                        self.erros.push(format!(
+                            "Método abstrato '{}' não pode ter corpo em '{}'",
+                            m.nome, fqn
+                        ));
+                    }
+                    // 3) método abstrato não pode ser estático
+                    if m.eh_abstrato && m.eh_estatica {
+                        self.erros.push(format!(
+                            "Método abstrato '{}' não pode ser estático em '{}'",
+                            m.nome, fqn
+                        ));
+                    }
+                }
+                // 4) Classe estática não pode ser abstrata (como em C#)
+                if classe.eh_abstrata && classe.eh_estatica {
+                    self.erros.push(format!(
+                        "Classe '{}' não pode ser 'abstrata' e 'estática' ao mesmo tempo",
+                        fqn
+                    ));
+                }
                 for metodo in &classe.metodos {
                     let mut metodo_vars = escopo_vars.clone();
                     for param in &metodo.parametros {
@@ -345,13 +379,15 @@ impl<'a> VerificadorTipos<'a> {
                         "DEBUG: Verificando método \"{}\". Parâmetros no escopo: {:?}",
                         metodo.nome, metodo_vars
                     );
-                    for comando in &metodo.corpo {
-                        self.verificar_comando(
-                            comando,
-                            namespace_atual,
-                            Some(&fqn),
-                            &mut metodo_vars,
-                        );
+                    if !metodo.eh_abstrato {
+                        for comando in &metodo.corpo {
+                            self.verificar_comando(
+                                comando,
+                                namespace_atual,
+                                Some(&fqn),
+                                &mut metodo_vars,
+                            );
+                        }
                     }
                 }
             }
