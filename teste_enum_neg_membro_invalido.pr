@@ -1,0 +1,7 @@
+espaco TestesNeg2 {
+  enumeração Cor { Vermelho, Verde, Azul }
+  função Principal() {
+    inteiro x = Cor.Amarelo; // ERRO esperado: membro inexistente
+    imprima(x);
+  }
+}

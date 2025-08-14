@@ -750,7 +750,17 @@ impl<'a> VerificadorTipos<'a> {
                     if let Some(en) = self.enums.get(fqn_enum) {
                         if en.valores.iter().any(|v| v == membro_nome) {
                             return Tipo::Enum(fqn_enum.clone());
+                        } else {
+                            self.erros.push(format!(
+                                "Membro \"{}\" não existe no enum \"{}\".",
+                                membro_nome, fqn_enum
+                            ));
                         }
+                    } else {
+                        self.erros.push(format!(
+                            "Enum \"{}\" não encontrado ao acessar membro \"{}\".",
+                            fqn_enum, membro_nome
+                        ));
                     }
                 }
                 Tipo::Inferido

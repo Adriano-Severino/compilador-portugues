@@ -1,0 +1,8 @@
+espaco TestesNeg1 {
+  enumeração Cor { Vermelho, Verde, Azul }
+  enumeração Direcao { Norte, Sul }
+  função Principal() {
+    Cor c = Direcao.Norte; // ERRO esperado: enums diferentes não são compatíveis
+    imprima(c);
+  }
+}
