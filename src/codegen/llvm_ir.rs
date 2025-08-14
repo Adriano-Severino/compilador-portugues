@@ -19,7 +19,11 @@ pub struct LlvmGenerator<'a> {
 }
 
 impl<'a> LlvmGenerator<'a> {
-    pub fn new(programa: &'a ast::Programa, type_checker: &'a type_checker::VerificadorTipos<'a>, resolved_classes: &'a HashMap<String, type_checker::ResolvedClassInfo<'a>>) -> Self {
+    pub fn new(
+        programa: &'a ast::Programa,
+        type_checker: &'a type_checker::VerificadorTipos<'a>,
+        resolved_classes: &'a HashMap<String, type_checker::ResolvedClassInfo<'a>>,
+    ) -> Self {
         Self {
             programa,
             type_checker,
@@ -37,6 +41,7 @@ impl<'a> LlvmGenerator<'a> {
     pub fn generate(&mut self) -> String {
         self.prepare_header();
         self.define_all_structs();
+        self.define_static_globals();
 
         // Gera definições de funções e classes.
         for declaracao in &self.programa.declaracoes {
@@ -54,19 +59,42 @@ impl<'a> LlvmGenerator<'a> {
             self.generate_namespace_definitions(ns);
         }
 
-        // Gera a função `main`, que chama a função `Principal`.
+        // Gera a função `main`: executa comandos globais e, se existir, chama `Principal`.
+        let mut old_body = self.body.clone();
+        let old_vars = self.variables.clone();
+        self.body = String::new();
+        self.variables.clear();
+
         self.body.push_str("define i32 @main() {\n");
         self.body.push_str("entry:\n");
-        if let Some(principal_func) = self.find_principal_function() {
-            let fqn = self.type_checker.resolver_nome_funcao(&principal_func.nome, &self.namespace_path);
-            self.body.push_str(&format!("  call void @\"{}\"()\n", fqn.replace(".", "_")));
+
+        // Comandos globais (top-level) no namespace raiz
+        for decl in &self.programa.declaracoes {
+            if let ast::Declaracao::Comando(cmd) = decl {
+                self.generate_comando(cmd);
+            }
         }
+
+        // Se existir uma função Principal, chama-a ao final
+        if let Some(principal_func) = self.find_principal_function() {
+            let fqn = self
+                .type_checker
+                .resolver_nome_funcao(&principal_func.nome, &self.namespace_path);
+            self.body
+                .push_str(&format!("  call void @\"{}\"()\n", fqn.replace(".", "_")));
+        }
+
         self.body.push_str("  ret i32 0\n");
         self.body.push_str("}\n");
 
+        // Anexa e restaura
+        old_body.push_str(&self.body);
+        self.body = old_body;
+        self.variables = old_vars;
+
         format!("{}{}", self.header, self.body)
     }
-    
+
     fn find_principal_function(&self) -> Option<&'a ast::DeclaracaoFuncao> {
         for decl in &self.programa.declaracoes {
             if let ast::Declaracao::DeclaracaoFuncao(func) = decl {
@@ -77,7 +105,7 @@ impl<'a> LlvmGenerator<'a> {
         }
         for ns in &self.programa.namespaces {
             for decl in &ns.declaracoes {
-                 if let ast::Declaracao::DeclaracaoFuncao(func) = decl {
+                if let ast::Declaracao::DeclaracaoFuncao(func) = decl {
                     if func.nome == "Principal" {
                         return Some(func);
                     }
@@ -99,9 +127,13 @@ impl<'a> LlvmGenerator<'a> {
     fn define_struct(&mut self, fqn: &str) {
         let mut field_types_llvm = Vec::new();
         if let Some(resolved_info) = self.resolved_classes.get(fqn) {
-            let mut all_fields: Vec<(&String, &ast::Tipo)> = resolved_info.fields.iter().map(|f| (&f.nome, &f.tipo)).collect();
+            let mut all_fields: Vec<(&String, &ast::Tipo)> = resolved_info
+                .fields
+                .iter()
+                .map(|f| (&f.nome, &f.tipo))
+                .collect();
             all_fields.extend(resolved_info.properties.iter().map(|p| (&p.nome, &p.tipo)));
-            
+
             for (_, tipo) in all_fields {
                 field_types_llvm.push(self.map_type_to_llvm_storage(tipo));
             }
@@ -135,7 +167,120 @@ impl<'a> LlvmGenerator<'a> {
 
         self.namespace_path = old_namespace;
     }
-    
+
+    fn define_static_globals(&mut self) {
+        // Varre todas as classes (globais e em namespaces) e cria globais LLVM para membros estáticos com inicialização simples
+        // Suporta: inteiro/booleano; demais tipos usam zeroinitializer
+        fn process_class<'a>(
+            this: &mut LlvmGenerator<'a>,
+            fqn: &str,
+            class: &'a ast::DeclaracaoClasse,
+        ) {
+            // Campos estáticos
+            for campo in &class.campos {
+                if campo.eh_estatica {
+                    let sym = this.static_global_symbol(fqn, &campo.nome);
+                    let ty = this.map_type_to_llvm_storage(&campo.tipo);
+                    if let Some(init) = &campo.valor_inicial {
+                        if let Some((val, _)) = this.const_llvm_init_for_expr(init, &campo.tipo) {
+                            this.header.push_str(&format!(
+                                "{0} = global {1} {2}, align 4\n",
+                                sym, ty, val
+                            ));
+                        } else {
+                            this.header.push_str(&format!(
+                                "{0} = global {1} zeroinitializer, align 4\n",
+                                sym, ty
+                            ));
+                        }
+                    } else {
+                        this.header.push_str(&format!(
+                            "{0} = global {1} zeroinitializer, align 4\n",
+                            sym, ty
+                        ));
+                    }
+                }
+            }
+            // Propriedades estáticas com valor_inicial
+            for prop in &class.propriedades {
+                if prop.eh_estatica {
+                    let sym = this.static_global_symbol(fqn, &prop.nome);
+                    let ty = this.map_type_to_llvm_storage(&prop.tipo);
+                    if let Some(init) = &prop.valor_inicial {
+                        if let Some((val, _)) = this.const_llvm_init_for_expr(init, &prop.tipo) {
+                            this.header.push_str(&format!(
+                                "{0} = global {1} {2}, align 4\n",
+                                sym, ty, val
+                            ));
+                        } else {
+                            this.header.push_str(&format!(
+                                "{0} = global {1} zeroinitializer, align 4\n",
+                                sym, ty
+                            ));
+                        }
+                    } else {
+                        this.header.push_str(&format!(
+                            "{0} = global {1} zeroinitializer, align 4\n",
+                            sym, ty
+                        ));
+                    }
+                }
+            }
+        }
+
+        for decl in &self.programa.declaracoes {
+            if let ast::Declaracao::DeclaracaoClasse(class) = decl {
+                let fqn = class.nome.clone();
+                process_class(self, &fqn, class);
+            }
+        }
+        for ns in &self.programa.namespaces {
+            for decl in &ns.declaracoes {
+                if let ast::Declaracao::DeclaracaoClasse(class) = decl {
+                    let fqn = format!("{}.{}", ns.nome, class.nome);
+                    process_class(self, &fqn, class);
+                }
+            }
+        }
+    }
+
+    fn static_global_symbol(&self, fqn_class: &str, member: &str) -> String {
+        let suffix = format!(".static.{}.{}", fqn_class.replace('.', "_"), member);
+        let mut s = String::from("@");
+        s.push_str(&suffix);
+        s
+    }
+
+    fn const_llvm_init_for_expr(
+        &mut self,
+        expr: &ast::Expressao,
+        expected_type: &ast::Tipo,
+    ) -> Option<(String, ast::Tipo)> {
+        match (expr, expected_type) {
+            (ast::Expressao::Inteiro(n), ast::Tipo::Inteiro) => {
+                Some((n.to_string(), ast::Tipo::Inteiro))
+            }
+            (ast::Expressao::Booleano(b), ast::Tipo::Booleano) => Some((
+                (if *b { "1" } else { "0" }).to_string(),
+                ast::Tipo::Booleano,
+            )),
+            // Para outros tipos, pode exigir inicialização dinâmica; retornar None para zeroinitializer
+            _ => None,
+        }
+    }
+
+    fn infer_member_type(&self, fqn_class: &str, member: &str) -> Option<ast::Tipo> {
+        if let Some(info) = self.resolved_classes.get(fqn_class) {
+            if let Some(f) = info.fields.iter().find(|f| f.nome == member) {
+                return Some(f.tipo.clone());
+            }
+            if let Some(p) = info.properties.iter().find(|p| p.nome == member) {
+                return Some(p.tipo.clone());
+            }
+        }
+        None
+    }
+
     fn generate_classe_definitions(&mut self, class: &'a ast::DeclaracaoClasse, namespace: &str) {
         let fqn = if namespace.is_empty() {
             class.nome.clone()
@@ -150,16 +295,23 @@ impl<'a> LlvmGenerator<'a> {
     }
 
     fn prepare_header(&mut self) {
-        self.header.push_str("target triple = \"x86_64-pc-windows-msvc\"\n");
+        self.header
+            .push_str("target triple = \"x86_64-pc-windows-msvc\"\n");
         self.header.push_str("declare i32 @printf(i8*, ...)\n");
         self.header.push_str("declare i8* @malloc(i64)\n");
-        self.header.push_str("declare i32 @sprintf(i8*, i8*, ...)\n");
+        self.header
+            .push_str("declare i32 @sprintf(i8*, i8*, ...)\n");
         self.header.push_str("declare i64 @strlen(i8*)\n");
         self.header.push_str("declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture writeonly, i8* nocapture readonly, i64, i1 immarg)\n");
-        self.header.push_str("declare void @llvm.memset.p0i8.i64(i8*, i8, i64, i1)\n");
-        self.header.push_str("@.println_fmt = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\", align 1\n");
-        self.header.push_str("@.int_fmt = private unnamed_addr constant [3 x i8] c\"%d\\00\", align 1\n");
-        self.header.push_str("@.empty_str = private unnamed_addr constant [1 x i8] c\"\\00\", align 1\n");
+        self.header
+            .push_str("declare void @llvm.memset.p0i8.i64(i8*, i8, i64, i1)\n");
+        self.header.push_str(
+            "@.println_fmt = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\", align 1\n",
+        );
+        self.header
+            .push_str("@.int_fmt = private unnamed_addr constant [3 x i8] c\"%d\\00\", align 1\n");
+        self.header
+            .push_str("@.empty_str = private unnamed_addr constant [1 x i8] c\"\\00\", align 1\n");
     }
 
     fn setup_parameters(&mut self, params: &[ast::Parametro]) {
@@ -169,12 +321,19 @@ impl<'a> LlvmGenerator<'a> {
             let llvm_type = self.map_type_to_llvm_storage(&var_type);
             let align = self.get_type_alignment(&var_type);
 
-            self.body.push_str(&format!("  {0} = alloca {1}, align {2}\n", ptr_reg, llvm_type, align));
-            
+            self.body.push_str(&format!(
+                "  {0} = alloca {1}, align {2}\n",
+                ptr_reg, llvm_type, align
+            ));
+
             let param_reg = format!("%param.{0}", param.nome);
-            self.body.push_str(&format!("  store {0} {1}, {0}* {2}\n", llvm_type, param_reg, ptr_reg));
-            
-            self.variables.insert(param.nome.to_string(), (ptr_reg, var_type));
+            self.body.push_str(&format!(
+                "  store {0} {1}, {0}* {2}\n",
+                llvm_type, param_reg, ptr_reg
+            ));
+
+            self.variables
+                .insert(param.nome.to_string(), (ptr_reg, var_type));
         }
     }
 
@@ -224,15 +383,20 @@ impl<'a> LlvmGenerator<'a> {
                 let loop_body_label = self.get_unique_label("loop.body");
                 let loop_end_label = self.get_unique_label("loop.end");
 
-                self.body.push_str(&format!("  br label %{0}\n", loop_cond_label));
+                self.body
+                    .push_str(&format!("  br label %{0}\n", loop_cond_label));
                 self.body.push_str(&format!("{0}:\n", loop_cond_label));
 
                 let (cond_reg, _) = self.generate_expressao(cond);
-                self.body.push_str(&format!("  br i1 {0}, label %{1}, label %{2}\n", cond_reg, loop_body_label, loop_end_label));
+                self.body.push_str(&format!(
+                    "  br i1 {0}, label %{1}, label %{2}\n",
+                    cond_reg, loop_body_label, loop_end_label
+                ));
 
                 self.body.push_str(&format!("{0}:\n", loop_body_label));
                 self.generate_comando(body);
-                self.body.push_str(&format!("  br label %{0}\n", loop_cond_label));
+                self.body
+                    .push_str(&format!("  br label %{0}\n", loop_cond_label));
 
                 self.body.push_str(&format!("{0}:\n", loop_end_label));
             }
@@ -243,9 +407,16 @@ impl<'a> LlvmGenerator<'a> {
                 let end_label = self.get_unique_label("end");
 
                 let has_else = else_block.is_some();
-                let final_else_label = if has_else { else_label.clone() } else { end_label.clone() };
+                let final_else_label = if has_else {
+                    else_label.clone()
+                } else {
+                    end_label.clone()
+                };
 
-                self.body.push_str(&format!("  br i1 {0}, label %{1}, label %{2}\n", cond_reg, then_label, final_else_label));
+                self.body.push_str(&format!(
+                    "  br i1 {0}, label %{1}, label %{2}\n",
+                    cond_reg, then_label, final_else_label
+                ));
 
                 self.body.push_str(&format!("{0}:\n", then_label));
                 self.generate_comando(then_block);
@@ -263,32 +434,73 @@ impl<'a> LlvmGenerator<'a> {
                 if let Some(e) = expr {
                     let (reg, tipo) = self.generate_expressao(e);
                     let llvm_type = self.map_type_to_llvm_arg(&tipo);
-                    self.body.push_str(&format!("  ret {0} {1}\n", llvm_type, reg));
+                    self.body
+                        .push_str(&format!("  ret {0} {1}\n", llvm_type, reg));
                 } else {
                     self.body.push_str("  ret void\n");
                 }
             }
             ast::Comando::AtribuirPropriedade(obj_expr, prop_nome, val_expr) => {
-                let (value_reg, value_type) = self.generate_expressao(val_expr);
+                // Suporte a membro estático: objeto pode ser identificador de classe
+                if let ast::Expressao::Identificador(class_ident) = &**obj_expr {
+                    let fqn = self
+                        .type_checker
+                        .resolver_nome_classe(class_ident, &self.namespace_path);
+                    if self.type_checker.classes.contains_key(&fqn) {
+                        // Trata como propriedade estática
+                        let (value_reg, value_type) = self.generate_expressao(val_expr);
+                        let ty = self.map_type_to_llvm_storage(&value_type);
+                        let sym = self.static_global_symbol(&fqn, prop_nome);
+                        self.body
+                            .push_str(&format!("  store {0} {1}, {0}* {2}\n", ty, value_reg, sym));
+                        return;
+                    }
+                }
+
+                // Caso instância
+                let (value_reg, _value_type) = self.generate_expressao(val_expr);
                 let (obj_ptr_reg, obj_type) = self.generate_expressao(obj_expr);
                 let class_name = match obj_type {
                     ast::Tipo::Classe(name) => name,
-                    _ => panic!("Atribuição de propriedade em algo que não é uma classe: {:?}", obj_type),
+                    _ => panic!(
+                        "Atribuição de propriedade em algo que não é uma classe: {:?}",
+                        obj_type
+                    ),
                 };
-                let (member_ptr_reg, member_type) = self.get_member_ptr(&obj_ptr_reg, &class_name, prop_nome);
+                let (member_ptr_reg, member_type) =
+                    self.get_member_ptr(&obj_ptr_reg, &class_name, prop_nome);
                 let llvm_type = self.map_type_to_llvm_storage(&member_type);
-                self.body.push_str(&format!("  store {0} {1}, {2} {3}\n", llvm_type, value_reg, self.map_type_to_llvm_ptr(&member_type), member_ptr_reg));
+                self.body.push_str(&format!(
+                    "  store {0} {1}, {2} {3}\n",
+                    llvm_type,
+                    value_reg,
+                    self.map_type_to_llvm_ptr(&member_type),
+                    member_ptr_reg
+                ));
             }
             ast::Comando::ChamarMetodo(obj_expr, metodo_nome, argumentos) => {
-                self.generate_expressao(&ast::Expressao::ChamadaMetodo(obj_expr.clone(), metodo_nome.clone(), argumentos.clone()));
+                self.generate_expressao(&ast::Expressao::ChamadaMetodo(
+                    obj_expr.clone(),
+                    metodo_nome.clone(),
+                    argumentos.clone(),
+                ));
             }
-            _ => panic!("Comando não suportado para geração de LLVM IR: {:?}", comando),
+            _ => panic!(
+                "Comando não suportado para geração de LLVM IR: {:?}",
+                comando
+            ),
         }
     }
 
     fn generate_funcao(&mut self, func: &'a ast::DeclaracaoFuncao, namespace: &str) {
-        let nome_funcao = self.type_checker.resolver_nome_funcao(&func.nome, namespace).replace('.', "_");
-        let tipo_retorno_resolvido = self.resolve_type(&func.tipo_retorno.clone().unwrap_or(ast::Tipo::Vazio), namespace);
+        let nome_funcao = self
+            .type_checker
+            .resolver_nome_funcao(&func.nome, namespace)
+            .replace('.', "_");
+        let tipo_retorno_resolvido = self.resolve_type(
+            &func.tipo_retorno.clone().unwrap_or(ast::Tipo::Vazio),
+            namespace,
+        );
         let tipo_retorno_llvm = self.map_type_to_llvm_arg(&tipo_retorno_resolvido);
 
         let mut params_llvm = Vec::new();
@@ -303,7 +515,12 @@ impl<'a> LlvmGenerator<'a> {
         self.body = String::new();
         self.variables.clear();
 
-        self.body.push_str(&format!("define {0} @\"{1}\"({2}) {{ \n", tipo_retorno_llvm, nome_funcao, params_llvm.join(", ")));
+        self.body.push_str(&format!(
+            "define {0} @\"{1}\"({2}) {{ \n",
+            tipo_retorno_llvm,
+            nome_funcao,
+            params_llvm.join(", ")
+        ));
         self.body.push_str("entry:\n");
 
         self.setup_parameters(&func.parametros);
@@ -314,10 +531,13 @@ impl<'a> LlvmGenerator<'a> {
 
         let last_instruction = self.body.trim().lines().last().unwrap_or("").trim();
         if !last_instruction.starts_with("ret") && !last_instruction.starts_with("unreachable") {
-             if func.tipo_retorno.is_none() || func.tipo_retorno == Some(ast::Tipo::Vazio) {
+            if func.tipo_retorno.is_none() || func.tipo_retorno == Some(ast::Tipo::Vazio) {
                 self.body.push_str("  ret void\n");
             } else {
-                 self.body.push_str(&format!("  unreachable ; A função '{0}' deve ter um retorno\n", func.nome));
+                self.body.push_str(&format!(
+                    "  unreachable ; A função '{0}' deve ter um retorno\n",
+                    func.nome
+                ));
             }
         }
 
@@ -332,8 +552,11 @@ impl<'a> LlvmGenerator<'a> {
         let classe_nome = self.classe_atual.as_ref().unwrap();
         let namespace = classe_nome.rsplit_once('.').map_or("", |(ns, _)| ns);
         let nome_metodo = format!("{0}::{1}", classe_nome, metodo.nome).replace('.', "_");
-        
-        let tipo_retorno_resolvido = self.resolve_type(&metodo.tipo_retorno.clone().unwrap_or(ast::Tipo::Vazio), namespace);
+
+        let tipo_retorno_resolvido = self.resolve_type(
+            &metodo.tipo_retorno.clone().unwrap_or(ast::Tipo::Vazio),
+            namespace,
+        );
         let tipo_retorno_llvm = self.map_type_to_llvm_arg(&tipo_retorno_resolvido);
 
         let mut params_llvm = Vec::new();
@@ -351,13 +574,27 @@ impl<'a> LlvmGenerator<'a> {
         self.body = String::new();
         self.variables.clear();
 
-        self.body.push_str(&format!("define {0} @\"{1}\"({2}) {{ \n", tipo_retorno_llvm, nome_metodo, params_llvm.join(", ")));
+        self.body.push_str(&format!(
+            "define {0} @\"{1}\"({2}) {{ \n",
+            tipo_retorno_llvm,
+            nome_metodo,
+            params_llvm.join(", ")
+        ));
         self.body.push_str("entry:\n");
 
         let self_ptr_reg = "%var.self".to_string();
-        self.body.push_str(&format!("  {0} = alloca {1}, align 8\n", self_ptr_reg, self_type));
-        self.body.push_str(&format!("  store {0} %param.self, {0}* {1}\n", self_type, self_ptr_reg));
-        self.variables.insert("self".to_string(), (self_ptr_reg, ast::Tipo::Classe(classe_nome.clone())));
+        self.body.push_str(&format!(
+            "  {0} = alloca {1}, align 8\n",
+            self_ptr_reg, self_type
+        ));
+        self.body.push_str(&format!(
+            "  store {0} %param.self, {0}* {1}\n",
+            self_type, self_ptr_reg
+        ));
+        self.variables.insert(
+            "self".to_string(),
+            (self_ptr_reg, ast::Tipo::Classe(classe_nome.clone())),
+        );
 
         self.setup_parameters(&metodo.parametros);
 
@@ -370,7 +607,10 @@ impl<'a> LlvmGenerator<'a> {
             if metodo.tipo_retorno.is_none() || metodo.tipo_retorno == Some(ast::Tipo::Vazio) {
                 self.body.push_str("  ret void\n");
             } else {
-                self.body.push_str(&format!("  unreachable ; O método '{0}' deve ter um retorno\n", metodo.nome));
+                self.body.push_str(&format!(
+                    "  unreachable ; O método '{0}' deve ter um retorno\n",
+                    metodo.nome
+                ));
             }
         }
 
@@ -384,24 +624,43 @@ impl<'a> LlvmGenerator<'a> {
         let ptr_reg = format!("%var.{0}", name);
         let llvm_type = self.map_type_to_llvm_storage(&var_type);
         let align = self.get_type_alignment(&var_type);
-        
-        self.body.push_str(&format!("  {0} = alloca {1}, align {2}\n", ptr_reg, llvm_type, align));
-        self.body.push_str(&format!("  store {0} {1}, {0}* {2}\n", llvm_type, value_reg, ptr_reg));
-        
+
+        self.body.push_str(&format!(
+            "  {0} = alloca {1}, align {2}\n",
+            ptr_reg, llvm_type, align
+        ));
+        self.body.push_str(&format!(
+            "  store {0} {1}, {0}* {2}\n",
+            llvm_type, value_reg, ptr_reg
+        ));
+
         self.variables.insert(name.to_string(), (ptr_reg, var_type));
     }
-    
-    fn get_member_ptr(&mut self, obj_ptr_reg: &str, class_name: &str, member_name: &str) -> (String, ast::Tipo) {
-        let fqn_class_name = self.type_checker.resolver_nome_classe(class_name, &self.namespace_path);
-        let resolved_info = self.resolved_classes.get(&fqn_class_name)
+
+    fn get_member_ptr(
+        &mut self,
+        obj_ptr_reg: &str,
+        class_name: &str,
+        member_name: &str,
+    ) -> (String, ast::Tipo) {
+        let fqn_class_name = self
+            .type_checker
+            .resolver_nome_classe(class_name, &self.namespace_path);
+        let resolved_info = self
+            .resolved_classes
+            .get(&fqn_class_name)
             .unwrap_or_else(|| panic!("Classe '{}' não encontrada.", fqn_class_name));
 
         let mut current_index = 0;
-        if let Some(pos) = resolved_info.fields.iter().position(|f| f.nome == member_name) {
+        if let Some(pos) = resolved_info
+            .fields
+            .iter()
+            .position(|f| f.nome == member_name)
+        {
             let field = &resolved_info.fields[pos];
             let member_type = field.tipo.clone();
             let member_index = current_index + pos;
-            
+
             let member_ptr_reg = self.get_unique_temp_name();
             let sanitized_class_name = fqn_class_name.replace('.', "_");
             let struct_type = format!("%class.{0}", sanitized_class_name);
@@ -413,8 +672,12 @@ impl<'a> LlvmGenerator<'a> {
             return (member_ptr_reg, member_type);
         }
         current_index += resolved_info.fields.len();
-        
-        if let Some(pos) = resolved_info.properties.iter().position(|p| p.nome == member_name) {
+
+        if let Some(pos) = resolved_info
+            .properties
+            .iter()
+            .position(|p| p.nome == member_name)
+        {
             let prop = &resolved_info.properties[pos];
             let member_type = prop.tipo.clone();
             let member_index = current_index + pos;
@@ -430,40 +693,60 @@ impl<'a> LlvmGenerator<'a> {
             return (member_ptr_reg, member_type);
         }
 
-        panic!("Membro '{}' não encontrado na classe '{}'", member_name, class_name);
+        panic!(
+            "Membro '{}' não encontrado na classe '{}'",
+            member_name, class_name
+        );
     }
 
     fn store_variable(&mut self, name: &str, _value_type: &ast::Tipo, value_reg: &str) {
         if let Some((ptr_reg, var_type)) = self.variables.get(name) {
             let llvm_type = self.map_type_to_llvm_storage(var_type);
-            self.body.push_str(&format!("  store {0} {1}, {0}* {2}\n", llvm_type, value_reg, ptr_reg));
+            self.body.push_str(&format!(
+                "  store {0} {1}, {0}* {2}\n",
+                llvm_type, value_reg, ptr_reg
+            ));
             return;
         }
 
         if let Some(class_name) = self.classe_atual.clone() {
-             if self.resolved_classes.get(&class_name).map_or(false, |c| c.fields.iter().any(|f| f.nome == name) || c.properties.iter().any(|p| p.nome == name)) {
+            if self.resolved_classes.get(&class_name).map_or(false, |c| {
+                c.fields.iter().any(|f| f.nome == name)
+                    || c.properties.iter().any(|p| p.nome == name)
+            }) {
                 let (self_ptr_reg, self_type) = self.variables.get("self").unwrap().clone();
                 let loaded_self_ptr = self.get_unique_temp_name();
                 let self_ptr_type = self.map_type_to_llvm_ptr(&self_type);
 
-                self.body.push_str(&format!("  {0} = load {1}, {1}* {2}\n", loaded_self_ptr, self_ptr_type, self_ptr_reg));
+                self.body.push_str(&format!(
+                    "  {0} = load {1}, {1}* {2}\n",
+                    loaded_self_ptr, self_ptr_type, self_ptr_reg
+                ));
 
-                let (member_ptr_reg, member_type) = self.get_member_ptr(&loaded_self_ptr, &class_name, name);
+                let (member_ptr_reg, member_type) =
+                    self.get_member_ptr(&loaded_self_ptr, &class_name, name);
                 let llvm_type = self.map_type_to_llvm_storage(&member_type);
-                self.body.push_str(&format!("  store {0} {1}, {2} {3}\n", llvm_type, value_reg, self.map_type_to_llvm_ptr(&member_type), member_ptr_reg));
+                self.body.push_str(&format!(
+                    "  store {0} {1}, {2} {3}\n",
+                    llvm_type,
+                    value_reg,
+                    self.map_type_to_llvm_ptr(&member_type),
+                    member_ptr_reg
+                ));
                 return;
             }
         }
-        
+
         panic!("Atribuição a variável não declarada '{}'", name);
     }
-
 
     fn generate_expressao(&mut self, expr: &ast::Expressao) -> (String, ast::Tipo) {
         match expr {
             ast::Expressao::Inteiro(n) => (n.to_string(), ast::Tipo::Inteiro),
             ast::Expressao::Texto(s) => (self.create_global_string(s), ast::Tipo::Texto),
-            ast::Expressao::Booleano(b) => (if *b { "1" } else { "0" }.to_string(), ast::Tipo::Booleano),
+            ast::Expressao::Booleano(b) => {
+                (if *b { "1" } else { "0" }.to_string(), ast::Tipo::Booleano)
+            }
             ast::Expressao::Identificador(name) => self.load_variable(name),
             ast::Expressao::Aritmetica(op, esq, dir) => {
                 let (left_reg, left_type) = self.generate_expressao(esq);
@@ -472,9 +755,12 @@ impl<'a> LlvmGenerator<'a> {
                 if left_type == ast::Tipo::Texto || right_type == ast::Tipo::Texto {
                     let left_str = self.ensure_string(&left_reg, &left_type);
                     let right_str = self.ensure_string(&right_reg, &right_type);
-                    return (self.concatenate_strings(&left_str, &right_str), ast::Tipo::Texto);
+                    return (
+                        self.concatenate_strings(&left_str, &right_str),
+                        ast::Tipo::Texto,
+                    );
                 }
-                
+
                 let op_code = match op {
                     ast::OperadorAritmetico::Soma => "add",
                     ast::OperadorAritmetico::Subtracao => "sub",
@@ -484,40 +770,64 @@ impl<'a> LlvmGenerator<'a> {
                 };
 
                 let result_reg = self.get_unique_temp_name();
-                self.body.push_str(&format!("  {0} = {1} i32 {2}, {3}\n", result_reg, op_code, left_reg, right_reg));
+                self.body.push_str(&format!(
+                    "  {0} = {1} i32 {2}, {3}\n",
+                    result_reg, op_code, left_reg, right_reg
+                ));
                 (result_reg, ast::Tipo::Inteiro)
             }
             ast::Expressao::NovoObjeto(nome_classe, argumentos) => {
-                let fqn = self.type_checker.resolver_nome_classe(nome_classe, &self.namespace_path);
+                let fqn = self
+                    .type_checker
+                    .resolver_nome_classe(nome_classe, &self.namespace_path);
                 let sanitized_fqn = fqn.replace('.', "_");
                 let struct_type = format!("%class.{0}", sanitized_fqn);
                 let struct_ptr_type = format!("%class.{0}*", sanitized_fqn);
 
                 let size_temp_reg = self.get_unique_temp_name();
-                self.body.push_str(&format!("  {0} = getelementptr inbounds {1}, {2} null, i32 1\n", size_temp_reg, struct_type, struct_ptr_type));
-                
+                self.body.push_str(&format!(
+                    "  {0} = getelementptr inbounds {1}, {2} null, i32 1\n",
+                    size_temp_reg, struct_type, struct_ptr_type
+                ));
+
                 let size_reg = self.get_unique_temp_name();
-                self.body.push_str(&format!("  {0} = ptrtoint {1} {2} to i64\n", size_reg, struct_ptr_type, size_temp_reg));
+                self.body.push_str(&format!(
+                    "  {0} = ptrtoint {1} {2} to i64\n",
+                    size_reg, struct_ptr_type, size_temp_reg
+                ));
 
                 let malloc_ptr_reg = self.get_unique_temp_name();
-                self.body.push_str(&format!("  {0} = call i8* @malloc(i64 {1})\n", malloc_ptr_reg, size_reg));
+                self.body.push_str(&format!(
+                    "  {0} = call i8* @malloc(i64 {1})\n",
+                    malloc_ptr_reg, size_reg
+                ));
 
                 // Inicializa a memória alocada com zeros.
-                self.body.push_str(&format!("  call void @llvm.memset.p0i8.i64(i8* align 1 {0}, i8 0, i64 {1}, i1 false)\n", malloc_ptr_reg, size_reg));
+                self.body.push_str(&format!(
+                    "  call void @llvm.memset.p0i8.i64(i8* align 1 {0}, i8 0, i64 {1}, i1 false)\n",
+                    malloc_ptr_reg, size_reg
+                ));
 
                 let obj_ptr_reg = self.get_unique_temp_name();
-                self.body.push_str(&format!("  {0} = bitcast i8* {1} to {2}\n", obj_ptr_reg, malloc_ptr_reg, struct_ptr_type));
+                self.body.push_str(&format!(
+                    "  {0} = bitcast i8* {1} to {2}\n",
+                    obj_ptr_reg, malloc_ptr_reg, struct_ptr_type
+                ));
 
                 // Atribui os argumentos do construtor aos campos correspondentes.
                 if let Some(resolved_info) = self.resolved_classes.get(&fqn) {
-                    let mut all_fields: Vec<(&String, &ast::Tipo)> = resolved_info.fields.iter().map(|f| (&f.nome, &f.tipo)).collect();
+                    let mut all_fields: Vec<(&String, &ast::Tipo)> = resolved_info
+                        .fields
+                        .iter()
+                        .map(|f| (&f.nome, &f.tipo))
+                        .collect();
                     all_fields.extend(resolved_info.properties.iter().map(|p| (&p.nome, &p.tipo)));
 
                     for (i, arg_expr) in argumentos.iter().enumerate() {
                         if i < all_fields.len() {
                             let (value_reg, value_type) = self.generate_expressao(arg_expr);
                             let member_ptr_reg = self.get_unique_temp_name();
-                            
+
                             self.body.push_str(&format!(
                                 "  {0} = getelementptr inbounds {1}, {2} {3}, i32 0, i32 {4}\n",
                                 member_ptr_reg, struct_type, struct_ptr_type, obj_ptr_reg, i
@@ -525,26 +835,51 @@ impl<'a> LlvmGenerator<'a> {
 
                             let llvm_type_storage = self.map_type_to_llvm_storage(&value_type);
                             let llvm_type_ptr = self.map_type_to_llvm_ptr(&value_type);
-                            self.body.push_str(&format!("  store {0} {1}, {2} {3}\n", llvm_type_storage, value_reg, llvm_type_ptr, member_ptr_reg));
+                            self.body.push_str(&format!(
+                                "  store {0} {1}, {2} {3}\n",
+                                llvm_type_storage, value_reg, llvm_type_ptr, member_ptr_reg
+                            ));
                         }
                     }
                 }
-                
+
                 (obj_ptr_reg, ast::Tipo::Classe(fqn))
             }
             ast::Expressao::Chamada(nome_funcao, argumentos) => {
-                let fqn_func_name = self.type_checker.resolver_nome_funcao(nome_funcao, &self.namespace_path);
-                let func = self.programa.declaracoes.iter().find_map(|d| match d {
-                    ast::Declaracao::DeclaracaoFuncao(f) if self.type_checker.resolver_nome_funcao(&f.nome, &self.namespace_path) == fqn_func_name => Some(f),
-                    _ => None,
-                }).or_else(|| {
-                    self.programa.namespaces.iter().find_map(|ns| {
-                        ns.declaracoes.iter().find_map(|d| match d {
-                            ast::Declaracao::DeclaracaoFuncao(f) if self.type_checker.resolver_nome_funcao(&f.nome, &ns.nome) == fqn_func_name => Some(f),
-                            _ => None,
+                let fqn_func_name = self
+                    .type_checker
+                    .resolver_nome_funcao(nome_funcao, &self.namespace_path);
+                let func = self
+                    .programa
+                    .declaracoes
+                    .iter()
+                    .find_map(|d| match d {
+                        ast::Declaracao::DeclaracaoFuncao(f)
+                            if self
+                                .type_checker
+                                .resolver_nome_funcao(&f.nome, &self.namespace_path)
+                                == fqn_func_name =>
+                        {
+                            Some(f)
+                        }
+                        _ => None,
+                    })
+                    .or_else(|| {
+                        self.programa.namespaces.iter().find_map(|ns| {
+                            ns.declaracoes.iter().find_map(|d| match d {
+                                ast::Declaracao::DeclaracaoFuncao(f)
+                                    if self
+                                        .type_checker
+                                        .resolver_nome_funcao(&f.nome, &ns.nome)
+                                        == fqn_func_name =>
+                                {
+                                    Some(f)
+                                }
+                                _ => None,
+                            })
                         })
                     })
-                }).unwrap();
+                    .unwrap();
                 let return_type = func.tipo_retorno.clone().unwrap_or(ast::Tipo::Vazio);
                 let return_type_llvm = self.map_type_to_llvm_arg(&return_type);
 
@@ -558,11 +893,17 @@ impl<'a> LlvmGenerator<'a> {
                 let sanitized_func_name = fqn_func_name.replace('.', "_");
 
                 if return_type == ast::Tipo::Vazio {
-                    self.body.push_str(&format!("  call {0} @\"{1}\"({2})\n", return_type_llvm, sanitized_func_name, args_str));
+                    self.body.push_str(&format!(
+                        "  call {0} @\"{1}\"({2})\n",
+                        return_type_llvm, sanitized_func_name, args_str
+                    ));
                     ("".to_string(), return_type)
                 } else {
                     let result_reg = self.get_unique_temp_name();
-                    self.body.push_str(&format!("  {0} = call {1} @\"{2}\"({3})\n", result_reg, return_type_llvm, sanitized_func_name, args_str));
+                    self.body.push_str(&format!(
+                        "  {0} = call {1} @\"{2}\"({3})\n",
+                        result_reg, return_type_llvm, sanitized_func_name, args_str
+                    ));
                     (result_reg, return_type)
                 }
             }
@@ -573,13 +914,25 @@ impl<'a> LlvmGenerator<'a> {
                     _ => panic!("Chamada de método em algo que não é um objeto."),
                 };
 
-                let fqn_class_name = self.type_checker.resolver_nome_classe(&class_name, &self.namespace_path);
+                let fqn_class_name = self
+                    .type_checker
+                    .resolver_nome_classe(&class_name, &self.namespace_path);
 
-                let resolved_method = self.resolved_classes.get(&fqn_class_name)
+                let resolved_method = self
+                    .resolved_classes
+                    .get(&fqn_class_name)
                     .and_then(|c| c.methods.get(metodo_nome))
-                    .unwrap_or_else(|| panic!("Método '{}' não encontrado na classe '{}'", metodo_nome, fqn_class_name));
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "Método '{}' não encontrado na classe '{}'",
+                            metodo_nome, fqn_class_name
+                        )
+                    });
 
-                let return_type = resolved_method.tipo_retorno.clone().unwrap_or(ast::Tipo::Vazio);
+                let return_type = resolved_method
+                    .tipo_retorno
+                    .clone()
+                    .unwrap_or(ast::Tipo::Vazio);
                 let return_type_llvm = self.map_type_to_llvm_arg(&return_type);
 
                 let fqn_method = format!("{0}::{1}", fqn_class_name, metodo_nome).replace('.', "_");
@@ -596,11 +949,17 @@ impl<'a> LlvmGenerator<'a> {
                 let args_str = arg_regs.join(", ");
 
                 if return_type == ast::Tipo::Vazio {
-                    self.body.push_str(&format!("  call void @\"{0}\"({1})\n", fqn_method, args_str));
+                    self.body.push_str(&format!(
+                        "  call void @\"{0}\"({1})\n",
+                        fqn_method, args_str
+                    ));
                     ("".to_string(), return_type)
                 } else {
                     let result_reg = self.get_unique_temp_name();
-                    self.body.push_str(&format!("  {0} = call {1} @\"{2}\"({3})\n", result_reg, return_type_llvm, fqn_method, args_str));
+                    self.body.push_str(&format!(
+                        "  {0} = call {1} @\"{2}\"({3})\n",
+                        result_reg, return_type_llvm, fqn_method, args_str
+                    ));
                     (result_reg, return_type)
                 }
             }
@@ -619,14 +978,19 @@ impl<'a> LlvmGenerator<'a> {
 
                 let result_reg = self.get_unique_temp_name();
                 let llvm_type = self.map_type_to_llvm_arg(&left_type);
-                self.body.push_str(&format!("  {0} = icmp {1} {2} {3}, {4}\n", result_reg, op_str, llvm_type, left_reg, right_reg));
+                self.body.push_str(&format!(
+                    "  {0} = icmp {1} {2} {3}, {4}\n",
+                    result_reg, op_str, llvm_type, left_reg, right_reg
+                ));
                 (result_reg, ast::Tipo::Booleano)
             }
             ast::Expressao::StringInterpolada(partes) => {
                 let mut result_reg = self.create_global_string("");
                 for parte in partes {
                     let part_reg = match parte {
-                        ast::PartStringInterpolada::Texto(texto) => self.create_global_string(texto),
+                        ast::PartStringInterpolada::Texto(texto) => {
+                            self.create_global_string(texto)
+                        }
                         ast::PartStringInterpolada::Expressao(expr) => {
                             let (expr_reg, expr_type) = self.generate_expressao(expr);
                             self.ensure_string(&expr_reg, &expr_type)
@@ -637,17 +1001,46 @@ impl<'a> LlvmGenerator<'a> {
                 (result_reg, ast::Tipo::Texto)
             }
             ast::Expressao::AcessoMembro(obj_expr, membro_nome) => {
+                // Se o objeto é um identificador de classe, trata acesso a membro estático
+                if let ast::Expressao::Identificador(class_ident) = &**obj_expr {
+                    let fqn = self
+                        .type_checker
+                        .resolver_nome_classe(class_ident, &self.namespace_path);
+                    if self.type_checker.classes.contains_key(&fqn) {
+                        // Carrega a partir do global estático
+                        // Descobre o tipo do membro pelos metadados de classe resolvidos
+                        let member_type = self
+                            .infer_member_type(&fqn, membro_nome)
+                            .unwrap_or(ast::Tipo::Inteiro);
+                        let ty = self.map_type_to_llvm_storage(&member_type);
+                        let sym = self.static_global_symbol(&fqn, membro_nome);
+                        let loaded_reg = self.get_unique_temp_name();
+                        self.body.push_str(&format!(
+                            "  {0} = load {1}, {1}* {2}\n",
+                            loaded_reg, ty, sym
+                        ));
+                        return (loaded_reg, member_type);
+                    }
+                }
+
+                // Caso instância
                 let (obj_reg, obj_type) = self.generate_expressao(obj_expr);
                 let class_name = match obj_type {
                     ast::Tipo::Classe(name) => name,
-                    _ => panic!("Acesso de membro em algo que não é uma classe: {:?}", obj_type),
+                    _ => panic!(
+                        "Acesso de membro em algo que não é uma classe: {:?}",
+                        obj_type
+                    ),
                 };
-                let (member_ptr_reg, member_type) = self.get_member_ptr(&obj_reg, &class_name, membro_nome);
-                
+                let (member_ptr_reg, member_type) =
+                    self.get_member_ptr(&obj_reg, &class_name, membro_nome);
                 let loaded_reg = self.get_unique_temp_name();
                 let llvm_type = self.map_type_to_llvm_storage(&member_type);
                 let llvm_ptr_type = self.map_type_to_llvm_ptr(&member_type);
-                self.body.push_str(&format!("\n  {0} = load {1}, {2} {3}\n", loaded_reg, llvm_type, llvm_ptr_type, member_ptr_reg));
+                self.body.push_str(&format!(
+                    "\n  {0} = load {1}, {2} {3}\n",
+                    loaded_reg, llvm_type, llvm_ptr_type, member_ptr_reg
+                ));
                 (loaded_reg, member_type)
             }
             ast::Expressao::Este => self.load_variable("self"),
@@ -660,39 +1053,61 @@ impl<'a> LlvmGenerator<'a> {
             let loaded_reg = self.get_unique_temp_name();
             let llvm_type = self.map_type_to_llvm_storage(&var_type);
             let llvm_ptr_type = self.map_type_to_llvm_ptr(&var_type);
-            self.body.push_str(&format!("\n  {0} = load {1}, {2} {3}\n", loaded_reg, llvm_type, llvm_ptr_type, ptr_reg));
+            self.body.push_str(&format!(
+                "\n  {0} = load {1}, {2} {3}\n",
+                loaded_reg, llvm_type, llvm_ptr_type, ptr_reg
+            ));
             return (loaded_reg, var_type);
         }
 
         if let Some(class_name) = self.classe_atual.clone() {
-            if self.resolved_classes.get(&class_name).map_or(false, |c| c.fields.iter().any(|f| f.nome == name) || c.properties.iter().any(|p| p.nome == name)) {
+            if self.resolved_classes.get(&class_name).map_or(false, |c| {
+                c.fields.iter().any(|f| f.nome == name)
+                    || c.properties.iter().any(|p| p.nome == name)
+            }) {
                 let (self_ptr_reg, self_type) = self.variables.get("self").unwrap().clone();
                 let loaded_self_ptr = self.get_unique_temp_name();
                 let self_ptr_type = self.map_type_to_llvm_ptr(&self_type);
 
-                self.body.push_str(&format!("\n  {0} = load {1}, {1}* {2}\n", loaded_self_ptr, self_ptr_type, self_ptr_reg));
+                self.body.push_str(&format!(
+                    "\n  {0} = load {1}, {1}* {2}\n",
+                    loaded_self_ptr, self_ptr_type, self_ptr_reg
+                ));
 
-                let (member_ptr_reg, member_type) = self.get_member_ptr(&loaded_self_ptr, &class_name, name);
+                let (member_ptr_reg, member_type) =
+                    self.get_member_ptr(&loaded_self_ptr, &class_name, name);
                 let loaded_reg = self.get_unique_temp_name();
                 let llvm_type = self.map_type_to_llvm_storage(&member_type);
                 let llvm_ptr_type = self.map_type_to_llvm_ptr(&member_type);
-                self.body.push_str(&format!("\n  {0} = load {1}, {2} {3}\n", loaded_reg, llvm_type, llvm_ptr_type, member_ptr_reg));
+                self.body.push_str(&format!(
+                    "\n  {0} = load {1}, {2} {3}\n",
+                    loaded_reg, llvm_type, llvm_ptr_type, member_ptr_reg
+                ));
                 return (loaded_reg, member_type);
             }
         }
-        
+
         panic!("Variável ou membro de classe não declarado: '{}'", name);
     }
 
     fn get_safe_string_ptr(&mut self, reg: &str) -> String {
         let is_null_reg = self.get_unique_temp_name();
-        self.body.push_str(&format!("  {0} = icmp eq i8* {1}, null\n", is_null_reg, reg));
-        
+        self.body.push_str(&format!(
+            "  {0} = icmp eq i8* {1}, null\n",
+            is_null_reg, reg
+        ));
+
         let empty_str_ptr = self.get_unique_temp_name();
-        self.body.push_str(&format!("  {0} = getelementptr inbounds [1 x i8], [1 x i8]* @.empty_str, i32 0, i32 0\n", empty_str_ptr));
+        self.body.push_str(&format!(
+            "  {0} = getelementptr inbounds [1 x i8], [1 x i8]* @.empty_str, i32 0, i32 0\n",
+            empty_str_ptr
+        ));
 
         let result_reg = self.get_unique_temp_name();
-        self.body.push_str(&format!("  {0} = select i1 {1}, i8* {2}, i8* {3}\n", result_reg, is_null_reg, empty_str_ptr, reg));
+        self.body.push_str(&format!(
+            "  {0} = select i1 {1}, i8* {2}, i8* {3}\n",
+            result_reg, is_null_reg, empty_str_ptr, reg
+        ));
         result_reg
     }
 
@@ -704,7 +1119,10 @@ impl<'a> LlvmGenerator<'a> {
                 let true_str = self.create_global_string("verdadeiro");
                 let false_str = self.create_global_string("falso");
                 let result_reg = self.get_unique_temp_name();
-                self.body.push_str(&format!("  {0} = select i1 {1}, i8* {2}, i8* {3}\n", result_reg, reg, true_str, false_str));
+                self.body.push_str(&format!(
+                    "  {0} = select i1 {1}, i8* {2}, i8* {3}\n",
+                    result_reg, reg, true_str, false_str
+                ));
                 result_reg
             }
             _ => self.create_global_string("[valor não textual]"),
@@ -713,14 +1131,24 @@ impl<'a> LlvmGenerator<'a> {
 
     fn convert_int_to_string(&mut self, int_reg: &str) -> String {
         let buffer = self.get_unique_temp_name();
-        self.body.push_str(&format!("  {0} = alloca [21 x i8], align 1\n", buffer));
+        self.body
+            .push_str(&format!("  {0} = alloca [21 x i8], align 1\n", buffer));
         let buffer_ptr = self.get_unique_temp_name();
-        self.body.push_str(&format!("  {0} = getelementptr inbounds [21 x i8], [21 x i8]* {1}, i32 0, i32 0\n", buffer_ptr, buffer));
-        
-        let format_specifier_ptr = self.get_unique_temp_name();
-        self.body.push_str(&format!("  {0} = getelementptr inbounds [3 x i8], [3 x i8]* @.int_fmt, i32 0, i32 0\n", format_specifier_ptr));
+        self.body.push_str(&format!(
+            "  {0} = getelementptr inbounds [21 x i8], [21 x i8]* {1}, i32 0, i32 0\n",
+            buffer_ptr, buffer
+        ));
 
-        self.body.push_str(&format!("  call i32 (i8*, i8*, ...) @sprintf(i8* {0}, i8* {1}, i32 {2})\n", buffer_ptr, format_specifier_ptr, int_reg));
+        let format_specifier_ptr = self.get_unique_temp_name();
+        self.body.push_str(&format!(
+            "  {0} = getelementptr inbounds [3 x i8], [3 x i8]* @.int_fmt, i32 0, i32 0\n",
+            format_specifier_ptr
+        ));
+
+        self.body.push_str(&format!(
+            "  call i32 (i8*, i8*, ...) @sprintf(i8* {0}, i8* {1}, i32 {2})\n",
+            buffer_ptr, format_specifier_ptr, int_reg
+        ));
         buffer_ptr
     }
 
@@ -729,31 +1157,56 @@ impl<'a> LlvmGenerator<'a> {
         let safe_str2 = self.get_safe_string_ptr(str2_reg);
 
         let len1_reg = self.get_unique_temp_name();
-        self.body.push_str(&format!("  {0} = call i64 @strlen(i8* {1})\n", len1_reg, safe_str1));
-        
+        self.body.push_str(&format!(
+            "  {0} = call i64 @strlen(i8* {1})\n",
+            len1_reg, safe_str1
+        ));
+
         let len2_reg = self.get_unique_temp_name();
-        self.body.push_str(&format!("  {0} = call i64 @strlen(i8* {1})\n", len2_reg, safe_str2));
-        
+        self.body.push_str(&format!(
+            "  {0} = call i64 @strlen(i8* {1})\n",
+            len2_reg, safe_str2
+        ));
+
         let total_len_reg = self.get_unique_temp_name();
-        self.body.push_str(&format!("  {0} = add i64 {1}, {2}\n", total_len_reg, len1_reg, len2_reg));
-        
+        self.body.push_str(&format!(
+            "  {0} = add i64 {1}, {2}\n",
+            total_len_reg, len1_reg, len2_reg
+        ));
+
         let alloc_size_reg = self.get_unique_temp_name();
-        self.body.push_str(&format!("  {0} = add i64 {1}, 1\n", alloc_size_reg, total_len_reg));
-        
+        self.body.push_str(&format!(
+            "  {0} = add i64 {1}, 1\n",
+            alloc_size_reg, total_len_reg
+        ));
+
         let buffer_reg = self.get_unique_temp_name();
-        self.body.push_str(&format!("  {0} = call i8* @malloc(i64 {1})\n", buffer_reg, alloc_size_reg));
-        
+        self.body.push_str(&format!(
+            "  {0} = call i8* @malloc(i64 {1})\n",
+            buffer_reg, alloc_size_reg
+        ));
+
         let dest_ptr1 = self.get_unique_temp_name();
-        self.body.push_str(&format!("  {0} = getelementptr i8, i8* {1}, i64 0\n", dest_ptr1, buffer_reg));
+        self.body.push_str(&format!(
+            "  {0} = getelementptr i8, i8* {1}, i64 0\n",
+            dest_ptr1, buffer_reg
+        ));
         self.body.push_str(&format!("  call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 1 {0}, i8* align 1 {1}, i64 {2}, i1 false)\n", dest_ptr1, safe_str1, len1_reg));
 
         let dest_ptr2 = self.get_unique_temp_name();
-        self.body.push_str(&format!("  {0} = getelementptr i8, i8* {1}, i64 {2}\n", dest_ptr2, buffer_reg, len1_reg));
+        self.body.push_str(&format!(
+            "  {0} = getelementptr i8, i8* {1}, i64 {2}\n",
+            dest_ptr2, buffer_reg, len1_reg
+        ));
         self.body.push_str(&format!("  call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 1 {0}, i8* align 1 {1}, i64 {2}, i1 false)\n", dest_ptr2, safe_str2, len2_reg));
 
         let null_terminator_ptr = self.get_unique_temp_name();
-        self.body.push_str(&format!("  {0} = getelementptr i8, i8* {1}, i64 {2}\n", null_terminator_ptr, buffer_reg, total_len_reg));
-        self.body.push_str(&format!("  store i8 0, i8* {0}\n", null_terminator_ptr));
+        self.body.push_str(&format!(
+            "  {0} = getelementptr i8, i8* {1}, i64 {2}\n",
+            null_terminator_ptr, buffer_reg, total_len_reg
+        ));
+        self.body
+            .push_str(&format!("  store i8 0, i8* {0}\n", null_terminator_ptr));
 
         buffer_reg
     }
@@ -762,11 +1215,20 @@ impl<'a> LlvmGenerator<'a> {
         let str_len = text.len() + 1;
         let str_name = format!("@.str.{0}", self.string_counter);
         self.string_counter += 1;
-        let sanitized_text = text.replace('\\', "\\").replace('\n', "\0A").replace('"', "\"");
-        self.header.push_str(&format!("{0} = private unnamed_addr constant [{1} x i8] c\"{2}\\00\", align 1\n", str_name, str_len, sanitized_text));
-        
+        let sanitized_text = text
+            .replace('\\', "\\")
+            .replace('\n', "\0A")
+            .replace('"', "\"");
+        self.header.push_str(&format!(
+            "{0} = private unnamed_addr constant [{1} x i8] c\"{2}\\00\", align 1\n",
+            str_name, str_len, sanitized_text
+        ));
+
         let ptr_register = self.get_unique_temp_name();
-        self.body.push_str(&format!("  {0} = getelementptr inbounds [{1} x i8], [{1} x i8]* {2}, i32 0, i32 0\n", ptr_register, str_len, str_name));
+        self.body.push_str(&format!(
+            "  {0} = getelementptr inbounds [{1} x i8], [{1} x i8]* {2}, i32 0, i32 0\n",
+            ptr_register, str_len, str_name
+        ));
         ptr_register
     }
 
@@ -784,7 +1246,9 @@ impl<'a> LlvmGenerator<'a> {
 
     fn resolve_type(&self, tipo: &ast::Tipo, namespace: &str) -> ast::Tipo {
         if let ast::Tipo::Classe(unresolved_name) = tipo {
-            let fqn = self.type_checker.resolver_nome_classe(unresolved_name, namespace);
+            let fqn = self
+                .type_checker
+                .resolver_nome_classe(unresolved_name, namespace);
             ast::Tipo::Classe(fqn)
         } else {
             tipo.clone()
@@ -801,9 +1265,9 @@ impl<'a> LlvmGenerator<'a> {
             _ => panic!("Tipo LLVM não mapeado para armazenamento: {:?}", tipo),
         }
     }
-    
+
     fn map_type_to_llvm_ptr(&self, tipo: &ast::Tipo) -> String {
-         match tipo {
+        match tipo {
             ast::Tipo::Inteiro => "i32*".to_string(),
             ast::Tipo::Texto => "i8**".to_string(),
             ast::Tipo::Booleano => "i1*".to_string(),
