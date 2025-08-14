@@ -504,6 +504,7 @@ impl<'a> LlvmGenerator<'a> {
         match var_type {
             ast::Tipo::Inteiro => 4,
             ast::Tipo::Texto => 8,
+            ast::Tipo::Decimal => 8,
             ast::Tipo::Booleano => 1,
             ast::Tipo::Classe(_) => 8,
             _ => 8,
@@ -926,6 +927,11 @@ impl<'a> LlvmGenerator<'a> {
             ast::Expressao::Booleano(b) => {
                 (if *b { "1" } else { "0" }.to_string(), ast::Tipo::Booleano)
             }
+            ast::Expressao::Decimal(s) => {
+                // Armazena decimal como string (removendo sufixo 'm' se presente)
+                let printed = s.trim_end_matches('m').trim_end_matches('M').to_string();
+                (self.create_global_string(&printed), ast::Tipo::Decimal)
+            }
             ast::Expressao::Identificador(name) => self.load_variable(name),
             ast::Expressao::Aritmetica(op, esq, dir) => {
                 let (left_reg, left_type) = self.generate_expressao(esq);
@@ -1322,6 +1328,7 @@ impl<'a> LlvmGenerator<'a> {
     fn ensure_string(&mut self, reg: &str, tipo: &ast::Tipo) -> String {
         match tipo {
             ast::Tipo::Texto => self.get_safe_string_ptr(reg),
+            ast::Tipo::Decimal => self.get_safe_string_ptr(reg),
             ast::Tipo::Inteiro => self.convert_int_to_string(reg),
             ast::Tipo::Booleano => {
                 let true_str = self.create_global_string("verdadeiro");
@@ -1467,6 +1474,7 @@ impl<'a> LlvmGenerator<'a> {
         match tipo {
             ast::Tipo::Inteiro => "i32".to_string(),
             ast::Tipo::Texto => "i8*".to_string(),
+            ast::Tipo::Decimal => "i8*".to_string(),
             ast::Tipo::Booleano => "i1".to_string(),
             ast::Tipo::Vazio => "void".to_string(),
             ast::Tipo::Classe(_) => self.map_type_to_llvm_ptr(tipo),
@@ -1478,6 +1486,7 @@ impl<'a> LlvmGenerator<'a> {
         match tipo {
             ast::Tipo::Inteiro => "i32*".to_string(),
             ast::Tipo::Texto => "i8**".to_string(),
+            ast::Tipo::Decimal => "i8**".to_string(),
             ast::Tipo::Booleano => "i1*".to_string(),
             ast::Tipo::Classe(name) => {
                 let sanitized_name = name.replace('.', "_");
@@ -1491,6 +1500,7 @@ impl<'a> LlvmGenerator<'a> {
         match tipo {
             ast::Tipo::Inteiro => "i32".to_string(),
             ast::Tipo::Texto => "i8*".to_string(),
+            ast::Tipo::Decimal => "i8*".to_string(),
             ast::Tipo::Booleano => "i1".to_string(),
             ast::Tipo::Vazio => "void".to_string(),
             ast::Tipo::Classe(_) => self.map_type_to_llvm_ptr(tipo),
