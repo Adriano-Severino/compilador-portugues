@@ -300,7 +300,7 @@ impl<'a> LlvmGenerator<'a> {
     }
 
     fn generate_construtor(&mut self, construtor: &'a ast::ConstrutorClasse) {
-        let classe_nome = self.classe_atual.as_ref().unwrap();
+        let classe_nome = self.classe_atual.as_ref().unwrap().clone();
         let namespace = classe_nome.rsplit_once('.').map_or("", |(ns, _)| ns);
         let total_params = construtor.parametros.len();
         let nome_ctor = format!("{0}::construtor${1}", classe_nome, total_params).replace('.', "_");
@@ -347,6 +347,98 @@ impl<'a> LlvmGenerator<'a> {
 
         // Parâmetros do construtor
         self.setup_parameters(&construtor.parametros);
+
+        // Se houver chamada explícita ao construtor da classe base, emita-a antes do corpo
+        if let Some(args_pai) = &construtor.chamada_pai {
+            // Descobre a classe base (FQN)
+            let classe_decl_atual = self
+                .type_checker
+                .classes
+                .get(&classe_nome)
+                .expect("Declaração da classe atual não encontrada");
+            if let Some(nome_base_simples) = &classe_decl_atual.classe_pai {
+                let parent_fqn = self
+                    .type_checker
+                    .resolver_nome_classe(nome_base_simples, namespace);
+
+                if let Some(parent_decl) = self.type_checker.classes.get(&parent_fqn) {
+                    // Seleciona o melhor construtor do pai com base em argumentos fornecidos + defaults
+                    let mut escolhido: Option<&ast::ConstrutorClasse> = None;
+                    let mut melhor_total = 0usize;
+                    for ctor in &parent_decl.construtores {
+                        let total = ctor.parametros.len();
+                        let obrig = ctor
+                            .parametros
+                            .iter()
+                            .filter(|p| p.valor_padrao.is_none())
+                            .count();
+                        let fornecidos = args_pai.len();
+                        if fornecidos >= obrig && fornecidos <= total {
+                            if total >= melhor_total {
+                                melhor_total = total;
+                                escolhido = Some(ctor);
+                            }
+                        }
+                    }
+
+                    if let Some(ctor_pai) = escolhido {
+                        // Prepara lista final de argumentos (com defaults quando necessário)
+                        let fornecidos = args_pai.len();
+                        let mut final_args: Vec<(String, ast::Tipo)> = Vec::new();
+                        for (idx, param) in ctor_pai.parametros.iter().enumerate() {
+                            if idx < fornecidos {
+                                final_args.push(self.generate_expressao(&args_pai[idx]));
+                            } else if let Some(def_expr) = &param.valor_padrao {
+                                final_args.push(self.generate_expressao(def_expr));
+                            } else {
+                                panic!(
+                                    "Argumento obrigatório ausente para parâmetro '{}' do construtor base de '{}'",
+                                    param.nome, parent_fqn
+                                );
+                            }
+                        }
+
+                        // Carrega 'self' atual e faz bitcast para ponteiro do tipo da classe base
+                        let (self_alloca, self_tipo) = self
+                            .variables
+                            .get("self")
+                            .cloned()
+                            .expect("Variável self não encontrada no construtor");
+                        let self_loaded = self.get_unique_temp_name();
+                        let self_ptr_ty = self.map_type_to_llvm_ptr(&self_tipo);
+                        self.body.push_str(&format!(
+                            "  {0} = load {1}, {1}* {2}\n",
+                            self_loaded, self_ptr_ty, self_alloca
+                        ));
+
+                        let base_ptr_ty =
+                            self.map_type_to_llvm_ptr(&ast::Tipo::Classe(parent_fqn.clone()));
+                        let self_as_base = self.get_unique_temp_name();
+                        self.body.push_str(&format!(
+                            "  {0} = bitcast {1} {2} to {3}\n",
+                            self_as_base, self_ptr_ty, self_loaded, base_ptr_ty
+                        ));
+
+                        // Monta chamada ao construtor base
+                        let func_name =
+                            format!("{0}::construtor${1}", parent_fqn, ctor_pai.parametros.len())
+                                .replace('.', "_");
+
+                        let mut args_llvm = Vec::new();
+                        args_llvm.push(format!("{0} {1}", base_ptr_ty, self_as_base));
+                        for (reg, ty) in &final_args {
+                            let llvm_ty = self.map_type_to_llvm_arg(ty);
+                            args_llvm.push(format!("{0} {1}", llvm_ty, reg));
+                        }
+                        self.body.push_str(&format!(
+                            "  call void @\"{0}\"({1})\n",
+                            func_name,
+                            args_llvm.join(", ")
+                        ));
+                    }
+                }
+            }
+        }
 
         // Corpo do construtor
         for comando in &construtor.corpo {
@@ -770,6 +862,22 @@ impl<'a> LlvmGenerator<'a> {
         );
     }
 
+    // Encontra o FQN da classe onde um método foi originalmente declarado.
+    // Necessário para herança: quando chamamos um método herdado (não sobrescrito),
+    // o símbolo LLVM existente é o da classe base (ex.: Animal::apresentar), não da derivada.
+    fn get_declaring_class_of_method(&self, metodo_ref: &'a ast::MetodoClasse) -> Option<String> {
+        for (class_name, class_decl) in &self.type_checker.classes {
+            if class_decl
+                .metodos
+                .iter()
+                .any(|m| std::ptr::eq(m, metodo_ref))
+            {
+                return Some(class_name.clone());
+            }
+        }
+        None
+    }
+
     fn store_variable(&mut self, name: &str, _value_type: &ast::Tipo, value_reg: &str) {
         if let Some((ptr_reg, var_type)) = self.variables.get(name) {
             let llvm_type = self.map_type_to_llvm_storage(var_type);
@@ -1030,8 +1138,12 @@ impl<'a> LlvmGenerator<'a> {
                     .clone()
                     .unwrap_or(ast::Tipo::Vazio);
                 let return_type_llvm = self.map_type_to_llvm_arg(&return_type);
-
-                let fqn_method = format!("{0}::{1}", fqn_class_name, metodo_nome).replace('.', "_");
+                // Usa a classe declaradora para construir o símbolo correto (suporta métodos herdados)
+                let declaring_class = self
+                    .get_declaring_class_of_method(resolved_method)
+                    .unwrap_or_else(|| fqn_class_name.clone());
+                let fqn_method =
+                    format!("{0}::{1}", declaring_class, metodo_nome).replace('.', "_");
 
                 let mut arg_regs = Vec::new();
                 let obj_ptr_type = self.map_type_to_llvm_ptr(&obj_type);

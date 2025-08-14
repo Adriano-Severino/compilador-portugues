@@ -82,9 +82,11 @@ impl<'a> VerificadorTipos<'a> {
             return;
         }
 
-        let mut properties: Vec<&'a ast::PropriedadeClasse> =
-            class_decl.propriedades.iter().collect();
-        let mut fields: Vec<&'a ast::CampoClasse> = class_decl.campos.iter().collect();
+        // Para herança correta no backend LLVM, os membros do pai devem vir primeiro
+        // no layout da classe, seguidos pelos membros específicos do filho (base-prefix layout).
+        // Por isso, começamos vazios e inserimos os membros do pai antes dos do filho.
+        let mut properties: Vec<&'a ast::PropriedadeClasse> = Vec::new();
+        let mut fields: Vec<&'a ast::CampoClasse> = Vec::new();
         let mut methods: HashMap<String, &'a ast::MetodoClasse> = class_decl
             .metodos
             .iter()
@@ -99,26 +101,26 @@ impl<'a> VerificadorTipos<'a> {
             if let Some(parent_decl) = self.classes.get(&parent_name).copied() {
                 self.resolve_class_hierarchy(&parent_name, parent_decl);
                 if let Some(parent_info) = self.resolved_classes.get(&parent_name) {
-                    let new_properties: Vec<_> = parent_info
-                        .properties
-                        .iter()
-                        .filter(|p| !properties.iter().any(|ep| ep.nome == p.nome))
-                        .cloned()
-                        .collect();
-                    properties.extend(new_properties);
-
-                    let new_fields: Vec<_> = parent_info
-                        .fields
-                        .iter()
-                        .filter(|f| !fields.iter().any(|ef| ef.nome == f.nome))
-                        .cloned()
-                        .collect();
-                    fields.extend(new_fields);
-
+                    // Primeiro, herda totalmente os membros do pai, preservando ordem
+                    properties.extend(parent_info.properties.iter().cloned());
+                    fields.extend(parent_info.fields.iter().cloned());
+                    // Métodos do pai entram se não forem sobrescritos pelo filho
                     for (name, method) in &parent_info.methods {
                         methods.entry(name.clone()).or_insert(method);
                     }
                 }
+            }
+        }
+
+        // Agora adiciona os membros do próprio filho (sem duplicados), ao final
+        for p in &class_decl.propriedades {
+            if !properties.iter().any(|ep| ep.nome == p.nome) {
+                properties.push(p);
+            }
+        }
+        for f in &class_decl.campos {
+            if !fields.iter().any(|ef| ef.nome == f.nome) {
+                fields.push(f);
             }
         }
 
@@ -226,8 +228,8 @@ impl<'a> VerificadorTipos<'a> {
 
     pub fn is_member_of_class(&self, class_name: &str, member_name: &str) -> bool {
         if let Some(class_info) = self.resolved_classes.get(class_name) {
-            return class_info.fields.iter().any(|f| f.nome == member_name) || 
-                   class_info.properties.iter().any(|p| p.nome == member_name);
+            return class_info.fields.iter().any(|f| f.nome == member_name)
+                || class_info.properties.iter().any(|p| p.nome == member_name);
         }
         false
     }
@@ -237,14 +239,22 @@ impl<'a> VerificadorTipos<'a> {
             if let Some(pos) = class_info.fields.iter().position(|f| f.nome == field_name) {
                 return Some((pos as u32, class_info.fields[pos].tipo.clone()));
             }
-            if let Some(pos) = class_info.properties.iter().position(|p| p.nome == field_name) {
+            if let Some(pos) = class_info
+                .properties
+                .iter()
+                .position(|p| p.nome == field_name)
+            {
                 return Some((pos as u32, class_info.properties[pos].tipo.clone()));
             }
         }
         None
     }
 
-        pub fn get_function_return_type(&self, nome_funcao: &str, namespace_atual: &str) -> Option<Tipo> {
+    pub fn get_function_return_type(
+        &self,
+        nome_funcao: &str,
+        namespace_atual: &str,
+    ) -> Option<Tipo> {
         let fqn = self.resolver_nome_funcao(nome_funcao, namespace_atual);
         if let Some(Declaracao::DeclaracaoFuncao(func_decl)) = self.simbolos_namespaces.get(&fqn) {
             func_decl.tipo_retorno.clone()
@@ -254,7 +264,10 @@ impl<'a> VerificadorTipos<'a> {
     }
 
     pub fn get_variable_type(&self, name: &str, namespace_atual: &str) -> Option<Tipo> {
-        println!("DEBUG: get_variable_type: name='{}', namespace_atual='{}'", name, namespace_atual);
+        println!(
+            "DEBUG: get_variable_type: name='{}', namespace_atual='{}'",
+            name, namespace_atual
+        );
         // Esta é uma implementação simplificada. Em um cenário real, você precisaria
         // de uma tabela de símbolos mais robusta que rastreie os escopos.
         // Por enquanto, vamos apenas verificar os símbolos globais.
@@ -267,7 +280,7 @@ impl<'a> VerificadorTipos<'a> {
         if self.classes.contains_key(&fqn_class) {
             return Some(Tipo::Classe(fqn_class));
         }
-        
+
         None
     }
 
@@ -435,9 +448,8 @@ impl<'a> VerificadorTipos<'a> {
                                 prop_nome, p_tipo, val_tipo
                             );
                             if p_tipo != val_tipo && val_tipo != Tipo::Inferido {
-                                if !((p_tipo == Tipo::Texto
-                                    && (val_tipo == Tipo::Inteiro
-                                        || val_tipo == Tipo::Booleano)))
+                                if !(p_tipo == Tipo::Texto
+                                    && (val_tipo == Tipo::Inteiro || val_tipo == Tipo::Booleano))
                                 {
                                     self.erros.push(format!("Atribuição de tipo inválido para propriedade \"{}\". Esperado {:?}, recebido {:?}.", prop_nome, p_tipo, val_tipo));
                                 }
@@ -496,8 +508,19 @@ impl<'a> VerificadorTipos<'a> {
             Comando::Atribuicao(nome, expr) => {
                 if let Some(class_name) = classe_atual {
                     if let Some(class_info) = self.resolved_classes.get(class_name) {
-                        if class_info.properties.iter().any(|p| p.nome == *nome) || class_info.fields.iter().any(|f| f.nome == *nome) {
-                            self.verificar_comando(&Comando::AtribuirPropriedade(Box::new(Expressao::Este), nome.clone(), expr.clone()), namespace_atual, classe_atual, escopo_vars);
+                        if class_info.properties.iter().any(|p| p.nome == *nome)
+                            || class_info.fields.iter().any(|f| f.nome == *nome)
+                        {
+                            self.verificar_comando(
+                                &Comando::AtribuirPropriedade(
+                                    Box::new(Expressao::Este),
+                                    nome.clone(),
+                                    expr.clone(),
+                                ),
+                                namespace_atual,
+                                classe_atual,
+                                escopo_vars,
+                            );
                             return;
                         }
                     }
@@ -558,9 +581,15 @@ impl<'a> VerificadorTipos<'a> {
                 }
                 if let Some(class_name) = classe_atual {
                     if let Some(class_info) = self.resolved_classes.get(class_name) {
-                        if class_info.properties.iter().any(|p| p.nome == *nome) || 
-                           class_info.fields.iter().any(|f| f.nome == *nome) {
-                            return self.inferir_tipo_expressao(&Expressao::AcessoMembro(Box::new(Expressao::Este), nome.clone()), namespace_atual, classe_atual, escopo_vars);
+                        if class_info.properties.iter().any(|p| p.nome == *nome)
+                            || class_info.fields.iter().any(|f| f.nome == *nome)
+                        {
+                            return self.inferir_tipo_expressao(
+                                &Expressao::AcessoMembro(Box::new(Expressao::Este), nome.clone()),
+                                namespace_atual,
+                                classe_atual,
+                                escopo_vars,
+                            );
                         }
                     }
                 }
@@ -588,10 +617,8 @@ impl<'a> VerificadorTipos<'a> {
                         {
                             return prop.tipo.clone();
                         }
-                        if let Some(field) = class_info
-                            .fields
-                            .iter()
-                            .find(|f| f.nome == *membro_nome)
+                        if let Some(field) =
+                            class_info.fields.iter().find(|f| f.nome == *membro_nome)
                         {
                             return field.tipo.clone();
                         }
@@ -615,7 +642,13 @@ impl<'a> VerificadorTipos<'a> {
         }
     }
 
-    pub fn get_expr_type(&self, expressao: &Expressao, namespace_atual: &str, classe_atual: Option<&String>, escopo_vars: &HashMap<String, Tipo>) -> Tipo {
+    pub fn get_expr_type(
+        &self,
+        expressao: &Expressao,
+        namespace_atual: &str,
+        classe_atual: Option<&String>,
+        escopo_vars: &HashMap<String, Tipo>,
+    ) -> Tipo {
         match expressao {
             Expressao::Inteiro(_) => Tipo::Inteiro,
             Expressao::Texto(_) => Tipo::Texto,
@@ -629,9 +662,15 @@ impl<'a> VerificadorTipos<'a> {
                 }
                 if let Some(class_name) = classe_atual {
                     if let Some(class_info) = self.resolved_classes.get(class_name) {
-                        if class_info.properties.iter().any(|p| p.nome == *nome) || 
-                           class_info.fields.iter().any(|f| f.nome == *nome) {
-                            return self.get_expr_type(&Expressao::AcessoMembro(Box::new(Expressao::Este), nome.clone()), namespace_atual, classe_atual, escopo_vars);
+                        if class_info.properties.iter().any(|p| p.nome == *nome)
+                            || class_info.fields.iter().any(|f| f.nome == *nome)
+                        {
+                            return self.get_expr_type(
+                                &Expressao::AcessoMembro(Box::new(Expressao::Este), nome.clone()),
+                                namespace_atual,
+                                classe_atual,
+                                escopo_vars,
+                            );
                         }
                     }
                 }
@@ -642,12 +681,8 @@ impl<'a> VerificadorTipos<'a> {
                 Tipo::Inferido
             }
             Expressao::AcessoMembro(obj_expr, membro_nome) => {
-                let obj_tipo = self.get_expr_type(
-                    obj_expr,
-                    namespace_atual,
-                    classe_atual,
-                    escopo_vars,
-                );
+                let obj_tipo =
+                    self.get_expr_type(obj_expr, namespace_atual, classe_atual, escopo_vars);
                 if let Tipo::Classe(nome_classe) = obj_tipo {
                     if let Some(class_info) = self.resolved_classes.get(&nome_classe) {
                         if let Some(prop) = class_info
@@ -657,10 +692,8 @@ impl<'a> VerificadorTipos<'a> {
                         {
                             return prop.tipo.clone();
                         }
-                        if let Some(field) = class_info
-                            .fields
-                            .iter()
-                            .find(|f| f.nome == *membro_nome)
+                        if let Some(field) =
+                            class_info.fields.iter().find(|f| f.nome == *membro_nome)
                         {
                             return field.tipo.clone();
                         }
@@ -672,10 +705,8 @@ impl<'a> VerificadorTipos<'a> {
                 Tipo::Classe(self.resolver_nome_classe(nome_classe, namespace_atual))
             }
             Expressao::Aritmetica(_, esq, dir) => {
-                let _te =
-                    self.get_expr_type(esq, namespace_atual, classe_atual, escopo_vars);
-                let _td =
-                    self.get_expr_type(dir, namespace_atual, classe_atual, escopo_vars);
+                let _te = self.get_expr_type(esq, namespace_atual, classe_atual, escopo_vars);
+                let _td = self.get_expr_type(dir, namespace_atual, classe_atual, escopo_vars);
                 Tipo::Inteiro
             }
             Expressao::Comparacao(_, _, _) => Tipo::Booleano,
