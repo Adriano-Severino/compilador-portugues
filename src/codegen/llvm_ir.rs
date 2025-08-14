@@ -288,10 +288,81 @@ impl<'a> LlvmGenerator<'a> {
             format!("{}.{}", namespace, class.nome)
         };
         self.classe_atual = Some(fqn);
+        // Métodos
         for metodo in &class.metodos {
             self.generate_metodo(metodo);
         }
+        // Construtores
+        for construtor in &class.construtores {
+            self.generate_construtor(construtor);
+        }
         self.classe_atual = None;
+    }
+
+    fn generate_construtor(&mut self, construtor: &'a ast::ConstrutorClasse) {
+        let classe_nome = self.classe_atual.as_ref().unwrap();
+        let namespace = classe_nome.rsplit_once('.').map_or("", |(ns, _)| ns);
+        let total_params = construtor.parametros.len();
+        let nome_ctor = format!("{0}::construtor${1}", classe_nome, total_params).replace('.', "_");
+
+        let tipo_retorno_llvm = "void".to_string();
+
+        let mut params_llvm = Vec::new();
+        let self_type = self.map_type_to_llvm_ptr(&ast::Tipo::Classe(classe_nome.clone()));
+        params_llvm.push(format!("{0} %param.self", self_type));
+
+        for param in &construtor.parametros {
+            let tipo_param_resolvido = self.resolve_type(&param.tipo, namespace);
+            let tipo_param_llvm = self.map_type_to_llvm_arg(&tipo_param_resolvido);
+            params_llvm.push(format!("{0} %param.{1}", tipo_param_llvm, param.nome));
+        }
+
+        let mut old_body = self.body.clone();
+        let old_vars = self.variables.clone();
+        self.body = String::new();
+        self.variables.clear();
+
+        self.body.push_str(&format!(
+            "define {0} @\"{1}\"({2}) {{ \n",
+            tipo_retorno_llvm,
+            nome_ctor,
+            params_llvm.join(", ")
+        ));
+        self.body.push_str("entry:\n");
+
+        // Aloca e armazena self
+        let self_ptr_reg = "%var.self".to_string();
+        self.body.push_str(&format!(
+            "  {0} = alloca {1}, align 8\n",
+            self_ptr_reg, self_type
+        ));
+        self.body.push_str(&format!(
+            "  store {0} %param.self, {0}* {1}\n",
+            self_type, self_ptr_reg
+        ));
+        self.variables.insert(
+            "self".to_string(),
+            (self_ptr_reg, ast::Tipo::Classe(classe_nome.clone())),
+        );
+
+        // Parâmetros do construtor
+        self.setup_parameters(&construtor.parametros);
+
+        // Corpo do construtor
+        for comando in &construtor.corpo {
+            self.generate_comando(comando);
+        }
+
+        // Retorno implícito
+        let last_instruction = self.body.trim().lines().last().unwrap_or("").trim();
+        if !last_instruction.starts_with("ret") && !last_instruction.starts_with("unreachable") {
+            self.body.push_str("  ret void\n");
+        }
+
+        self.body.push_str("}\n");
+        old_body.push_str(&self.body);
+        self.body = old_body;
+        self.variables = old_vars;
     }
 
     fn prepare_header(&mut self) {
@@ -814,32 +885,57 @@ impl<'a> LlvmGenerator<'a> {
                     obj_ptr_reg, malloc_ptr_reg, struct_ptr_type
                 ));
 
-                // Atribui os argumentos do construtor aos campos correspondentes.
-                if let Some(resolved_info) = self.resolved_classes.get(&fqn) {
-                    let mut all_fields: Vec<(&String, &ast::Tipo)> = resolved_info
-                        .fields
-                        .iter()
-                        .map(|f| (&f.nome, &f.tipo))
-                        .collect();
-                    all_fields.extend(resolved_info.properties.iter().map(|p| (&p.nome, &p.tipo)));
-
-                    for (i, arg_expr) in argumentos.iter().enumerate() {
-                        if i < all_fields.len() {
-                            let (value_reg, value_type) = self.generate_expressao(arg_expr);
-                            let member_ptr_reg = self.get_unique_temp_name();
-
-                            self.body.push_str(&format!(
-                                "  {0} = getelementptr inbounds {1}, {2} {3}, i32 0, i32 {4}\n",
-                                member_ptr_reg, struct_type, struct_ptr_type, obj_ptr_reg, i
-                            ));
-
-                            let llvm_type_storage = self.map_type_to_llvm_storage(&value_type);
-                            let llvm_type_ptr = self.map_type_to_llvm_ptr(&value_type);
-                            self.body.push_str(&format!(
-                                "  store {0} {1}, {2} {3}\n",
-                                llvm_type_storage, value_reg, llvm_type_ptr, member_ptr_reg
-                            ));
+                // Chama um construtor: seleciona pelo número de argumentos (com suporte a defaults)
+                if let Some(class_decl) = self.type_checker.classes.get(&fqn) {
+                    // Encontrar melhor construtor compatível
+                    let mut escolhido: Option<&ast::ConstrutorClasse> = None;
+                    let mut melhor_total = 0usize;
+                    for ctor in &class_decl.construtores {
+                        let total = ctor.parametros.len();
+                        let obrig = ctor
+                            .parametros
+                            .iter()
+                            .filter(|p| p.valor_padrao.is_none())
+                            .count();
+                        let fornecidos = argumentos.len();
+                        if fornecidos >= obrig && fornecidos <= total {
+                            if total >= melhor_total {
+                                melhor_total = total;
+                                escolhido = Some(ctor);
+                            }
                         }
+                    }
+                    if let Some(ctor) = escolhido {
+                        // Monta lista final de argumentos (preenche defaults se necessário)
+                        let mut final_args: Vec<(String, ast::Tipo)> = Vec::new();
+                        let fornecidos = argumentos.len();
+                        for (idx, param) in ctor.parametros.iter().enumerate() {
+                            if idx < fornecidos {
+                                final_args.push(self.generate_expressao(&argumentos[idx]));
+                            } else {
+                                if let Some(def_expr) = &param.valor_padrao {
+                                    final_args.push(self.generate_expressao(def_expr));
+                                } else {
+                                    panic!("Argumento obrigatório ausente para parâmetro '{}' do construtor de '{}'", param.nome, fqn);
+                                }
+                            }
+                        }
+
+                        // Chamada ao construtor LLVM
+                        let func_name = format!("{0}::construtor${1}", fqn, ctor.parametros.len())
+                            .replace('.', "_");
+                        let mut args_llvm = Vec::new();
+                        // self primeiro
+                        args_llvm.push(format!("{0} {1}", struct_ptr_type, obj_ptr_reg));
+                        for (reg, ty) in &final_args {
+                            let llvm_ty = self.map_type_to_llvm_arg(ty);
+                            args_llvm.push(format!("{0} {1}", llvm_ty, reg));
+                        }
+                        self.body.push_str(&format!(
+                            "  call void @\"{0}\"({1})\n",
+                            func_name,
+                            args_llvm.join(", ")
+                        ));
                     }
                 }
 
