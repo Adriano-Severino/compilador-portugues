@@ -16,6 +16,14 @@ serde = { version = "1.0", features = ["derive"] }
 rust_decimal = { version = "1", features = ["serde"] }
 rust_decimal_macros = "1"
 
+# JIT opcional (Cranelift). Mantido atrás de feature para não impactar builds padrão.
+cranelift-codegen = { version = "0.104", optional = true }
+cranelift-module = { version = "0.104", optional = true }
+cranelift-frontend = { version = "0.104", optional = true }
+cranelift-jit = { version = "0.104", optional = true }
+cranelift-native = { version = "0.104", optional = true }
+target-lexicon = { version = "0.12", optional = true }
+
 # Test dependencies
 [dev-dependencies]
 assert_cmd = "2"
@@ -40,3 +48,14 @@ opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
+
+[features]
+# Ativa o JIT baseado em Cranelift.
+jit = [
+    "cranelift-codegen",
+    "cranelift-module",
+    "cranelift-frontend",
+    "cranelift-jit",
+    "cranelift-native",
+    "target-lexicon",
+]
