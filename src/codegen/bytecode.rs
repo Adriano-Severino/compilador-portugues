@@ -1,5 +1,5 @@
 use crate::ast;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 impl fmt::Display for ast::Expressao {
@@ -29,6 +29,8 @@ pub struct BytecodeGenerator<'a> {
     props_por_classe: HashMap<String, Vec<String>>,
     construtor_params_por_classe: HashMap<String, Vec<String>>,
     current_class_name: Option<String>,
+    // Parâmetros locais do método/construtor atual (para desambiguar nome igual a propriedade)
+    current_params: Option<HashSet<String>>,
 }
 
 impl<'a> BytecodeGenerator<'a> {
@@ -41,6 +43,7 @@ impl<'a> BytecodeGenerator<'a> {
             props_por_classe: self.props_por_classe.clone(),
             construtor_params_por_classe: self.construtor_params_por_classe.clone(),
             current_class_name: self.current_class_name.clone(),
+            current_params: self.current_params.clone(),
         }
     }
     fn get_class_declaration(&self, class_name: &str) -> Option<&'a ast::DeclaracaoClasse> {
@@ -67,6 +70,7 @@ impl<'a> BytecodeGenerator<'a> {
             props_por_classe: HashMap::new(),
             construtor_params_por_classe: HashMap::new(),
             current_class_name: None,
+            current_params: None,
         }
     }
 
@@ -95,6 +99,12 @@ impl<'a> BytecodeGenerator<'a> {
             props_por_classe: self.props_por_classe.clone(),
             construtor_params_por_classe: self.construtor_params_por_classe.clone(),
             current_class_name: Some(nome_classe.to_string()),
+            current_params: Some(
+                ctor.parametros
+                    .iter()
+                    .map(|p| p.nome.clone())
+                    .collect::<HashSet<String>>(),
+            ),
         };
         let corpo = sub.generate();
         let mut corpo_com_defaults = Vec::new();
@@ -164,6 +174,7 @@ impl<'a> BytecodeGenerator<'a> {
                     props_por_classe: self.props_por_classe.clone(),
                     construtor_params_por_classe: self.construtor_params_por_classe.clone(),
                     current_class_name: None,
+                    current_params: None,
                 };
                 self.bytecode_instructions.extend(sub.generate());
             }
@@ -221,6 +232,9 @@ impl<'a> BytecodeGenerator<'a> {
                 }
 
                 for metodo in &classe_def.metodos {
+                    if metodo.eh_abstrato {
+                        continue; // não gera corpo nem entrada para métodos abstratos
+                    }
                     self.gerar_metodo(metodo, &full_class_name);
                 }
 
@@ -279,6 +293,7 @@ impl<'a> BytecodeGenerator<'a> {
                     props_por_classe: self.props_por_classe.clone(),
                     construtor_params_por_classe: self.construtor_params_por_classe.clone(),
                     current_class_name: None,
+                    current_params: None,
                 };
                 let mut corpo = sub.generate(); // inclui HALT
                 if !matches!(corpo.last(), Some(op) if op == "RETURN") {
@@ -328,6 +343,13 @@ impl<'a> BytecodeGenerator<'a> {
             props_por_classe: self.props_por_classe.clone(),
             construtor_params_por_classe: self.construtor_params_por_classe.clone(),
             current_class_name: Some(nome_classe.to_string()),
+            current_params: Some(
+                metodo
+                    .parametros
+                    .iter()
+                    .map(|p| p.nome.clone())
+                    .collect::<HashSet<String>>(),
+            ),
         };
         let mut corpo = sub.generate();
 
@@ -389,6 +411,13 @@ impl<'a> BytecodeGenerator<'a> {
             props_por_classe: self.props_por_classe.clone(),
             construtor_params_por_classe: self.construtor_params_por_classe.clone(),
             current_class_name: Some(nome_classe.to_string()),
+            current_params: Some(
+                metodo
+                    .parametros
+                    .iter()
+                    .map(|p| p.nome.clone())
+                    .collect::<HashSet<String>>(),
+            ),
         };
         let mut corpo = sub.generate();
 
@@ -454,6 +483,7 @@ impl<'a> BytecodeGenerator<'a> {
                 props_por_classe: self.props_por_classe.clone(),
                 construtor_params_por_classe: self.construtor_params_por_classe.clone(),
                 current_class_name: None,
+                current_params: None,
             };
             self.bytecode_instructions.extend(sub.generate());
         }
@@ -573,6 +603,16 @@ impl<'a> BytecodeGenerator<'a> {
                     .type_checker
                     .resolver_nome_classe(classe, &self.namespace_path);
 
+                // Bloquear instanciação de classes abstratas no bytecode
+                if let Some(cl_decl) = self.get_class_declaration(&nome_completo) {
+                    if cl_decl.eh_abstrata {
+                        panic!(
+                            "Não é possível instanciar classe abstrata: {}",
+                            nome_completo
+                        );
+                    }
+                }
+
                 for arg in argumentos_chamada {
                     self.generate_expressao(arg);
                 }
@@ -671,6 +711,12 @@ impl<'a> BytecodeGenerator<'a> {
                     .push(format!("LOAD_CONST_DECIMAL {}", s))
             }
             ast::Expressao::Identificador(nome) => {
+                // Se o identificador é um parâmetro/variável local do método/construtor, priorizar variável
+                let is_local = self
+                    .current_params
+                    .as_ref()
+                    .map(|ps| ps.contains(nome))
+                    .unwrap_or(false);
                 if let Some(class_name) = &self.current_class_name {
                     if let Some(class_info) = self.type_checker.classes.get(class_name) {
                         let mut current_class = Some(*class_info);
@@ -678,11 +724,16 @@ impl<'a> BytecodeGenerator<'a> {
                             if class_decl.propriedades.iter().any(|p| p.nome == *nome)
                                 || class_decl.campos.iter().any(|f| f.nome == *nome)
                             {
-                                self.bytecode_instructions
-                                    .push(format!("LOAD_VAR {}", "este"));
-                                self.bytecode_instructions
-                                    .push(format!("GET_PROPERTY {}", nome));
-                                return;
+                                // Somente acessar como propriedade se NÃO houver variável local com o mesmo nome
+                                if !is_local {
+                                    self.bytecode_instructions
+                                        .push(format!("LOAD_VAR {}", "este"));
+                                    self.bytecode_instructions
+                                        .push(format!("GET_PROPERTY {}", nome));
+                                    return;
+                                } else {
+                                    break; // há variável local; cair para LOAD_VAR nome
+                                }
                             }
                             current_class =
                                 class_decl.classe_pai.as_ref().and_then(|parent_name| {
@@ -728,6 +779,15 @@ impl<'a> BytecodeGenerator<'a> {
                 let nome_completo = self
                     .type_checker
                     .resolver_nome_classe(classe_nome, &self.namespace_path);
+
+                if let Some(class_decl) = self.get_class_declaration(&nome_completo) {
+                    if class_decl.eh_abstrata {
+                        panic!(
+                            "Não é possível instanciar classe abstrata: {}",
+                            nome_completo
+                        );
+                    }
+                }
 
                 let mut final_args_count = 0;
                 if let Some(class_decl) = self.get_class_declaration(&nome_completo) {

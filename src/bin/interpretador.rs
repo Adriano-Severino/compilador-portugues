@@ -8,6 +8,10 @@ use std::rc::Rc;
 
 use rust_decimal::Decimal;
 
+// Disponibiliza o JIT da crate de biblioteca quando a feature estiver ativa
+#[cfg(feature = "jit")]
+use compilador_portugues::jit::CraneliftJit;
+
 //cargo run --bin compilador -- teste.pr --target=bytecode
 //cargo run --bin interpretador -- teste.pbc
 
@@ -1555,6 +1559,19 @@ impl VM {
 // Ponto de entrada do programa interpretador.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
+    let usar_jit = args.iter().any(|a| a == "--jit");
+
+    // Quando --jit for passado, faça um autoteste simples do JIT para confirmar que está funcional.
+    #[cfg(feature = "jit")]
+    if usar_jit {
+        if let Ok(mut jit) = CraneliftJit::new() {
+            if let Ok(handle) = jit.compilar_soma_i32() {
+                let r = unsafe { jit.chamar_soma_i32(&handle, 2, 40) };
+                eprintln!("[JIT] autoteste soma_i32(2,40) = {}", r);
+            }
+        }
+    }
+
     if args.len() < 2 {
         eprintln!(
             "Uso: {} <arquivo.pbc> [--executar-funcao <nome_da_funcao_completo>]",
