@@ -16,6 +16,10 @@ pub struct LlvmGenerator<'a> {
     namespace_path: String,
     /// Mantém o controle da classe que está sendo processada no momento.
     classe_atual: Option<String>,
+    // Mapa: FQN da classe -> lista ordenada de (nome_metodo, FQN_declarante)
+    vtables: HashMap<String, Vec<(String, String)>>,
+    // Índices rápidos: FQN -> (metodo -> índice)
+    vtable_index: HashMap<String, HashMap<String, usize>>,
 }
 
 impl<'a> LlvmGenerator<'a> {
@@ -35,12 +39,17 @@ impl<'a> LlvmGenerator<'a> {
             variables: HashMap::new(),
             namespace_path: String::new(),
             classe_atual: None,
+            vtables: HashMap::new(),
+            vtable_index: HashMap::new(),
         }
     }
 
     pub fn generate(&mut self) -> String {
         self.prepare_header();
+        // Constrói vtables antes de definir structs
+        self.build_all_vtables();
         self.define_all_structs();
+        self.define_all_vtable_globals();
         self.define_static_globals();
 
         // Gera definições de funções e classes.
@@ -126,6 +135,8 @@ impl<'a> LlvmGenerator<'a> {
 
     fn define_struct(&mut self, fqn: &str) {
         let mut field_types_llvm = Vec::new();
+        // Primeiro campo: ponteiro para vtable (i8**)
+        field_types_llvm.push("i8**".to_string());
         if let Some(resolved_info) = self.resolved_classes.get(fqn) {
             let mut all_fields: Vec<(&String, &ast::Tipo)> = resolved_info
                 .fields
@@ -840,7 +851,8 @@ impl<'a> LlvmGenerator<'a> {
             .get(&fqn_class_name)
             .unwrap_or_else(|| panic!("Classe '{}' não encontrada.", fqn_class_name));
 
-        let mut current_index = 0;
+        // Índice 0 é o vptr; campos começam em 1
+        let mut current_index = 1;
         if let Some(pos) = resolved_info
             .fields
             .iter()
@@ -1084,6 +1096,29 @@ impl<'a> LlvmGenerator<'a> {
                     obj_ptr_reg, malloc_ptr_reg, struct_ptr_type
                 ));
 
+                // Inicializa o ponteiro de vtable no primeiro campo
+                if let Some(vt_len) = self.vtables.get(&fqn).map(|v| v.len()) {
+                    let vt_sym = self.vtable_global_symbol(&fqn);
+                    // Obter ponteiro para o primeiro elemento da vtable (i8**)
+                    let vt_elem0 = self.get_unique_temp_name();
+                    self.body.push_str(&format!(
+                        "  {0} = getelementptr inbounds [{1} x i8*], [{1} x i8*]* {2}, i32 0, i32 0\n",
+                        vt_elem0,
+                        vt_len,
+                        vt_sym
+                    ));
+                    // Escreve vt pointer no primeiro campo da struct
+                    let vptr_ptr = self.get_unique_temp_name();
+                    self.body.push_str(&format!(
+                        "  {0} = bitcast {1} {2} to i8***\n",
+                        vptr_ptr, struct_ptr_type, obj_ptr_reg
+                    ));
+                    self.body.push_str(&format!(
+                        "  store i8** {0}, i8*** {1}\n",
+                        vt_elem0, vptr_ptr
+                    ));
+                }
+
                 // Chama um construtor: seleciona pelo número de argumentos (com suporte a defaults)
                 if let Some(class_decl) = self.type_checker.classes.get(&fqn) {
                     // Encontrar melhor construtor compatível
@@ -1213,54 +1248,118 @@ impl<'a> LlvmGenerator<'a> {
                 let fqn_class_name = self
                     .type_checker
                     .resolver_nome_classe(&class_name, &self.namespace_path);
+                // Determina se é virtual (tem índice de vtable)
+                let vtable_idx_opt = self
+                    .vtable_index
+                    .get(&fqn_class_name)
+                    .and_then(|m| m.get(metodo_nome).cloned());
 
+                // Resolve tipo de retorno pela classe estática
                 let resolved_method = self
                     .resolved_classes
                     .get(&fqn_class_name)
                     .and_then(|c| c.methods.get(metodo_nome))
+                    .cloned()
                     .unwrap_or_else(|| {
                         panic!(
-                            "Método '{}' não encontrado na classe '{}'",
+                            "Método '{}' não encontrado em '{}'",
                             metodo_nome, fqn_class_name
                         )
                     });
-
                 let return_type = resolved_method
                     .tipo_retorno
                     .clone()
                     .unwrap_or(ast::Tipo::Vazio);
                 let return_type_llvm = self.map_type_to_llvm_arg(&return_type);
-                // Usa a classe declaradora para construir o símbolo correto (suporta métodos herdados)
-                let declaring_class = self
-                    .get_declaring_class_of_method(resolved_method)
-                    .unwrap_or_else(|| fqn_class_name.clone());
-                let fqn_method =
-                    format!("{0}::{1}", declaring_class, metodo_nome).replace('.', "_");
 
-                let mut arg_regs = Vec::new();
+                // Prepara argumentos
                 let obj_ptr_type = self.map_type_to_llvm_ptr(&obj_type);
-                arg_regs.push(format!("{0} {1}", obj_ptr_type, obj_reg));
-
+                let mut args_llvm_sig: Vec<String> = Vec::new();
+                let mut args_values: Vec<(String, ast::Tipo)> = Vec::new();
+                args_llvm_sig.push(obj_ptr_type.clone());
+                args_values.push((obj_reg.clone(), obj_type.clone()));
                 for arg in argumentos {
                     let (arg_reg, arg_type) = self.generate_expressao(arg);
-                    let llvm_type = self.map_type_to_llvm_arg(&arg_type);
-                    arg_regs.push(format!("{0} {1}", llvm_type, arg_reg));
+                    args_llvm_sig.push(self.map_type_to_llvm_arg(&arg_type));
+                    args_values.push((arg_reg, arg_type));
                 }
-                let args_str = arg_regs.join(", ");
 
-                if return_type == ast::Tipo::Vazio {
+                if let Some(vt_index) = vtable_idx_opt {
+                    // Chamada indireta via vtable
+                    // Carrega vptr do objeto
+                    let vptr_ptr = self.get_unique_temp_name();
                     self.body.push_str(&format!(
-                        "  call void @\"{0}\"({1})\n",
-                        fqn_method, args_str
+                        "  {0} = bitcast {1} {2} to i8***\n",
+                        vptr_ptr, obj_ptr_type, obj_reg
                     ));
-                    ("".to_string(), return_type)
+                    let vptr = self.get_unique_temp_name();
+                    self.body
+                        .push_str(&format!("  {0} = load i8**, i8*** {1}\n", vptr, vptr_ptr));
+                    // Acessa slot da vtable
+                    let slot_ptr = self.get_unique_temp_name();
+                    self.body.push_str(&format!(
+                        "  {0} = getelementptr inbounds i8*, i8** {1}, i32 {2}\n",
+                        slot_ptr, vptr, vt_index
+                    ));
+                    let fn_i8 = self.get_unique_temp_name();
+                    self.body
+                        .push_str(&format!("  {0} = load i8*, i8** {1}\n", fn_i8, slot_ptr));
+                    // Monta o tipo de função esperado: ret (Tself, args...)*
+                    let fn_ty = format!("{0} ({1})*", return_type_llvm, args_llvm_sig.join(", "));
+                    let fn_typed = self.get_unique_temp_name();
+                    self.body.push_str(&format!(
+                        "  {0} = bitcast i8* {1} to {2}\n",
+                        fn_typed, fn_i8, fn_ty
+                    ));
+                    // Chamada indireta
+                    let args_vals: Vec<String> = args_values
+                        .iter()
+                        .map(|(reg, ty)| format!("{0} {1}", self.map_type_to_llvm_arg(ty), reg))
+                        .collect();
+                    let call_sig = args_vals.join(", ");
+                    if return_type == ast::Tipo::Vazio {
+                        self.body.push_str(&format!(
+                            "  call {0} {1}({2})\n",
+                            return_type_llvm, fn_typed, call_sig
+                        ));
+                        ("".to_string(), return_type)
+                    } else {
+                        let result_reg = self.get_unique_temp_name();
+                        self.body.push_str(&format!(
+                            "  {0} = call {1} {2}({3})\n",
+                            result_reg, return_type_llvm, fn_typed, call_sig
+                        ));
+                        (result_reg, return_type)
+                    }
                 } else {
-                    let result_reg = self.get_unique_temp_name();
-                    self.body.push_str(&format!(
-                        "  {0} = call {1} @\"{2}\"({3})\n",
-                        result_reg, return_type_llvm, fqn_method, args_str
-                    ));
-                    (result_reg, return_type)
+                    // Não-virtual: chamada direta
+                    let declaring_class = self
+                        .get_declaring_class_of_method(resolved_method)
+                        .unwrap_or_else(|| fqn_class_name.clone());
+                    let fqn_method =
+                        format!("{0}::{1}", declaring_class, metodo_nome).replace('.', "_");
+                    let args_vals: Vec<String> =
+                        std::iter::once((obj_reg.clone(), obj_type.clone()))
+                            .chain(args_values.into_iter())
+                            .map(|(reg, ty)| {
+                                format!("{0} {1}", self.map_type_to_llvm_arg(&ty), reg)
+                            })
+                            .collect();
+                    let args_str = args_vals.join(", ");
+                    if return_type == ast::Tipo::Vazio {
+                        self.body.push_str(&format!(
+                            "  call void @\"{0}\"({1})\n",
+                            fqn_method, args_str
+                        ));
+                        ("".to_string(), return_type)
+                    } else {
+                        let result_reg = self.get_unique_temp_name();
+                        self.body.push_str(&format!(
+                            "  {0} = call {1} @\"{2}\"({3})\n",
+                            result_reg, return_type_llvm, fqn_method, args_str
+                        ));
+                        (result_reg, return_type)
+                    }
                 }
             }
             ast::Expressao::Comparacao(op, esq, dir) => {
@@ -1780,5 +1879,137 @@ impl<'a> LlvmGenerator<'a> {
             ast::Tipo::Classe(_) => self.map_type_to_llvm_ptr(tipo),
             _ => panic!("Tipo LLVM não mapeado para argumento: {:?}", tipo),
         }
+    }
+}
+
+impl<'a> LlvmGenerator<'a> {
+    fn vtable_global_symbol(&self, fqn_class: &str) -> String {
+        format!("@.vtable.{}", fqn_class.replace('.', "_"))
+    }
+
+    fn build_all_vtables(&mut self) {
+        // Ordena por nome para determinismo
+        let mut classes: Vec<String> = self.resolved_classes.keys().cloned().collect();
+        classes.sort();
+        for fqn in classes {
+            let entries = self.compute_vtable_for(&fqn);
+            // Índices
+            let mut index = HashMap::new();
+            for (i, (name, _)) in entries.iter().enumerate() {
+                index.insert(name.clone(), i);
+            }
+            self.vtable_index.insert(fqn.clone(), index);
+            self.vtables.insert(fqn, entries);
+        }
+    }
+
+    fn compute_vtable_for(&self, fqn: &str) -> Vec<(String, String)> {
+        // Começa com vtable do pai
+        let mut result: Vec<(String, String)> = Vec::new();
+        if let Some(info) = self.resolved_classes.get(fqn) {
+            if let Some(parent_simple) = &info.parent_name {
+                let parent_fqn = self
+                    .type_checker
+                    .resolver_nome_classe(parent_simple, &self.get_namespace_from_fqn(fqn));
+                if self.resolved_classes.contains_key(&parent_fqn) {
+                    result = self.compute_vtable_for(&parent_fqn);
+                }
+            }
+        }
+        // Métodos declarados nesta classe
+        let decl = match self.type_checker.classes.get(fqn) {
+            Some(d) => *d,
+            None => return result,
+        };
+        for m in &decl.metodos {
+            if m.eh_abstrato || m.eh_estatica {
+                continue;
+            }
+            if m.eh_override || m.eh_virtual {
+                // Se já existe no pai, substitui; senão, adiciona
+                if let Some(pos) = result.iter().position(|(n, _)| n == &m.nome) {
+                    result[pos] = (m.nome.clone(), fqn.to_string());
+                } else if m.eh_virtual {
+                    result.push((m.nome.clone(), fqn.to_string()));
+                }
+            }
+        }
+        result
+    }
+
+    fn define_all_vtable_globals(&mut self) {
+        let mut fqns: Vec<_> = self.vtables.keys().cloned().collect();
+        fqns.sort();
+        for fqn in fqns {
+            let entries = self.vtables.get(&fqn).cloned().unwrap_or_default();
+            let sym = self.vtable_global_symbol(&fqn);
+            let elems: Vec<String> = entries
+                .iter()
+                .map(|(metodo_nome, decl_cls)| {
+                    // Símbolo LLVM do método declarado
+                    let fun_sym = format!("{}::{}", decl_cls, metodo_nome).replace('.', "_");
+
+                    // Descobre a assinatura exata do método na classe declarante
+                    let metodo_decl = self
+                        .type_checker
+                        .classes
+                        .get(decl_cls)
+                        .and_then(|c| c.metodos.iter().find(|m| m.nome == *metodo_nome))
+                        .unwrap_or_else(|| panic!(
+                            "Método '{}' não encontrado em classe declarante '{}' ao construir vtable de '{}'",
+                            metodo_nome, decl_cls, fqn
+                        ));
+
+                    // Resolve tipos no namespace da classe declarante
+                    let decl_ns = self.get_namespace_from_fqn(decl_cls);
+                    let ret_tipo_resolvido = self.resolve_type(
+                        &metodo_decl
+                            .tipo_retorno
+                            .clone()
+                            .unwrap_or(ast::Tipo::Vazio),
+                        &decl_ns,
+                    );
+                    let ret_llvm = self.map_type_to_llvm_arg(&ret_tipo_resolvido);
+
+                    // Primeiro parâmetro é o ponteiro para a classe declarante (self)
+                    let self_ptr_ty = self.map_type_to_llvm_ptr(&ast::Tipo::Classe(decl_cls.clone()));
+                    let mut params_llvm: Vec<String> = vec![self_ptr_ty];
+                    for p in &metodo_decl.parametros {
+                        let p_res = self.resolve_type(&p.tipo, &decl_ns);
+                        params_llvm.push(self.map_type_to_llvm_arg(&p_res));
+                    }
+                    let params_sig = params_llvm.join(", ");
+
+                    // Bitcast do ponteiro de função tipado para i8*
+                    format!(
+                        "i8* bitcast ({ret} ({params})* @\"{sym}\" to i8*)",
+                        ret = ret_llvm,
+                        params = params_sig,
+                        sym = fun_sym
+                    )
+                })
+                .collect();
+            // Caso sem entradas, cria um array vazio de i8*
+            let count = elems.len();
+            let array_elems = if count == 0 {
+                String::new()
+            } else {
+                elems.join(", ")
+            };
+            self.header.push_str(&format!(
+                "{0} = global [{1} x i8*] [ {2} ], align 8\n",
+                sym, count, array_elems
+            ));
+        }
+    }
+
+    fn get_namespace_from_fqn(&self, full: &str) -> String {
+        full.rsplit_once('.')
+            .map(|(ns, _)| ns.to_string())
+            .unwrap_or_default()
+    }
+
+    fn get_namespace_from_full_name(&self, full: &str) -> String {
+        self.get_namespace_from_fqn(full)
     }
 }

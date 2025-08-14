@@ -43,6 +43,14 @@ impl<'a> VerificadorTipos<'a> {
             return true;
         }
         match (destino, origem) {
+            // Subtipagem de classes: permite atribuir derivada em variável do tipo base
+            (Classe(dest), Classe(orig)) => {
+                if dest == orig {
+                    true
+                } else {
+                    self.is_subclass_of(orig, dest)
+                }
+            }
             // Enums: somente o mesmo enum é compatível implicitamente
             (Enum(a), Enum(b)) if a == b => true,
             // Texto aceita conversão implícita de inteiro/booleano (compatibilidade existente)
@@ -53,6 +61,31 @@ impl<'a> VerificadorTipos<'a> {
             (Duplo, Flutuante) => true,
             _ => false,
         }
+    }
+
+    // Verifica se `sub` é subclasse (direta ou indireta) de `base`. Parâmetros são FQN.
+    fn is_subclass_of(&self, sub: &str, base: &str) -> bool {
+        if sub == base {
+            return true;
+        }
+        let mut current = Some(sub.to_string());
+        while let Some(cls_fqn) = current {
+            if let Some(decl) = self.classes.get(&cls_fqn) {
+                if let Some(parent_simple) = &decl.classe_pai {
+                    let parent_fqn = self.resolver_nome_classe(
+                        parent_simple,
+                        &self.get_namespace_from_full_name(&cls_fqn),
+                    );
+                    if parent_fqn == base {
+                        return true;
+                    }
+                    current = Some(parent_fqn);
+                    continue;
+                }
+            }
+            break;
+        }
+        false
     }
 
     pub fn verificar_programa(&mut self, programa: &'a Programa) -> Result<(), Vec<String>> {
@@ -474,7 +507,7 @@ impl<'a> VerificadorTipos<'a> {
                             {
                                 if !base_m.eh_virtual {
                                     self.erros.push(format!(
-                                        "Método '{}' em '{}' usa 'sobrescreve' mas o método da classe base não é 'redefinível'",
+                                        "Método '{}' em '{}' usa 'sobrescreve' mas o método da classe base não é 'redefinível'. Dica: marque o método da base como 'redefinível'.",
                                         metodo.nome, fqn
                                     ));
                                 } else {
@@ -482,14 +515,14 @@ impl<'a> VerificadorTipos<'a> {
                                     let (ret_b, params_b) = self.assinatura_metodo(base_m);
                                     if ret_c != ret_b || params_c != params_b {
                                         self.erros.push(format!(
-                                            "Assinatura incompatível no override de '{}.{}'",
+                                            "Assinatura incompatível no override de '{}.{}'. Dica: a assinatura deve ser exatamente a mesma da base (retorno e parâmetros).",
                                             fqn, metodo.nome
                                         ));
                                     }
                                 }
                             } else {
                                 self.erros.push(format!(
-                                    "Método '{}' marcado como 'sobrescreve' mas não existe método correspondente na classe base de '{}'",
+                                    "Método '{}' marcado como 'sobrescreve' mas não existe método correspondente na classe base de '{}'. Dica: verifique nome, parâmetros e se o método da base está visível.",
                                     metodo.nome, fqn
                                 ));
                             }
