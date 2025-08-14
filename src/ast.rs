@@ -14,6 +14,7 @@ pub enum Tipo {
     Vazio,
     Lista(Box<Tipo>),
     Classe(String), // Stores FQN
+    Enum(String),   // Enumeração (FQN)
     Funcao(Vec<Tipo>, Box<Tipo>),
     Generico(String),
     Opcional(Box<Tipo>),

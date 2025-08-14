@@ -290,7 +290,9 @@ impl<'a> LlvmGenerator<'a> {
         self.classe_atual = Some(fqn);
         // Métodos (pula abstratos)
         for metodo in &class.metodos {
-            if metodo.eh_abstrato { continue; }
+            if metodo.eh_abstrato {
+                continue;
+            }
             self.generate_metodo(metodo);
         }
         // Construtores
@@ -515,6 +517,7 @@ impl<'a> LlvmGenerator<'a> {
             ast::Tipo::Duplo => 8,
             ast::Tipo::Decimal => 8,
             ast::Tipo::Booleano => 1,
+            ast::Tipo::Enum(_) => 4,
             ast::Tipo::Classe(_) => 8,
             _ => 8,
         }
@@ -1172,7 +1175,8 @@ impl<'a> LlvmGenerator<'a> {
                         })
                     })
                     .unwrap();
-                let return_type = func.tipo_retorno.clone().unwrap_or(ast::Tipo::Vazio);
+                let return_type_decl = func.tipo_retorno.clone().unwrap_or(ast::Tipo::Vazio);
+                let return_type = self.resolve_type(&return_type_decl, &self.namespace_path);
                 let return_type_llvm = self.map_type_to_llvm_arg(&return_type);
 
                 let mut arg_regs = Vec::new();
@@ -1265,7 +1269,7 @@ impl<'a> LlvmGenerator<'a> {
                 use ast::Tipo::*;
                 let result_reg = self.get_unique_temp_name();
                 match (left_type.clone(), right_type.clone()) {
-                    (Inteiro | Booleano, Inteiro | Booleano) => {
+                    (Inteiro | Booleano | Enum(_), Inteiro | Booleano | Enum(_)) => {
                         let op_str = match op {
                             ast::OperadorComparacao::Igual => "eq",
                             ast::OperadorComparacao::Diferente => "ne",
@@ -1354,6 +1358,15 @@ impl<'a> LlvmGenerator<'a> {
                             loaded_reg, ty, sym
                         ));
                         return (loaded_reg, member_type);
+                    }
+                    // Se for enumeração, emitir o valor inteiro da posição do membro
+                    let fqn_enum = self
+                        .type_checker
+                        .resolver_nome_enum(class_ident, &self.namespace_path);
+                    if let Some(en) = self.type_checker.enums.get(&fqn_enum) {
+                        if let Some(idx) = en.valores.iter().position(|v| v == membro_nome) {
+                            return (idx.to_string(), ast::Tipo::Enum(fqn_enum));
+                        }
                     }
                 }
 
@@ -1450,6 +1463,7 @@ impl<'a> LlvmGenerator<'a> {
             ast::Tipo::Texto => self.get_safe_string_ptr(reg),
             ast::Tipo::Decimal => self.get_safe_string_ptr(reg),
             ast::Tipo::Inteiro => self.convert_int_to_string(reg),
+            ast::Tipo::Enum(_) => self.convert_int_to_string(reg),
             ast::Tipo::Flutuante => self.convert_float_to_string(reg),
             ast::Tipo::Duplo => self.convert_double_to_string(reg),
             ast::Tipo::Booleano => {
@@ -1701,13 +1715,24 @@ impl<'a> LlvmGenerator<'a> {
 
     fn resolve_type(&self, tipo: &ast::Tipo, namespace: &str) -> ast::Tipo {
         if let ast::Tipo::Classe(unresolved_name) = tipo {
-            let fqn = self
+            // Primeiro tenta resolver como classe
+            let fqn_class = self
                 .type_checker
                 .resolver_nome_classe(unresolved_name, namespace);
-            ast::Tipo::Classe(fqn)
-        } else {
-            tipo.clone()
+            if self.type_checker.classes.contains_key(&fqn_class) {
+                return ast::Tipo::Classe(fqn_class);
+            }
+            // Depois tenta como enumeração
+            let fqn_enum = self
+                .type_checker
+                .resolver_nome_enum(unresolved_name, namespace);
+            if self.type_checker.enums.contains_key(&fqn_enum) {
+                return ast::Tipo::Enum(fqn_enum);
+            }
+            // Mantém original caso não resolva
+            return tipo.clone();
         }
+        tipo.clone()
     }
 
     fn map_type_to_llvm_storage(&self, tipo: &ast::Tipo) -> String {
@@ -1719,6 +1744,7 @@ impl<'a> LlvmGenerator<'a> {
             ast::Tipo::Decimal => "i8*".to_string(),
             ast::Tipo::Booleano => "i1".to_string(),
             ast::Tipo::Vazio => "void".to_string(),
+            ast::Tipo::Enum(_) => "i32".to_string(),
             ast::Tipo::Classe(_) => self.map_type_to_llvm_ptr(tipo),
             _ => panic!("Tipo LLVM não mapeado para armazenamento: {:?}", tipo),
         }
@@ -1732,6 +1758,7 @@ impl<'a> LlvmGenerator<'a> {
             ast::Tipo::Duplo => "double*".to_string(),
             ast::Tipo::Decimal => "i8**".to_string(),
             ast::Tipo::Booleano => "i1*".to_string(),
+            ast::Tipo::Enum(_) => "i32*".to_string(),
             ast::Tipo::Classe(name) => {
                 let sanitized_name = name.replace('.', "_");
                 format!("%class.{0}*", sanitized_name)
@@ -1749,6 +1776,7 @@ impl<'a> LlvmGenerator<'a> {
             ast::Tipo::Decimal => "i8*".to_string(),
             ast::Tipo::Booleano => "i1".to_string(),
             ast::Tipo::Vazio => "void".to_string(),
+            ast::Tipo::Enum(_) => "i32".to_string(),
             ast::Tipo::Classe(_) => self.map_type_to_llvm_ptr(tipo),
             _ => panic!("Tipo LLVM não mapeado para argumento: {:?}", tipo),
         }

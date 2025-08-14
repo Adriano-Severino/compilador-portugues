@@ -766,6 +766,17 @@ impl<'a> BytecodeGenerator<'a> {
                         ));
                         return;
                     }
+                    // Enumeração: emite o índice do membro como inteiro
+                    let fqn_enum = self
+                        .type_checker
+                        .resolver_nome_enum(class_name, &self.namespace_path);
+                    if let Some(en) = self.type_checker.enums.get(&fqn_enum) {
+                        if let Some(idx) = en.valores.iter().position(|v| v == membro) {
+                            self.bytecode_instructions
+                                .push(format!("LOAD_CONST_INT {}", idx));
+                            return;
+                        }
+                    }
                 }
 
                 // Acesso a membro de instância

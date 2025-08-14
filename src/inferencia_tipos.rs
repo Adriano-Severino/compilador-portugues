@@ -306,6 +306,7 @@ impl InferenciaTipos {
     // ✅ VERIFICAR: Se necessário, adicionar case para Decimal
     fn tipos_compativeis(&self, tipo1: &Tipo, tipo2: &Tipo) -> bool {
         match (tipo1, tipo2) {
+            (Tipo::Enum(a), Tipo::Enum(b)) => a == b,
             (Tipo::Inteiro, Tipo::Inteiro) => true,
             (Tipo::Flutuante, Tipo::Flutuante) => true,
             (Tipo::Duplo, Tipo::Duplo) => true,
@@ -359,6 +360,7 @@ impl InferenciaTipos {
             Tipo::Decimal => "decimal".to_string(), // ✅ ADICIONADO: Case faltante
             Tipo::Booleano => "booleano".to_string(),
             Tipo::Vazio => "vazio".to_string(),
+            Tipo::Enum(nome) => format!("enum {}", nome),
             Tipo::Classe(nome) => nome.clone(),
             Tipo::Lista(t) => format!("lista<{}>", self.tipo_para_string(t)),
             Tipo::Funcao(params, ret) => {

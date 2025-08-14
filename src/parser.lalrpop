@@ -81,7 +81,23 @@ Identificador: String = {
 Declaracao: ast::Declaracao = {
     <funcao:DeclaracaoFuncao> => ast::Declaracao::DeclaracaoFuncao(funcao),
     <classe:DeclaracaoClasse> => ast::Declaracao::DeclaracaoClasse(classe),
+    <en:DeclaracaoEnumeracao> => ast::Declaracao::DeclaracaoEnum(en),
     <cmd:ComandoTopLevel> => ast::Declaracao::Comando(cmd),
+};
+
+// === ENUMERAÇÃO ===
+DeclaracaoEnumeracao: ast::DeclaracaoEnum = {
+    "enumeração" <nome:IdentificadorSimples> "{" <valores:ListaIdentificadores?> "}" => {
+        ast::DeclaracaoEnum { nome, valores: valores.unwrap_or_default() }
+    }
+};
+
+ListaIdentificadores: Vec<String> = {
+    <primeiro:IdentificadorSimples> <rest:("," IdentificadorSimples)*> => {
+        let mut v = vec![primeiro];
+        v.extend(rest.into_iter().map(|(_, id)| id));
+        v
+    }
 };
 
 // === MODIFICADORES DE ACESSO =============================================
@@ -663,7 +679,8 @@ extern {
         "verdadeiro" => Token::TVerdadeiro,
         "falso" => Token::TFalso,
         "classe" => Token::TClasse,
-        "construtor" => Token::TConstrutor,
+    "enumeração" => Token::TEnumeracao,
+    "construtor" => Token::TConstrutor,
         "publico" => Token::TPublico,
         "privado" => Token::TPrivado,
         "protegido" => Token::TProtegido,

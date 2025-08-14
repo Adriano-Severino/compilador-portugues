@@ -7,6 +7,7 @@ pub struct VerificadorTipos<'a> {
     usings: Vec<String>,
     simbolos_namespaces: HashMap<String, &'a Declaracao>,
     pub classes: HashMap<String, &'a DeclaracaoClasse>,
+    pub enums: HashMap<String, &'a DeclaracaoEnum>,
     pub resolved_classes: HashMap<String, ResolvedClassInfo<'a>>,
     erros: Vec<String>,
 }
@@ -29,6 +30,7 @@ impl<'a> VerificadorTipos<'a> {
             usings: Vec::new(),
             simbolos_namespaces: HashMap::new(),
             classes: HashMap::new(),
+            enums: HashMap::new(),
             resolved_classes: HashMap::new(),
             erros: Vec::new(),
         }
@@ -41,6 +43,8 @@ impl<'a> VerificadorTipos<'a> {
             return true;
         }
         match (destino, origem) {
+            // Enums: somente o mesmo enum é compatível implicitamente
+            (Enum(a), Enum(b)) if a == b => true,
             // Texto aceita conversão implícita de inteiro/booleano (compatibilidade existente)
             (Texto, Inteiro) | (Texto, Booleano) => true,
             // Promoções numéricas
@@ -61,6 +65,9 @@ impl<'a> VerificadorTipos<'a> {
             if let Declaracao::DeclaracaoClasse(cl) = decl {
                 self.classes.insert(nome.clone(), cl);
             }
+            if let Declaracao::DeclaracaoEnum(en) = decl {
+                self.enums.insert(nome.clone(), en);
+            }
             self.simbolos_namespaces.insert(nome, decl);
         }
         for ns in &programa.namespaces {
@@ -69,6 +76,9 @@ impl<'a> VerificadorTipos<'a> {
                 let fqn = format!("{}.{}", ns.nome, nome_simples);
                 if let Declaracao::DeclaracaoClasse(cl) = decl {
                     self.classes.insert(fqn.clone(), cl);
+                }
+                if let Declaracao::DeclaracaoEnum(en) = decl {
+                    self.enums.insert(fqn.clone(), en);
                 }
                 self.simbolos_namespaces.insert(fqn, decl);
             }
@@ -308,8 +318,31 @@ impl<'a> VerificadorTipos<'a> {
         match declaracao {
             Declaracao::DeclaracaoFuncao(f) => f.nome.clone(),
             Declaracao::DeclaracaoClasse(c) => c.nome.clone(),
+            Declaracao::DeclaracaoEnum(e) => e.nome.clone(),
             _ => "".to_string(),
         }
+    }
+
+    pub fn resolver_nome_enum(&self, nome: &str, namespace_atual: &str) -> String {
+        if nome.contains('.') {
+            return nome.to_string();
+        }
+        if !namespace_atual.is_empty() {
+            let fqn = format!("{}.{}", namespace_atual, nome);
+            if self.enums.contains_key(&fqn) {
+                return fqn;
+            }
+        }
+        for using_path in &self.usings {
+            let fqn = format!("{}.{}", using_path, nome);
+            if self.enums.contains_key(&fqn) {
+                return fqn;
+            }
+        }
+        if self.enums.contains_key(nome) {
+            return nome.to_string();
+        }
+        nome.to_string()
     }
 
     fn verificar_declaracao(
@@ -368,9 +401,21 @@ impl<'a> VerificadorTipos<'a> {
                     let mut metodo_vars = escopo_vars.clone();
                     for param in &metodo.parametros {
                         let resolved_param_type = match &param.tipo {
-                            Tipo::Classe(nome_classe) => Tipo::Classe(
-                                self.resolver_nome_classe(nome_classe, namespace_atual),
-                            ),
+                            Tipo::Classe(nome_classe) => {
+                                let fqn_cls =
+                                    self.resolver_nome_classe(nome_classe, namespace_atual);
+                                if self.classes.contains_key(&fqn_cls) {
+                                    Tipo::Classe(fqn_cls)
+                                } else {
+                                    let fqn_en =
+                                        self.resolver_nome_enum(nome_classe, namespace_atual);
+                                    if self.enums.contains_key(&fqn_en) {
+                                        Tipo::Enum(fqn_en)
+                                    } else {
+                                        param.tipo.clone()
+                                    }
+                                }
+                            }
                             _ => param.tipo.clone(),
                         };
                         metodo_vars.insert(param.nome.clone(), resolved_param_type);
@@ -432,7 +477,17 @@ impl<'a> VerificadorTipos<'a> {
                 );
                 let tipo_resolvido = match tipo {
                     Tipo::Classe(nome_classe) => {
-                        Tipo::Classe(self.resolver_nome_classe(nome_classe, namespace_atual))
+                        let fqn_cls = self.resolver_nome_classe(nome_classe, namespace_atual);
+                        if self.classes.contains_key(&fqn_cls) {
+                            Tipo::Classe(fqn_cls)
+                        } else {
+                            let fqn_en = self.resolver_nome_enum(nome_classe, namespace_atual);
+                            if self.enums.contains_key(&fqn_en) {
+                                Tipo::Enum(fqn_en)
+                            } else {
+                                tipo.clone()
+                            }
+                        }
                     }
                     _ => tipo.clone(),
                 };
@@ -653,9 +708,15 @@ impl<'a> VerificadorTipos<'a> {
                         }
                     }
                 }
-                let fqn = self.resolver_nome_classe(nome, namespace_atual);
-                if self.classes.contains_key(&fqn) {
-                    return Tipo::Classe(fqn.clone());
+                // Classe?
+                let fqn_class = self.resolver_nome_classe(nome, namespace_atual);
+                if self.classes.contains_key(&fqn_class) {
+                    return Tipo::Classe(fqn_class);
+                }
+                // Enum?
+                let fqn_enum = self.resolver_nome_enum(nome, namespace_atual);
+                if self.enums.contains_key(&fqn_enum) {
+                    return Tipo::Enum(fqn_enum);
                 }
                 self.erros
                     .push(format!("Identificador \"{}\" não encontrado.", nome));
@@ -668,8 +729,8 @@ impl<'a> VerificadorTipos<'a> {
                     classe_atual,
                     escopo_vars,
                 );
-                if let Tipo::Classe(nome_classe) = obj_tipo {
-                    if let Some(class_info) = self.resolved_classes.get(&nome_classe) {
+                if let Tipo::Classe(ref nome_classe) = obj_tipo {
+                    if let Some(class_info) = self.resolved_classes.get(nome_classe) {
                         if let Some(prop) = class_info
                             .properties
                             .iter()
@@ -681,6 +742,14 @@ impl<'a> VerificadorTipos<'a> {
                             class_info.fields.iter().find(|f| f.nome == *membro_nome)
                         {
                             return field.tipo.clone();
+                        }
+                    }
+                }
+                // Enum membro? O membro possui o tipo do próprio enum
+                if let Tipo::Enum(ref fqn_enum) = obj_tipo {
+                    if let Some(en) = self.enums.get(fqn_enum) {
+                        if en.valores.iter().any(|v| v == membro_nome) {
+                            return Tipo::Enum(fqn_enum.clone());
                         }
                     }
                 }
@@ -743,17 +812,21 @@ impl<'a> VerificadorTipos<'a> {
                         }
                     }
                 }
-                let fqn = self.resolver_nome_classe(nome, namespace_atual);
-                if self.classes.contains_key(&fqn) {
-                    return Tipo::Classe(fqn.clone());
+                let fqn_class = self.resolver_nome_classe(nome, namespace_atual);
+                if self.classes.contains_key(&fqn_class) {
+                    return Tipo::Classe(fqn_class);
+                }
+                let fqn_enum = self.resolver_nome_enum(nome, namespace_atual);
+                if self.enums.contains_key(&fqn_enum) {
+                    return Tipo::Enum(fqn_enum);
                 }
                 Tipo::Inferido
             }
             Expressao::AcessoMembro(obj_expr, membro_nome) => {
                 let obj_tipo =
                     self.get_expr_type(obj_expr, namespace_atual, classe_atual, escopo_vars);
-                if let Tipo::Classe(nome_classe) = obj_tipo {
-                    if let Some(class_info) = self.resolved_classes.get(&nome_classe) {
+                if let Tipo::Classe(ref nome_classe) = obj_tipo {
+                    if let Some(class_info) = self.resolved_classes.get(nome_classe) {
                         if let Some(prop) = class_info
                             .properties
                             .iter()
@@ -765,6 +838,13 @@ impl<'a> VerificadorTipos<'a> {
                             class_info.fields.iter().find(|f| f.nome == *membro_nome)
                         {
                             return field.tipo.clone();
+                        }
+                    }
+                }
+                if let Tipo::Enum(ref fqn_enum) = obj_tipo {
+                    if let Some(en) = self.enums.get(fqn_enum) {
+                        if en.valores.iter().any(|v| v == membro_nome) {
+                            return Tipo::Enum(fqn_enum.clone());
                         }
                     }
                 }
