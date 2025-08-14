@@ -397,6 +397,8 @@ Tipo: ast::Tipo = {
     "inteiro" => ast::Tipo::Inteiro,
     "texto" => ast::Tipo::Texto,
     "booleano" => ast::Tipo::Booleano,
+    "flutuante" => ast::Tipo::Flutuante,
+    "duplo" => ast::Tipo::Duplo,
     "decimal" => ast::Tipo::Decimal,
     "vazio" => ast::Tipo::Vazio,
     <nome:TIdentificador> => ast::Tipo::Classe(nome),
@@ -585,6 +587,8 @@ ExpressaoLiteral: ast::Expressao = {
     <s:TStringInterpolada> => crate::interpolacao::parse_string_interpolada(&s).unwrap(),
     <t:TString>            => ast::Expressao::Texto(t),
     <n:TInteiro>           => ast::Expressao::Inteiro(n),
+    <f:TFlutuanteLiteral>  => ast::Expressao::FlutuanteLiteral(f),
+    <df:TDuploLiteral>     => ast::Expressao::DuploLiteral(df),
     <d:TDecimal>           => ast::Expressao::Decimal(d),
 };
 
@@ -631,6 +635,8 @@ extern {
         "inteiro" => Token::TTipoInteiro,
         "texto" => Token::TTipoTexto,
         "booleano" => Token::TTipoBooleano,
+    "flutuante" => Token::TTipoFlutuante,
+    "duplo" => Token::TTipoDuplo,
         "decimal" => Token::TTipoDecimal,
         "vazio" => Token::TTipoVazio,
         "verdadeiro" => Token::TVerdadeiro,
@@ -681,6 +687,8 @@ extern {
         TIdentificador => Token::TIdentificador(<String>),
         TInteiro => Token::TInteiro(<i64>),
         TDecimal => Token::TDecimal(<String>),
+    TFlutuanteLiteral => Token::TFlutuanteLiteral(<String>),
+    TDuploLiteral => Token::TDuploLiteral(<String>),
         // === CAMINHOS ===
 
         TStringInterpolada => Token::TStringInterpolada(<String>),

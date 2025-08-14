@@ -32,6 +32,23 @@ impl<'a> VerificadorTipos<'a> {
         }
     }
 
+    // Compatibilidade de tipos para atribuição: permite promoções numéricas (widening)
+    fn tipos_compativeis_atribuicao(&self, destino: &Tipo, origem: &Tipo) -> bool {
+        use Tipo::*;
+        if destino == origem {
+            return true;
+        }
+        match (destino, origem) {
+            // Texto aceita conversão implícita de inteiro/booleano (compatibilidade existente)
+            (Texto, Inteiro) | (Texto, Booleano) => true,
+            // Promoções numéricas
+            (Flutuante, Inteiro) => true,
+            (Duplo, Inteiro) => true,
+            (Duplo, Flutuante) => true,
+            _ => false,
+        }
+    }
+
     pub fn verificar_programa(&mut self, programa: &'a Programa) -> Result<(), Vec<String>> {
         // 1. usings
         self.usings = programa.usings.iter().map(|u| u.caminho.clone()).collect();
@@ -394,10 +411,13 @@ impl<'a> VerificadorTipos<'a> {
                         "DEBUG: Tipo inferido para expressão de inicialização: {:?}",
                         tipo_expr
                     );
-                    if tipo_resolvido != tipo_expr && tipo_expr != Tipo::Inferido {
-                        if !(tipo_resolvido == Tipo::Texto && tipo_expr == Tipo::Inteiro) {
-                            self.erros.push(format!("Tipo da expressão ({:?}) não corresponde ao tipo da variável \"{}\" ({:?}).", tipo_expr, nome, tipo_resolvido));
-                        }
+                    if tipo_expr != Tipo::Inferido
+                        && !self.tipos_compativeis_atribuicao(&tipo_resolvido, &tipo_expr)
+                    {
+                        self.erros.push(format!(
+                            "Tipo da expressão ({:?}) não corresponde ao tipo da variável \"{}\" ({:?}).",
+                            tipo_expr, nome, tipo_resolvido
+                        ));
                     }
                 }
                 escopo_vars.insert(nome.clone(), tipo_resolvido.clone());
@@ -447,12 +467,13 @@ impl<'a> VerificadorTipos<'a> {
                                 "DEBUG: Tipo da propriedade \"{}\": {:?}. Tipo do valor: {:?}",
                                 prop_nome, p_tipo, val_tipo
                             );
-                            if p_tipo != val_tipo && val_tipo != Tipo::Inferido {
-                                if !(p_tipo == Tipo::Texto
-                                    && (val_tipo == Tipo::Inteiro || val_tipo == Tipo::Booleano))
-                                {
-                                    self.erros.push(format!("Atribuição de tipo inválido para propriedade \"{}\". Esperado {:?}, recebido {:?}.", prop_nome, p_tipo, val_tipo));
-                                }
+                            if val_tipo != Tipo::Inferido
+                                && !self.tipos_compativeis_atribuicao(&p_tipo, &val_tipo)
+                            {
+                                self.erros.push(format!(
+                                    "Atribuição de tipo inválido para propriedade \"{}\". Esperado {:?}, recebido {:?}.",
+                                    prop_nome, p_tipo, val_tipo
+                                ));
                             }
                         } else {
                             self.erros.push(format!(
@@ -528,12 +549,12 @@ impl<'a> VerificadorTipos<'a> {
                 let tipo_expr =
                     self.inferir_tipo_expressao(expr, namespace_atual, classe_atual, escopo_vars);
                 if let Some(tipo_var) = escopo_vars.get(nome) {
-                    if *tipo_var != tipo_expr && tipo_expr != Tipo::Inferido {
+                    if tipo_expr != Tipo::Inferido
+                        && !self.tipos_compativeis_atribuicao(tipo_var, &tipo_expr)
+                    {
                         self.erros.push(format!(
                             "Atribuição de tipo inválido para variável \"{}\". Esperado {:?}, recebido {:?}.",
-                            nome,
-                            tipo_var,
-                            tipo_expr
+                            nome, tipo_var, tipo_expr
                         ));
                     }
                 } else {
@@ -572,6 +593,9 @@ impl<'a> VerificadorTipos<'a> {
             Expressao::Inteiro(_) => Tipo::Inteiro,
             Expressao::Texto(_) => Tipo::Texto,
             Expressao::Booleano(_) => Tipo::Booleano,
+            Expressao::FlutuanteLiteral(_) => Tipo::Flutuante,
+            Expressao::DuploLiteral(_) => Tipo::Duplo,
+            Expressao::Decimal(_) => Tipo::Decimal,
             Expressao::Este => {
                 classe_atual.map_or(Tipo::Inferido, |nome| Tipo::Classe(nome.clone()))
             }
@@ -630,11 +654,19 @@ impl<'a> VerificadorTipos<'a> {
                 Tipo::Classe(self.resolver_nome_classe(nome_classe, namespace_atual))
             }
             Expressao::Aritmetica(_, esq, dir) => {
-                let _te =
+                let te =
                     self.inferir_tipo_expressao(esq, namespace_atual, classe_atual, escopo_vars);
-                let _td =
+                let td =
                     self.inferir_tipo_expressao(dir, namespace_atual, classe_atual, escopo_vars);
-                Tipo::Inteiro
+                // Promoção numérica simples: Duplo > Flutuante > Inteiro; Decimal tratado a parte
+                use Tipo::*;
+                match (te, td) {
+                    (Decimal, _) | (_, Decimal) => Decimal,
+                    (Duplo, _) | (_, Duplo) => Duplo,
+                    (Flutuante, _) | (_, Flutuante) => Flutuante,
+                    (Inteiro, Inteiro) => Inteiro,
+                    _ => Inteiro,
+                }
             }
             Expressao::Comparacao(_, _, _) => Tipo::Booleano,
             Expressao::Logica(_, _, _) => Tipo::Booleano,
@@ -653,6 +685,7 @@ impl<'a> VerificadorTipos<'a> {
             Expressao::Inteiro(_) => Tipo::Inteiro,
             Expressao::Texto(_) => Tipo::Texto,
             Expressao::Booleano(_) => Tipo::Booleano,
+            Expressao::Decimal(_) => Tipo::Decimal,
             Expressao::Este => {
                 classe_atual.map_or(Tipo::Inferido, |nome| Tipo::Classe(nome.clone()))
             }
@@ -705,9 +738,16 @@ impl<'a> VerificadorTipos<'a> {
                 Tipo::Classe(self.resolver_nome_classe(nome_classe, namespace_atual))
             }
             Expressao::Aritmetica(_, esq, dir) => {
-                let _te = self.get_expr_type(esq, namespace_atual, classe_atual, escopo_vars);
-                let _td = self.get_expr_type(dir, namespace_atual, classe_atual, escopo_vars);
-                Tipo::Inteiro
+                let te = self.get_expr_type(esq, namespace_atual, classe_atual, escopo_vars);
+                let td = self.get_expr_type(dir, namespace_atual, classe_atual, escopo_vars);
+                use Tipo::*;
+                match (te, td) {
+                    (Decimal, _) | (_, Decimal) => Decimal,
+                    (Duplo, _) | (_, Duplo) => Duplo,
+                    (Flutuante, _) | (_, Flutuante) => Flutuante,
+                    (Inteiro, Inteiro) => Inteiro,
+                    _ => Inteiro,
+                }
             }
             Expressao::Comparacao(_, _, _) => Tipo::Booleano,
             Expressao::Logica(_, _, _) => Tipo::Booleano,

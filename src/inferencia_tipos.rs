@@ -24,6 +24,8 @@ impl InferenciaTipos {
             Expressao::Inteiro(_) => Ok(Tipo::Inteiro),
             Expressao::Texto(_) => Ok(Tipo::Texto),
             Expressao::Booleano(_) => Ok(Tipo::Booleano),
+            Expressao::FlutuanteLiteral(_) => Ok(Tipo::Flutuante),
+            Expressao::DuploLiteral(_) => Ok(Tipo::Duplo),
             Expressao::Decimal(_) => Ok(Tipo::Decimal),
             Expressao::NovoObjeto(c, _) => Ok(Tipo::Classe(c.clone())),
 
@@ -33,8 +35,24 @@ impl InferenciaTipos {
                 match (op, &t_esq, &t_dir) {
                     (OperadorAritmetico::Soma, Tipo::Texto, _)
                     | (OperadorAritmetico::Soma, _, Tipo::Texto) => Ok(Tipo::Texto),
-                    (_, Tipo::Inteiro, Tipo::Inteiro) => Ok(Tipo::Inteiro),
-                    _ => Err("Tipos incompatíveis para operação aritmética".into()),
+                    _ => {
+                        // Promoção numérica: inteiro < flutuante < duplo
+                        let is_num =
+                            |t: &Tipo| matches!(t, Tipo::Inteiro | Tipo::Flutuante | Tipo::Duplo);
+                        if is_num(&t_esq) && is_num(&t_dir) {
+                            if matches!(t_esq, Tipo::Duplo) || matches!(t_dir, Tipo::Duplo) {
+                                Ok(Tipo::Duplo)
+                            } else if matches!(t_esq, Tipo::Flutuante)
+                                || matches!(t_dir, Tipo::Flutuante)
+                            {
+                                Ok(Tipo::Flutuante)
+                            } else {
+                                Ok(Tipo::Inteiro)
+                            }
+                        } else {
+                            Err("Tipos incompatíveis para operação aritmética".into())
+                        }
+                    }
                 }
             }
 
@@ -289,6 +307,8 @@ impl InferenciaTipos {
     fn tipos_compativeis(&self, tipo1: &Tipo, tipo2: &Tipo) -> bool {
         match (tipo1, tipo2) {
             (Tipo::Inteiro, Tipo::Inteiro) => true,
+            (Tipo::Flutuante, Tipo::Flutuante) => true,
+            (Tipo::Duplo, Tipo::Duplo) => true,
             (Tipo::Texto, Tipo::Texto) => true,
             (Tipo::Decimal, Tipo::Decimal) => true, // ✅ ADICIONAR se não existir
             (Tipo::Booleano, Tipo::Booleano) => true,
@@ -299,6 +319,9 @@ impl InferenciaTipos {
             (Tipo::Texto, _) => true,
             (Tipo::Decimal, Tipo::Inteiro) => true, // ✅ ADICIONAR: Conversão implícita
             (Tipo::Inteiro, Tipo::Decimal) => true, // ✅ ADICIONAR: Conversão implícita
+            (Tipo::Flutuante, Tipo::Inteiro) => true, // permitir atribuir inteiro a flutuante
+            (Tipo::Duplo, Tipo::Inteiro) => true,   // permitir atribuir inteiro a duplo
+            (Tipo::Duplo, Tipo::Flutuante) => true, // permitir atribuir flutuante a duplo
             _ => false,
         }
     }
@@ -330,6 +353,8 @@ impl InferenciaTipos {
     fn tipo_para_string(&self, tipo: &Tipo) -> String {
         match tipo {
             Tipo::Inteiro => "inteiro".to_string(),
+            Tipo::Flutuante => "flutuante".to_string(),
+            Tipo::Duplo => "duplo".to_string(),
             Tipo::Texto => "texto".to_string(),
             Tipo::Decimal => "decimal".to_string(), // ✅ ADICIONADO: Case faltante
             Tipo::Booleano => "booleano".to_string(),

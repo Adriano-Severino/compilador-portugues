@@ -8,6 +8,8 @@ pub enum Tipo {
     Booleano,
     Texto,
     Inteiro,
+    Flutuante, // f32
+    Duplo,     // f64
     Decimal,
     Vazio,
     Lista(Box<Tipo>),
@@ -284,6 +286,8 @@ pub enum Expressao {
     Texto(String),
     Booleano(bool),
     Decimal(String),
+    FlutuanteLiteral(String),
+    DuploLiteral(String),
     Identificador(String),
     Aritmetica(OperadorAritmetico, Box<Expressao>, Box<Expressao>),
     Comparacao(OperadorComparacao, Box<Expressao>, Box<Expressao>),
@@ -295,7 +299,7 @@ pub enum Expressao {
     StringInterpolada(Vec<PartStringInterpolada>),
     Unario(OperadorUnario, Box<Expressao>),
     Este,
-    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OperadorUnario {

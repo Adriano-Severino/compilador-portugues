@@ -473,6 +473,12 @@ impl<'a> LlvmGenerator<'a> {
         );
         self.header
             .push_str("@.int_fmt = private unnamed_addr constant [3 x i8] c\"%d\\00\", align 1\n");
+        self.header.push_str(
+            "@.float_fmt = private unnamed_addr constant [3 x i8] c\"%f\\00\", align 1\n",
+        );
+        self.header.push_str(
+            "@.double_fmt = private unnamed_addr constant [3 x i8] c\"%f\\00\", align 1\n",
+        );
         self.header
             .push_str("@.empty_str = private unnamed_addr constant [1 x i8] c\"\\00\", align 1\n");
     }
@@ -504,6 +510,8 @@ impl<'a> LlvmGenerator<'a> {
         match var_type {
             ast::Tipo::Inteiro => 4,
             ast::Tipo::Texto => 8,
+            ast::Tipo::Flutuante => 4,
+            ast::Tipo::Duplo => 8,
             ast::Tipo::Decimal => 8,
             ast::Tipo::Booleano => 1,
             ast::Tipo::Classe(_) => 8,
@@ -515,12 +523,12 @@ impl<'a> LlvmGenerator<'a> {
         match comando {
             ast::Comando::DeclaracaoVar(nome, expr) => {
                 let (value_reg, value_type) = self.generate_expressao(expr);
-                self.declare_and_store_variable(nome, value_type, &value_reg);
+                self.declare_and_store_variable(nome, value_type.clone(), value_type, &value_reg);
             }
             ast::Comando::DeclaracaoVariavel(tipo, nome, Some(expr)) => {
-                let (value_reg, _) = self.generate_expressao(expr);
+                let (value_reg, value_type) = self.generate_expressao(expr);
                 let tipo_resolvido = self.resolve_type(tipo, &self.namespace_path);
-                self.declare_and_store_variable(nome, tipo_resolvido, &value_reg);
+                self.declare_and_store_variable(nome, tipo_resolvido, value_type, &value_reg);
             }
             ast::Comando::Imprima(expr) => {
                 let (value_reg, value_type) = self.generate_expressao(expr);
@@ -613,16 +621,21 @@ impl<'a> LlvmGenerator<'a> {
                     if self.type_checker.classes.contains_key(&fqn) {
                         // Trata como propriedade estática
                         let (value_reg, value_type) = self.generate_expressao(val_expr);
-                        let ty = self.map_type_to_llvm_storage(&value_type);
+                        // Descobrir tipo declarado da propriedade
+                        let member_type = self
+                            .infer_member_type(&fqn, prop_nome)
+                            .unwrap_or(value_type.clone());
+                        let coerced = self.ensure_value_type(&value_reg, &value_type, &member_type);
+                        let ty = self.map_type_to_llvm_storage(&member_type);
                         let sym = self.static_global_symbol(&fqn, prop_nome);
                         self.body
-                            .push_str(&format!("  store {0} {1}, {0}* {2}\n", ty, value_reg, sym));
+                            .push_str(&format!("  store {0} {1}, {0}* {2}\n", ty, coerced, sym));
                         return;
                     }
                 }
 
                 // Caso instância
-                let (value_reg, _value_type) = self.generate_expressao(val_expr);
+                let (value_reg, value_type) = self.generate_expressao(val_expr);
                 let (obj_ptr_reg, obj_type) = self.generate_expressao(obj_expr);
                 let class_name = match obj_type {
                     ast::Tipo::Classe(name) => name,
@@ -634,10 +647,11 @@ impl<'a> LlvmGenerator<'a> {
                 let (member_ptr_reg, member_type) =
                     self.get_member_ptr(&obj_ptr_reg, &class_name, prop_nome);
                 let llvm_type = self.map_type_to_llvm_storage(&member_type);
+                let coerced = self.ensure_value_type(&value_reg, &value_type, &member_type);
                 self.body.push_str(&format!(
                     "  store {0} {1}, {2} {3}\n",
                     llvm_type,
-                    value_reg,
+                    coerced,
                     self.map_type_to_llvm_ptr(&member_type),
                     member_ptr_reg
                 ));
@@ -784,7 +798,13 @@ impl<'a> LlvmGenerator<'a> {
         self.variables = old_vars;
     }
 
-    fn declare_and_store_variable(&mut self, name: &str, var_type: ast::Tipo, value_reg: &str) {
+    fn declare_and_store_variable(
+        &mut self,
+        name: &str,
+        var_type: ast::Tipo,
+        value_type: ast::Tipo,
+        value_reg: &str,
+    ) {
         let ptr_reg = format!("%var.{0}", name);
         let llvm_type = self.map_type_to_llvm_storage(&var_type);
         let align = self.get_type_alignment(&var_type);
@@ -793,9 +813,10 @@ impl<'a> LlvmGenerator<'a> {
             "  {0} = alloca {1}, align {2}\n",
             ptr_reg, llvm_type, align
         ));
+        let coerced = self.ensure_value_type(value_reg, &value_type, &var_type);
         self.body.push_str(&format!(
             "  store {0} {1}, {0}* {2}\n",
-            llvm_type, value_reg, ptr_reg
+            llvm_type, coerced, ptr_reg
         ));
 
         self.variables.insert(name.to_string(), (ptr_reg, var_type));
@@ -879,12 +900,13 @@ impl<'a> LlvmGenerator<'a> {
         None
     }
 
-    fn store_variable(&mut self, name: &str, _value_type: &ast::Tipo, value_reg: &str) {
-        if let Some((ptr_reg, var_type)) = self.variables.get(name) {
-            let llvm_type = self.map_type_to_llvm_storage(var_type);
+    fn store_variable(&mut self, name: &str, value_type: &ast::Tipo, value_reg: &str) {
+        if let Some((ptr_reg, var_type)) = self.variables.get(name).cloned() {
+            let llvm_type = self.map_type_to_llvm_storage(&var_type);
+            let coerced = self.ensure_value_type(value_reg, value_type, &var_type);
             self.body.push_str(&format!(
                 "  store {0} {1}, {0}* {2}\n",
-                llvm_type, value_reg, ptr_reg
+                llvm_type, coerced, ptr_reg
             ));
             return;
         }
@@ -906,10 +928,11 @@ impl<'a> LlvmGenerator<'a> {
                 let (member_ptr_reg, member_type) =
                     self.get_member_ptr(&loaded_self_ptr, &class_name, name);
                 let llvm_type = self.map_type_to_llvm_storage(&member_type);
+                let coerced = self.ensure_value_type(value_reg, value_type, &member_type);
                 self.body.push_str(&format!(
                     "  store {0} {1}, {2} {3}\n",
                     llvm_type,
-                    value_reg,
+                    coerced,
                     self.map_type_to_llvm_ptr(&member_type),
                     member_ptr_reg
                 ));
@@ -926,6 +949,22 @@ impl<'a> LlvmGenerator<'a> {
             ast::Expressao::Texto(s) => (self.create_global_string(s), ast::Tipo::Texto),
             ast::Expressao::Booleano(b) => {
                 (if *b { "1" } else { "0" }.to_string(), ast::Tipo::Booleano)
+            }
+            ast::Expressao::FlutuanteLiteral(s) => {
+                // Remover sufixo f/F e emitir constante float (f32) via fptrunc de double literal
+                let raw = s.trim_end_matches('f').trim_end_matches('F');
+                let val: f64 = raw.parse().expect("literal flutuante inválido");
+                let dbl = format!("{:.6e}", val); // LLVM aceita notação científica
+                let tmp = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = fptrunc double {1} to float\n", tmp, dbl));
+                (tmp, ast::Tipo::Flutuante)
+            }
+            ast::Expressao::DuploLiteral(s) => {
+                // Número de ponto flutuante sem sufixo: tratar como double, em notação científica
+                let val: f64 = s.parse().expect("literal duplo inválido");
+                let dbl = format!("{:.6e}", val);
+                (dbl, ast::Tipo::Duplo)
             }
             ast::Expressao::Decimal(s) => {
                 // Armazena decimal como string (removendo sufixo 'm' se presente)
@@ -946,20 +985,56 @@ impl<'a> LlvmGenerator<'a> {
                     );
                 }
 
-                let op_code = match op {
-                    ast::OperadorAritmetico::Soma => "add",
-                    ast::OperadorAritmetico::Subtracao => "sub",
-                    ast::OperadorAritmetico::Multiplicacao => "mul",
-                    ast::OperadorAritmetico::Divisao => "sdiv",
-                    ast::OperadorAritmetico::Modulo => "srem",
+                // Promover para o tipo comum e emitir operação correta (inteiro vs float/double)
+                use ast::Tipo::*;
+                let result_tipo = match (left_type.clone(), right_type.clone()) {
+                    (Duplo, _) | (_, Duplo) => Duplo,
+                    (Flutuante, _) | (_, Flutuante) => Flutuante,
+                    _ => Inteiro,
                 };
-
+                let (l, r, llvm_op, llvm_ty) = match result_tipo {
+                    Inteiro => {
+                        let op_code = match op {
+                            ast::OperadorAritmetico::Soma => "add",
+                            ast::OperadorAritmetico::Subtracao => "sub",
+                            ast::OperadorAritmetico::Multiplicacao => "mul",
+                            ast::OperadorAritmetico::Divisao => "sdiv",
+                            ast::OperadorAritmetico::Modulo => "srem",
+                        };
+                        (left_reg, right_reg, op_code.to_string(), "i32".to_string())
+                    }
+                    Flutuante => {
+                        let l = self.ensure_float(&left_reg, &left_type);
+                        let r = self.ensure_float(&right_reg, &right_type);
+                        let op_code = match op {
+                            ast::OperadorAritmetico::Soma => "fadd",
+                            ast::OperadorAritmetico::Subtracao => "fsub",
+                            ast::OperadorAritmetico::Multiplicacao => "fmul",
+                            ast::OperadorAritmetico::Divisao => "fdiv",
+                            ast::OperadorAritmetico::Modulo => "frem",
+                        };
+                        (l, r, op_code.to_string(), "float".to_string())
+                    }
+                    Duplo => {
+                        let l = self.ensure_double(&left_reg, &left_type);
+                        let r = self.ensure_double(&right_reg, &right_type);
+                        let op_code = match op {
+                            ast::OperadorAritmetico::Soma => "fadd",
+                            ast::OperadorAritmetico::Subtracao => "fsub",
+                            ast::OperadorAritmetico::Multiplicacao => "fmul",
+                            ast::OperadorAritmetico::Divisao => "fdiv",
+                            ast::OperadorAritmetico::Modulo => "frem",
+                        };
+                        (l, r, op_code.to_string(), "double".to_string())
+                    }
+                    _ => unreachable!(),
+                };
                 let result_reg = self.get_unique_temp_name();
                 self.body.push_str(&format!(
-                    "  {0} = {1} i32 {2}, {3}\n",
-                    result_reg, op_code, left_reg, right_reg
+                    "  {0} = {1} {2} {3}, {4}\n",
+                    result_reg, llvm_op, llvm_ty, l, r
                 ));
-                (result_reg, ast::Tipo::Inteiro)
+                (result_reg, result_tipo)
             }
             ast::Expressao::NovoObjeto(nome_classe, argumentos) => {
                 let fqn = self
@@ -1178,24 +1253,62 @@ impl<'a> LlvmGenerator<'a> {
                 }
             }
             ast::Expressao::Comparacao(op, esq, dir) => {
-                let (left_reg, left_type) = self.generate_expressao(esq);
-                let (right_reg, _) = self.generate_expressao(dir);
-
-                let op_str = match op {
-                    ast::OperadorComparacao::Igual => "eq",
-                    ast::OperadorComparacao::Diferente => "ne",
-                    ast::OperadorComparacao::Menor => "slt",
-                    ast::OperadorComparacao::MaiorQue => "sgt",
-                    ast::OperadorComparacao::MenorIgual => "sle",
-                    ast::OperadorComparacao::MaiorIgual => "sge",
-                };
-
+                let (mut left_reg, left_type) = self.generate_expressao(esq);
+                let (mut right_reg, right_type) = self.generate_expressao(dir);
+                use ast::Tipo::*;
                 let result_reg = self.get_unique_temp_name();
-                let llvm_type = self.map_type_to_llvm_arg(&left_type);
-                self.body.push_str(&format!(
-                    "  {0} = icmp {1} {2} {3}, {4}\n",
-                    result_reg, op_str, llvm_type, left_reg, right_reg
-                ));
+                match (left_type.clone(), right_type.clone()) {
+                    (Inteiro | Booleano, Inteiro | Booleano) => {
+                        let op_str = match op {
+                            ast::OperadorComparacao::Igual => "eq",
+                            ast::OperadorComparacao::Diferente => "ne",
+                            ast::OperadorComparacao::Menor => "slt",
+                            ast::OperadorComparacao::MaiorQue => "sgt",
+                            ast::OperadorComparacao::MenorIgual => "sle",
+                            ast::OperadorComparacao::MaiorIgual => "sge",
+                        };
+                        self.body.push_str(&format!(
+                            "  {0} = icmp {1} i32 {2}, {3}\n",
+                            result_reg, op_str, left_reg, right_reg
+                        ));
+                    }
+                    (Duplo, _) | (_, Duplo) => {
+                        left_reg = self.ensure_double(&left_reg, &left_type);
+                        right_reg = self.ensure_double(&right_reg, &right_type);
+                        let pred = match op {
+                            ast::OperadorComparacao::Igual => "oeq",
+                            ast::OperadorComparacao::Diferente => "one",
+                            ast::OperadorComparacao::Menor => "olt",
+                            ast::OperadorComparacao::MaiorQue => "ogt",
+                            ast::OperadorComparacao::MenorIgual => "ole",
+                            ast::OperadorComparacao::MaiorIgual => "oge",
+                        };
+                        self.body.push_str(&format!(
+                            "  {0} = fcmp {1} double {2}, {3}\n",
+                            result_reg, pred, left_reg, right_reg
+                        ));
+                    }
+                    (Flutuante, _) | (_, Flutuante) => {
+                        left_reg = self.ensure_float(&left_reg, &left_type);
+                        right_reg = self.ensure_float(&right_reg, &right_type);
+                        let pred = match op {
+                            ast::OperadorComparacao::Igual => "oeq",
+                            ast::OperadorComparacao::Diferente => "one",
+                            ast::OperadorComparacao::Menor => "olt",
+                            ast::OperadorComparacao::MaiorQue => "ogt",
+                            ast::OperadorComparacao::MenorIgual => "ole",
+                            ast::OperadorComparacao::MaiorIgual => "oge",
+                        };
+                        self.body.push_str(&format!(
+                            "  {0} = fcmp {1} float {2}, {3}\n",
+                            result_reg, pred, left_reg, right_reg
+                        ));
+                    }
+                    _ => panic!(
+                        "Comparação não suportada entre tipos: {:?} e {:?}",
+                        left_type, right_type
+                    ),
+                }
                 (result_reg, ast::Tipo::Booleano)
             }
             ast::Expressao::StringInterpolada(partes) => {
@@ -1330,6 +1443,8 @@ impl<'a> LlvmGenerator<'a> {
             ast::Tipo::Texto => self.get_safe_string_ptr(reg),
             ast::Tipo::Decimal => self.get_safe_string_ptr(reg),
             ast::Tipo::Inteiro => self.convert_int_to_string(reg),
+            ast::Tipo::Flutuante => self.convert_float_to_string(reg),
+            ast::Tipo::Duplo => self.convert_double_to_string(reg),
             ast::Tipo::Booleano => {
                 let true_str = self.create_global_string("verdadeiro");
                 let false_str = self.create_global_string("falso");
@@ -1341,6 +1456,124 @@ impl<'a> LlvmGenerator<'a> {
                 result_reg
             }
             _ => self.create_global_string("[valor não textual]"),
+        }
+    }
+
+    // Garante que o valor esteja no tipo esperado (apenas numéricos básicos por enquanto)
+    fn ensure_value_type(&mut self, reg: &str, from: &ast::Tipo, to: &ast::Tipo) -> String {
+        use ast::Tipo::*;
+        match (from, to) {
+            (f, t) if f == t => reg.to_string(),
+            (Inteiro, Flutuante) => {
+                let tmp = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = sitofp i32 {1} to float\n", tmp, reg));
+                tmp
+            }
+            (Inteiro, Duplo) => {
+                let tmp = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = sitofp i32 {1} to double\n", tmp, reg));
+                tmp
+            }
+            (Flutuante, Duplo) => {
+                let tmp = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = fpext float {1} to double\n", tmp, reg));
+                tmp
+            }
+            (Duplo, Flutuante) => {
+                let tmp = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = fptrunc double {1} to float\n", tmp, reg));
+                tmp
+            }
+            _ => reg.to_string(),
+        }
+    }
+
+    fn convert_float_to_string(&mut self, f_reg: &str) -> String {
+        let buffer = self.get_unique_temp_name();
+        self.body
+            .push_str(&format!("  {0} = alloca [64 x i8], align 1\n", buffer));
+        let buffer_ptr = self.get_unique_temp_name();
+        self.body.push_str(&format!(
+            "  {0} = getelementptr inbounds [64 x i8], [64 x i8]* {1}, i32 0, i32 0\n",
+            buffer_ptr, buffer
+        ));
+        let fmt_ptr = self.get_unique_temp_name();
+        self.body.push_str(&format!(
+            "  {0} = getelementptr inbounds [3 x i8], [3 x i8]* @.float_fmt, i32 0, i32 0\n",
+            fmt_ptr
+        ));
+        let as_double = self.get_unique_temp_name();
+        self.body.push_str(&format!(
+            "  {0} = fpext float {1} to double\n",
+            as_double, f_reg
+        ));
+        self.body.push_str(&format!(
+            "  call i32 (i8*, i8*, ...) @sprintf(i8* {0}, i8* {1}, double {2})\n",
+            buffer_ptr, fmt_ptr, as_double
+        ));
+        buffer_ptr
+    }
+
+    fn convert_double_to_string(&mut self, d_reg: &str) -> String {
+        let buffer = self.get_unique_temp_name();
+        self.body
+            .push_str(&format!("  {0} = alloca [64 x i8], align 1\n", buffer));
+        let buffer_ptr = self.get_unique_temp_name();
+        self.body.push_str(&format!(
+            "  {0} = getelementptr inbounds [64 x i8], [64 x i8]* {1}, i32 0, i32 0\n",
+            buffer_ptr, buffer
+        ));
+        let fmt_ptr = self.get_unique_temp_name();
+        self.body.push_str(&format!(
+            "  {0} = getelementptr inbounds [3 x i8], [3 x i8]* @.double_fmt, i32 0, i32 0\n",
+            fmt_ptr
+        ));
+        self.body.push_str(&format!(
+            "  call i32 (i8*, i8*, ...) @sprintf(i8* {0}, i8* {1}, double {2})\n",
+            buffer_ptr, fmt_ptr, d_reg
+        ));
+        buffer_ptr
+    }
+
+    fn ensure_float(&mut self, reg: &str, tipo: &ast::Tipo) -> String {
+        match tipo {
+            ast::Tipo::Flutuante => reg.to_string(),
+            ast::Tipo::Inteiro => {
+                let tmp = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = sitofp i32 {1} to float\n", tmp, reg));
+                tmp
+            }
+            ast::Tipo::Duplo => {
+                let tmp = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = fptrunc double {1} to float\n", tmp, reg));
+                tmp
+            }
+            _ => panic!("Conversão para float não suportada: {:?}", tipo),
+        }
+    }
+
+    fn ensure_double(&mut self, reg: &str, tipo: &ast::Tipo) -> String {
+        match tipo {
+            ast::Tipo::Duplo => reg.to_string(),
+            ast::Tipo::Inteiro => {
+                let tmp = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = sitofp i32 {1} to double\n", tmp, reg));
+                tmp
+            }
+            ast::Tipo::Flutuante => {
+                let tmp = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = fpext float {1} to double\n", tmp, reg));
+                tmp
+            }
+            _ => panic!("Conversão para double não suportada: {:?}", tipo),
         }
     }
 
@@ -1474,6 +1707,8 @@ impl<'a> LlvmGenerator<'a> {
         match tipo {
             ast::Tipo::Inteiro => "i32".to_string(),
             ast::Tipo::Texto => "i8*".to_string(),
+            ast::Tipo::Flutuante => "float".to_string(),
+            ast::Tipo::Duplo => "double".to_string(),
             ast::Tipo::Decimal => "i8*".to_string(),
             ast::Tipo::Booleano => "i1".to_string(),
             ast::Tipo::Vazio => "void".to_string(),
@@ -1486,6 +1721,8 @@ impl<'a> LlvmGenerator<'a> {
         match tipo {
             ast::Tipo::Inteiro => "i32*".to_string(),
             ast::Tipo::Texto => "i8**".to_string(),
+            ast::Tipo::Flutuante => "float*".to_string(),
+            ast::Tipo::Duplo => "double*".to_string(),
             ast::Tipo::Decimal => "i8**".to_string(),
             ast::Tipo::Booleano => "i1*".to_string(),
             ast::Tipo::Classe(name) => {
@@ -1500,6 +1737,8 @@ impl<'a> LlvmGenerator<'a> {
         match tipo {
             ast::Tipo::Inteiro => "i32".to_string(),
             ast::Tipo::Texto => "i8*".to_string(),
+            ast::Tipo::Flutuante => "float".to_string(),
+            ast::Tipo::Duplo => "double".to_string(),
             ast::Tipo::Decimal => "i8*".to_string(),
             ast::Tipo::Booleano => "i1".to_string(),
             ast::Tipo::Vazio => "void".to_string(),

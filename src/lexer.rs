@@ -33,6 +33,10 @@ pub enum Token {
     TTipoTexto,
     #[token("booleano")]
     TTipoBooleano,
+    #[token("flutuante")]
+    TTipoFlutuante,
+    #[token("duplo")]
+    TTipoDuplo,
     #[token("decimal")]
     TTipoDecimal,
     #[token("vazio")]
@@ -135,7 +139,14 @@ pub enum Token {
     TString(String),
     #[regex(r"[0-9]+\.[0-9]+[mM]", |lex| lex.slice().to_string())]
     TDecimal(String),
-    #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().unwrap())]
+    #[regex(r"[0-9]+\.[0-9]+[fF]", |lex| lex.slice().to_string())]
+    TFlutuanteLiteral(String),
+    #[regex(r"[0-9]+\.[0-9]+", |lex| lex.slice().to_string())]
+    TDuploLiteral(String),
+    #[regex(r"[0-9]+", |lex| {
+        let s = lex.slice();
+        s.parse::<i64>().expect(&format!("Literal inteiro inválido: '{s}'"))
+    })]
     TInteiro(i64),
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
     TIdentificador(String),
@@ -211,8 +222,10 @@ mod tests {
 
     #[test]
     fn test_decimal_type() {
-        let codigo = "decimal";
+        let codigo = "decimal flutuante duplo";
         let mut lex = Token::lexer(codigo);
         assert_eq!(lex.next(), Some(Ok(Token::TTipoDecimal)));
+        assert_eq!(lex.next(), Some(Ok(Token::TTipoFlutuante)));
+        assert_eq!(lex.next(), Some(Ok(Token::TTipoDuplo)));
     }
 }
