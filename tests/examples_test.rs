@@ -160,6 +160,10 @@ fn test_examples_with_expected_out() {
             "exemplos/teste_static_property.pr",
             include_str!("../teste_static_property.out.txt"),
         ),
+        (
+            "exemplos/heranca_basica.pr",
+            include_str!("../heranca_basica.out.txt"),
+        ),
     ];
     for (pr, out) in cases {
         assert_example_ok(pr, Some(out));
@@ -185,6 +189,7 @@ fn test_examples_without_expected_out() {
         // novos: bibliotecas
         "exemplos/biblioteca.pr",
         "exemplos/biblioteca_sistema.pr",
+        "exemplos/heranca_basica.pr",
     ];
     for pr in cases {
         assert_example_ok(pr, None);
@@ -244,4 +249,18 @@ fn test_negative_circular_inheritance_should_fail() {
         "Compilação deveria falhar por herança circular em {:?}",
         a_src
     );
+}
+
+#[test]
+fn test_negative_three_level_circular_inheritance_should_fail() {
+    // A -> B -> C -> A
+    let temp_dir = repo_root().join("target").join("test-temp-ciclo3");
+    std::fs::create_dir_all(&temp_dir).ok();
+    let p = temp_dir.join("ciclo_abc.pr");
+    let src = r#"namespace N { classe A : B { } classe B : C { } classe C : A { } }"#;
+    std::fs::write(&p, src).unwrap();
+    let path_str = p.to_string_lossy().to_string();
+    let args = vec![path_str.as_str(), "--target=bytecode"];
+    let (code, _o, _e) = run_compiler(&args);
+    assert_ne!(code, 0, "Deveria falhar por herança circular A->B->C->A");
 }

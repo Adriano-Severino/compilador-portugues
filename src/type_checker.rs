@@ -171,7 +171,11 @@ impl<'a> VerificadorTipos<'a> {
                     }
                 }
             } else {
-                // Pai não encontrado — deixe outros checks tratarem (ou poderíamos emitir erro aqui)
+                // Pai não encontrado — reporta erro explícito
+                self.erros.push(format!(
+                    "Classe pai '{}' não encontrada para '{}'.",
+                    parent_name, class_name
+                ));
             }
         }
 
