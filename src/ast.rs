@@ -135,6 +135,8 @@ pub struct Exportacao {
 pub struct DeclaracaoClasse {
     pub nome: String,
     pub classe_pai: Option<String>,
+    // Lista de interfaces implementadas (nomes simples ou FQN conforme parser)
+    pub interfaces: Vec<String>,
     pub modificador: ModificadorAcesso,
     pub campos: Vec<CampoClasse>,
     pub propriedades: Vec<PropriedadeClasse>,

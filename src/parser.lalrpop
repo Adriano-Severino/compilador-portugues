@@ -95,7 +95,7 @@ DeclaracaoEnumeracao: ast::DeclaracaoEnum = {
 
 // === INTERFACE ===
 DeclaracaoInterface: ast::DeclaracaoInterface = {
-    "interface" <nome:IdentificadorSimples> "{" <metodos:AssinaturasMetodoInterface*> "}" => {
+    <_macc:ModificadorAcesso?> "interface" <nome:IdentificadorSimples> "{" <metodos:AssinaturasMetodoInterface*> "}" => {
         ast::DeclaracaoInterface { nome, metodos }
     }
 };
@@ -123,7 +123,12 @@ ModificadorAcesso: ast::ModificadorAcesso = {
 
 // === CLASSES ===
 DeclaracaoClasse: ast::DeclaracaoClasse = {
-    <modificador:ModificadorAcesso?> <classe_abstrata:("abstrata")?> <estatica:("estática")?> "classe" <nome:IdentificadorSimples> <heranca:(":" <IdentificadorSimples>)?> "{" <membros:MembroClasse*> "}" => {
+    <modificador:ModificadorAcesso?> <classe_abstrata:("abstrata")?> <estatica:("estática")?> "classe" <nome:IdentificadorSimples>
+    // Estilo C#: ':' Base, I1, I2... (primeiro é base, demais são interfaces)
+    <lista_cabecalho:(":" <ListaIdentificadores>)?>
+    // Compatibilidade opcional: 'implementa I1, I2'
+    <impls:("implementa" <ListaIdentificadores>)?>
+    "{" <membros:MembroClasse*> "}" => {
         let mut campos = Vec::new();
         let mut propriedades = Vec::new();
         let mut metodos = Vec::new();
@@ -138,9 +143,21 @@ DeclaracaoClasse: ast::DeclaracaoClasse = {
             }
         }
 
+        // Determina base e interfaces
+    let mut classe_pai: Option<String> = None;
+    let mut interfaces: Vec<String> = Vec::new();
+    if let Some(mut lista) = lista_cabecalho {
+            if !lista.is_empty() {
+                classe_pai = Some(lista.remove(0));
+                interfaces.extend(lista.into_iter());
+            }
+        }
+    if let Some(lst) = impls { interfaces.extend(lst.into_iter()); }
+
         ast::DeclaracaoClasse {
             nome,
-            classe_pai: heranca,
+            classe_pai,
+            interfaces,
             modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
             campos,
             propriedades,
@@ -715,6 +732,7 @@ extern {
         "falso" => Token::TFalso,
         "classe" => Token::TClasse,
     "interface" => Token::TInterface,
+    "implementa" => Token::TImplementa,
     "enumeração" => Token::TEnumeracao,
     "construtor" => Token::TConstrutor,
         "publico" => Token::TPublico,

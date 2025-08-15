@@ -321,6 +321,9 @@ impl<'a> BytecodeGenerator<'a> {
                 self.generate_comando(cmd);
             }
 
+            // Interfaces não geram bytecode diretamente; usadas apenas pelo verificador de tipos
+            ast::Declaracao::DeclaracaoInterface(_iface) => {}
+
             // Ignora outras declarações por enquanto
             _ => { /* Fazer nada ou adicionar tratamento para outros comandos */ }
         }

@@ -55,6 +55,8 @@ pub enum Token {
     TClasse,
     #[token("interface")]
     TInterface,
+    #[token("implementa")]
+    TImplementa,
     #[token("enumeração")]
     TEnumeracao,
     #[token("construtor")]

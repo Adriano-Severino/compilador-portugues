@@ -7,6 +7,7 @@ pub struct VerificadorTipos<'a> {
     usings: Vec<String>,
     simbolos_namespaces: HashMap<String, &'a Declaracao>,
     pub classes: HashMap<String, &'a DeclaracaoClasse>,
+    pub interfaces: HashMap<String, &'a ast::DeclaracaoInterface>,
     pub enums: HashMap<String, &'a DeclaracaoEnum>,
     pub resolved_classes: HashMap<String, ResolvedClassInfo<'a>>,
     erros: Vec<String>,
@@ -22,6 +23,7 @@ pub struct ResolvedClassInfo<'a> {
     pub eh_estatica: bool,
     // nova flag não essencial para layout, mas útil para checks em codegen/semântica
     pub eh_abstrata: bool,
+    pub interfaces: Vec<String>,
 }
 
 impl<'a> VerificadorTipos<'a> {
@@ -30,6 +32,7 @@ impl<'a> VerificadorTipos<'a> {
             usings: Vec::new(),
             simbolos_namespaces: HashMap::new(),
             classes: HashMap::new(),
+            interfaces: HashMap::new(),
             enums: HashMap::new(),
             resolved_classes: HashMap::new(),
             erros: Vec::new(),
@@ -92,11 +95,14 @@ impl<'a> VerificadorTipos<'a> {
         // 1. usings
         self.usings = programa.usings.iter().map(|u| u.caminho.clone()).collect();
 
-        // 2. primeira passagem: só registra classes e functions
+        // 2. primeira passagem: registra classes, interfaces e enums
         for decl in &programa.declaracoes {
             let nome = self.get_declaracao_nome(decl);
             if let Declaracao::DeclaracaoClasse(cl) = decl {
                 self.classes.insert(nome.clone(), cl);
+            }
+            if let Declaracao::DeclaracaoInterface(interf) = decl {
+                self.interfaces.insert(nome.clone(), interf);
             }
             if let Declaracao::DeclaracaoEnum(en) = decl {
                 self.enums.insert(nome.clone(), en);
@@ -109,6 +115,9 @@ impl<'a> VerificadorTipos<'a> {
                 let fqn = format!("{}.{}", ns.nome, nome_simples);
                 if let Declaracao::DeclaracaoClasse(cl) = decl {
                     self.classes.insert(fqn.clone(), cl);
+                }
+                if let Declaracao::DeclaracaoInterface(interf) = decl {
+                    self.interfaces.insert(fqn.clone(), interf);
                 }
                 if let Declaracao::DeclaracaoEnum(en) = decl {
                     self.enums.insert(fqn.clone(), en);
@@ -132,11 +141,105 @@ impl<'a> VerificadorTipos<'a> {
             self.verificar_namespace(ns);
         }
 
+        // 5. validação de interfaces implementadas por classes
+        for (fqn, classe) in &self.classes {
+            let ns_atual = self.get_namespace_from_full_name(fqn);
+            let classe_eh_abstrata = classe.eh_abstrata;
+            // métodos resolvidos (inclui herdados)
+            let resolved_methods = self
+                .resolved_classes
+                .get(fqn)
+                .map(|ci| &ci.methods)
+                .cloned()
+                .unwrap_or_default();
+            // lista de interfaces implementadas: AST + detectadas na resolução
+            let mut ifaces_lista: Vec<String> = classe.interfaces.clone();
+            if let Some(ci) = self.resolved_classes.get(fqn) {
+                for i in &ci.interfaces {
+                    if !ifaces_lista.contains(i) {
+                        ifaces_lista.push(i.clone());
+                    }
+                }
+            }
+
+            for iface_nome in &ifaces_lista {
+                let iface_fqn = self.resolver_nome_interface(iface_nome, &ns_atual);
+                if let Some(iface) = self.interfaces.get(&iface_fqn) {
+                    for sig in &iface.metodos {
+                        let ret_i = sig
+                            .tipo_retorno
+                            .clone()
+                            .or(Some(Tipo::Vazio))
+                            .map(|t| match t {
+                                Tipo::Classe(ref n) => {
+                                    Tipo::Classe(self.resolver_nome_classe(n, &ns_atual))
+                                }
+                                Tipo::Enum(ref n) => {
+                                    Tipo::Enum(self.resolver_nome_enum(n, &ns_atual))
+                                }
+                                other => other,
+                            })
+                            .unwrap();
+                        let params_i: Vec<Tipo> = sig
+                            .parametros
+                            .iter()
+                            .map(|p| match &p.tipo {
+                                Tipo::Classe(n) => {
+                                    Tipo::Classe(self.resolver_nome_classe(n, &ns_atual))
+                                }
+                                Tipo::Enum(n) => Tipo::Enum(self.resolver_nome_enum(n, &ns_atual)),
+                                other => other.clone(),
+                            })
+                            .collect();
+
+                        if let Some(m) = resolved_methods.get(&sig.nome) {
+                            let (ret_c, params_c) = self.assinatura_metodo(m);
+                            if ret_c != Some(ret_i.clone()) || params_c != params_i {
+                                self.erros.push(format!(
+                                    "Classe '{}' não implementa corretamente método '{}' da interface '{}'. Assinatura esperada: ({:?}) -> {:?}",
+                                    fqn, sig.nome, iface_fqn, params_i, ret_i
+                                ));
+                            }
+                        } else if !classe_eh_abstrata {
+                            self.erros.push(format!(
+                                "Classe '{}' não implementa método obrigatório '{}' da interface '{}'",
+                                fqn, sig.nome, iface_fqn
+                            ));
+                        }
+                    }
+                } else {
+                    self.erros.push(format!(
+                        "Interface '{}' não encontrada (referenciada por '{}')",
+                        iface_nome, fqn
+                    ));
+                }
+            }
+        }
+
         if self.erros.is_empty() {
             Ok(())
         } else {
             Err(self.erros.clone())
         }
+    }
+
+    pub fn resolver_nome_interface(&self, nome_iface: &str, namespace_atual: &str) -> String {
+        if nome_iface.contains('.') {
+            return nome_iface.to_string();
+        }
+        if !namespace_atual.is_empty() {
+            let fqn = format!("{}.{}", namespace_atual, nome_iface);
+            if self.interfaces.contains_key(&fqn) {
+                return fqn;
+            }
+        }
+        for using_path in &self.usings {
+            let fqn = format!("{}.{}", using_path, nome_iface);
+            if self.interfaces.contains_key(&fqn) {
+                return fqn;
+            }
+        }
+        nome_iface.to_string()
     }
 
     fn assinatura_metodo(&self, m: &'a ast::MetodoClasse) -> (Option<Tipo>, Vec<Tipo>) {
@@ -203,6 +306,9 @@ impl<'a> VerificadorTipos<'a> {
             .map(|m| (m.nome.clone(), m))
             .collect();
 
+        // Vamos calcular dinamicamente o pai e as interfaces finais, pois o primeiro item após ':' pode ser uma interface
+        let mut interfaces_final: Vec<String> = class_decl.interfaces.clone();
+        let mut parent_effective: Option<String> = None;
         if let Some(parent_name_simple) = &class_decl.classe_pai {
             let parent_name = self.resolver_nome_classe(
                 parent_name_simple,
@@ -229,12 +335,23 @@ impl<'a> VerificadorTipos<'a> {
                         methods.entry(name.clone()).or_insert(method);
                     }
                 }
+                parent_effective = Some(parent_name.clone());
             } else {
-                // Pai não encontrado — reporta erro explícito
-                self.erros.push(format!(
-                    "Classe pai '{}' não encontrada para '{}'.",
-                    parent_name, class_name
-                ));
+                // Não é classe — pode ser uma interface listada após ':' (estilo C#)
+                let iface_fqn = self.resolver_nome_interface(
+                    parent_name_simple,
+                    &self.get_namespace_from_full_name(class_name),
+                );
+                if self.interfaces.contains_key(&iface_fqn) {
+                    interfaces_final.push(parent_name_simple.clone());
+                    // Sem classe pai efetiva
+                } else {
+                    // Nem classe, nem interface conhecida — erro
+                    self.erros.push(format!(
+                        "Classe pai '{}' não encontrada para '{}'.",
+                        parent_name, class_name
+                    ));
+                }
             }
         }
 
@@ -254,12 +371,13 @@ impl<'a> VerificadorTipos<'a> {
             class_name.to_string(),
             ResolvedClassInfo {
                 name: class_name.to_string(),
-                parent_name: class_decl.classe_pai.clone(),
+                parent_name: parent_effective,
                 properties,
                 fields,
                 methods,
                 eh_estatica: class_decl.eh_estatica,
                 eh_abstrata: class_decl.eh_abstrata,
+                interfaces: interfaces_final,
             },
         );
 
@@ -417,6 +535,7 @@ impl<'a> VerificadorTipos<'a> {
         match declaracao {
             Declaracao::DeclaracaoFuncao(f) => f.nome.clone(),
             Declaracao::DeclaracaoClasse(c) => c.nome.clone(),
+            Declaracao::DeclaracaoInterface(i) => i.nome.clone(),
             Declaracao::DeclaracaoEnum(e) => e.nome.clone(),
             _ => "".to_string(),
         }
