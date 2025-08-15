@@ -373,6 +373,15 @@ ParametroSimples: ast::Parametro = {
         ast::Parametro::obrigatorio(nome, tipo),
 };
 
+// Lista de elementos de array
+ListaElementosArray: Vec<ast::Expressao> = {
+    <primeiro:Expressao> <rest:("," Expressao)*> => {
+        let mut v = vec![primeiro];
+        v.extend(rest.into_iter().map(|(_, e)| e));
+        v
+    }
+};
+
 // === COMANDOS SE/SENÃO ===
 ComandoSe: ast::Comando = {
     // Se sem else
@@ -431,6 +440,7 @@ ComandosBasicos: ast::Comando = {
 // === TIPOS E IDENTIFICADORES ===
 // Tipo primitivo ou classe
 Tipo: ast::Tipo = {
+    // Tipos primitivos
     "inteiro" => ast::Tipo::Inteiro,
     "texto" => ast::Tipo::Texto,
     "booleano" => ast::Tipo::Booleano,
@@ -438,7 +448,18 @@ Tipo: ast::Tipo = {
     "duplo" => ast::Tipo::Duplo,
     "decimal" => ast::Tipo::Decimal,
     "vazio" => ast::Tipo::Vazio,
+    
+    // Arrays de tipos primitivos
+    "inteiro" "[" "]" => ast::Tipo::Lista(Box::new(ast::Tipo::Inteiro)),
+    "texto" "[" "]" => ast::Tipo::Lista(Box::new(ast::Tipo::Texto)),
+    "booleano" "[" "]" => ast::Tipo::Lista(Box::new(ast::Tipo::Booleano)),
+    "flutuante" "[" "]" => ast::Tipo::Lista(Box::new(ast::Tipo::Flutuante)),
+    "duplo" "[" "]" => ast::Tipo::Lista(Box::new(ast::Tipo::Duplo)),
+    "decimal" "[" "]" => ast::Tipo::Lista(Box::new(ast::Tipo::Decimal)),
+    
+    // Tipos customizados e arrays de tipos customizados
     <nome:TIdentificador> => ast::Tipo::Classe(nome),
+    <nome:TIdentificador> "[" "]" => ast::Tipo::Lista(Box::new(ast::Tipo::Classe(nome))),
 };
 
 // === COMANDOS - ✅ ESTRUTURA SIMPLIFICADA ===
@@ -715,6 +736,8 @@ extern {
         ")" => Token::TParenDir,
         "{" => Token::TChaveEsq,
         "}" => Token::TChaveDir,
+        "[" => Token::TColcheteEsq,
+        "]" => Token::TColcheteDir,
         ";" => Token::TPontoVirgula,
         "," => Token::TVirgula,
         "=>" => Token::TSeta,

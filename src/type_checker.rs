@@ -646,6 +646,32 @@ impl<'a> VerificadorTipos<'a> {
                     nome, tipo_resolvido, escopo_vars
                 );
             }
+            Comando::AtribuirIndice(alvo, idx, valor) => {
+                let t_alvo =
+                    self.inferir_tipo_expressao(alvo, namespace_atual, classe_atual, escopo_vars);
+                let t_idx =
+                    self.inferir_tipo_expressao(idx, namespace_atual, classe_atual, escopo_vars);
+                if t_idx != Tipo::Inteiro {
+                    self.erros.push("Índice de array deve ser inteiro".into());
+                }
+                if let Tipo::Lista(elem) = t_alvo {
+                    let t_val = self.inferir_tipo_expressao(
+                        valor,
+                        namespace_atual,
+                        classe_atual,
+                        escopo_vars,
+                    );
+                    if !self.tipos_compativeis_atribuicao(&elem, &t_val) {
+                        self.erros.push(format!(
+                            "Atribuição de elemento incompatível: esperado {:?}, recebido {:?}",
+                            elem, t_val
+                        ));
+                    }
+                } else {
+                    self.erros
+                        .push("Atribuição por índice requer alvo do tipo lista".into());
+                }
+            }
             Comando::AtribuirPropriedade(obj_expr, prop_nome, val_expr) => {
                 println!(
                     "DEBUG: AtribuirPropriedade: objeto_expr={:?}, prop_nome=\"{}\", val_expr={:?}",
@@ -874,6 +900,12 @@ impl<'a> VerificadorTipos<'a> {
                         }
                     }
                 }
+                // Propriedade especial de arrays e textos
+                if membro_nome == "tamanho" {
+                    if matches!(obj_tipo, Tipo::Lista(_) | Tipo::Texto) {
+                        return Tipo::Inteiro;
+                    }
+                }
                 // Enum membro? O membro possui o tipo do próprio enum
                 if let Tipo::Enum(ref fqn_enum) = obj_tipo {
                     if let Some(en) = self.enums.get(fqn_enum) {
@@ -892,6 +924,44 @@ impl<'a> VerificadorTipos<'a> {
                         ));
                     }
                 }
+                Tipo::Inferido
+            }
+            Expressao::ListaLiteral(items) => {
+                // Homogeneidade: infere tipo comum, por ora exige todos iguais
+                if items.is_empty() {
+                    return Tipo::Lista(Box::new(Tipo::Inferido));
+                }
+                let first = self.inferir_tipo_expressao(
+                    &items[0],
+                    namespace_atual,
+                    classe_atual,
+                    escopo_vars,
+                );
+                for e in &items[1..] {
+                    let te =
+                        self.inferir_tipo_expressao(e, namespace_atual, classe_atual, escopo_vars);
+                    if !self.tipos_compativeis_atribuicao(&first, &te)
+                        || !self.tipos_compativeis_atribuicao(&te, &first)
+                    {
+                        self.erros
+                            .push("Elementos do array devem ter tipos compatíveis".into());
+                        break;
+                    }
+                }
+                return Tipo::Lista(Box::new(first));
+            }
+            Expressao::AcessoIndice(obj, idx) => {
+                let t_obj =
+                    self.inferir_tipo_expressao(obj, namespace_atual, classe_atual, escopo_vars);
+                let t_idx =
+                    self.inferir_tipo_expressao(idx, namespace_atual, classe_atual, escopo_vars);
+                if t_idx != Tipo::Inteiro {
+                    self.erros.push("Índice de acesso deve ser inteiro".into());
+                }
+                if let Tipo::Lista(elem) = t_obj {
+                    return *elem;
+                }
+                self.erros.push("Acesso por índice requer lista".into());
                 Tipo::Inferido
             }
             Expressao::NovoObjeto(nome_classe, _) => {
@@ -980,12 +1050,32 @@ impl<'a> VerificadorTipos<'a> {
                         }
                     }
                 }
+                if membro_nome == "tamanho" {
+                    if matches!(obj_tipo, Tipo::Lista(_) | Tipo::Texto) {
+                        return Tipo::Inteiro;
+                    }
+                }
                 if let Tipo::Enum(ref fqn_enum) = obj_tipo {
                     if let Some(en) = self.enums.get(fqn_enum) {
                         if en.valores.iter().any(|v| v == membro_nome) {
                             return Tipo::Enum(fqn_enum.clone());
                         }
                     }
+                }
+                Tipo::Inferido
+            }
+            Expressao::ListaLiteral(items) => {
+                if items.is_empty() {
+                    return Tipo::Lista(Box::new(Tipo::Inferido));
+                }
+                let first =
+                    self.get_expr_type(&items[0], namespace_atual, classe_atual, escopo_vars);
+                return Tipo::Lista(Box::new(first));
+            }
+            Expressao::AcessoIndice(obj, _idx) => {
+                let t_obj = self.get_expr_type(obj, namespace_atual, classe_atual, escopo_vars);
+                if let Tipo::Lista(elem) = t_obj {
+                    return *elem;
                 }
                 Tipo::Inferido
             }

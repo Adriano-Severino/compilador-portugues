@@ -482,6 +482,8 @@ impl<'a> LlvmGenerator<'a> {
         self.header.push_str("declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture writeonly, i8* nocapture readonly, i64, i1 immarg)\n");
         self.header
             .push_str("declare void @llvm.memset.p0i8.i64(i8*, i8, i64, i1)\n");
+        // Estrutura genérica de array: { i32 len, i8* data }
+        self.header.push_str("%array = type { i32, i8* }\n");
         self.header.push_str(
             "@.println_fmt = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\", align 1\n",
         );
@@ -495,6 +497,7 @@ impl<'a> LlvmGenerator<'a> {
         );
         self.header
             .push_str("@.empty_str = private unnamed_addr constant [1 x i8] c\"\\00\", align 1\n");
+        self.header.push_str("@.oob_msg = private unnamed_addr constant [23 x i8] c\"Indice fora dos limites\", align 1\n");
     }
 
     fn setup_parameters(&mut self, params: &[ast::Parametro]) {
@@ -530,6 +533,7 @@ impl<'a> LlvmGenerator<'a> {
             ast::Tipo::Booleano => 1,
             ast::Tipo::Enum(_) => 4,
             ast::Tipo::Classe(_) => 8,
+            ast::Tipo::Lista(_) => 8,
             _ => 8,
         }
     }
@@ -561,6 +565,69 @@ impl<'a> LlvmGenerator<'a> {
             ast::Comando::Atribuicao(nome, expr) => {
                 let (value_reg, value_type) = self.generate_expressao(expr);
                 self.store_variable(nome, &value_type, &value_reg);
+            }
+            ast::Comando::AtribuirIndice(alvo, idx, val) => {
+                // Gera: arr_ptr, idx, val; verifica limites e faz store
+                let (arr_reg, arr_tipo) = self.generate_expressao(alvo);
+                let (idx_reg, _idx_tipo) = self.generate_expressao(idx);
+                let (val_reg, val_tipo) = self.generate_expressao(val);
+                let elem_tipo = match arr_tipo {
+                    ast::Tipo::Lista(boxed) => *boxed,
+                    _ => panic!("Atribuição por índice requer array, obtido: {:?}", arr_tipo),
+                };
+                let (data_ptr, len_reg) = self.get_array_data_and_len(&arr_reg);
+                // Bounds check: idx < 0 || idx >= len
+                let neg = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = icmp slt i32 {1}, 0\n", neg, idx_reg));
+                let ge = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = icmp sge i32 {1}, {2}\n",
+                    ge, idx_reg, len_reg
+                ));
+                let oob = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = or i1 {1}, i1 {2}\n", oob, neg, ge));
+                let ok_label = self.get_unique_label("idx.ok");
+                let oob_label = self.get_unique_label("idx.oob");
+                let end_label = self.get_unique_label("idx.end");
+                self.body.push_str(&format!(
+                    "  br i1 {0}, label %{1}, label %{2}\n",
+                    oob, oob_label, ok_label
+                ));
+                // oob path
+                self.body.push_str(&format!("{0}:\n", oob_label));
+                let msg_ptr = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = getelementptr inbounds [23 x i8], [23 x i8]* @.oob_msg, i32 0, i32 0\n",
+                    msg_ptr
+                ));
+                self.body.push_str(&format!(
+                    "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.println_fmt, i32 0, i32 0), i8* {0})\n",
+                    msg_ptr
+                ));
+                self.body.push_str(&format!("  br label %{0}\n", end_label));
+                // ok path
+                self.body.push_str(&format!("{0}:\n", ok_label));
+                let elem_ptr_t = self.map_type_to_llvm_arg(&elem_tipo);
+                let casted = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = bitcast i8* {1} to {2}*\n",
+                    casted, data_ptr, elem_ptr_t
+                ));
+                let slot = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = getelementptr inbounds {1}, {1}* {2}, i32 {3}\n",
+                    slot, elem_ptr_t, casted, idx_reg
+                ));
+                let coerced = self.ensure_value_type(&val_reg, &val_tipo, &elem_tipo);
+                let elem_store_ty = self.map_type_to_llvm_storage(&elem_tipo);
+                self.body.push_str(&format!(
+                    "  store {0} {1}, {0}* {2}\n",
+                    elem_store_ty, coerced, slot
+                ));
+                self.body.push_str(&format!("  br label %{0}\n", end_label));
+                self.body.push_str(&format!("{0}:\n", end_label));
             }
             ast::Comando::Expressao(expr) => {
                 self.generate_expressao(expr);
@@ -1175,6 +1242,185 @@ impl<'a> LlvmGenerator<'a> {
 
                 (obj_ptr_reg, ast::Tipo::Classe(fqn))
             }
+            ast::Expressao::ListaLiteral(items) => {
+                // Infere tipo de elemento a partir do primeiro item (assumindo homogêneo)
+                let (elem0_reg, elem0_tipo) = self.generate_expressao(&items[0]);
+                let elem_ty_arg = self.map_type_to_llvm_arg(&elem0_tipo);
+
+                // sizeof(T):
+                let gep = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = getelementptr inbounds {1}, {1}* null, i32 1\n",
+                    gep, elem_ty_arg
+                ));
+                let sizeof_t = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = ptrtoint {1} {2} to i64\n",
+                    sizeof_t,
+                    format!("{0}*", elem_ty_arg),
+                    gep
+                ));
+
+                // total size = len * sizeof(T)
+                let len = items.len();
+                let total_size = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = mul i64 {1}, {2}\n",
+                    total_size, sizeof_t, len
+                ));
+                let data_i8 = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = call i8* @malloc(i64 {1})\n",
+                    data_i8, total_size
+                ));
+                // Escrever elementos
+                let data_typed = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = bitcast i8* {1} to {2}*\n",
+                    data_typed, data_i8, elem_ty_arg
+                ));
+                // store o primeiro
+                let coerced0 = self.ensure_value_type(&elem0_reg, &elem0_tipo, &elem0_tipo);
+                let slot0 = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = getelementptr inbounds {1}, {1}* {2}, i32 0\n",
+                    slot0, elem_ty_arg, data_typed
+                ));
+                let elem_store_ty = self.map_type_to_llvm_storage(&elem0_tipo);
+                self.body.push_str(&format!(
+                    "  store {0} {1}, {0}* {2}\n",
+                    elem_store_ty, coerced0, slot0
+                ));
+                for (i, it) in items.iter().enumerate().skip(1) {
+                    let (r, t) = self.generate_expressao(it);
+                    let coerced = self.ensure_value_type(&r, &t, &elem0_tipo);
+                    let slot = self.get_unique_temp_name();
+                    self.body.push_str(&format!(
+                        "  {0} = getelementptr inbounds {1}, {1}* {2}, i32 {3}\n",
+                        slot, elem_ty_arg, data_typed, i
+                    ));
+                    self.body.push_str(&format!(
+                        "  store {0} {1}, {0}* {2}\n",
+                        elem_store_ty, coerced, slot
+                    ));
+                }
+
+                // Aloca e preenche header %array
+                let array_size_gep = self.get_unique_temp_name();
+                self.body.push_str("  ");
+                self.body.push_str(&format!(
+                    "{0} = getelementptr inbounds %array, %array* null, i32 1\n",
+                    array_size_gep
+                ));
+                let array_size = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = ptrtoint %array* {1} to i64\n",
+                    array_size, array_size_gep
+                ));
+                let array_mem = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = call i8* @malloc(i64 {1})\n",
+                    array_mem, array_size
+                ));
+                let array_ptr = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = bitcast i8* {1} to %array*\n",
+                    array_ptr, array_mem
+                ));
+                // campos: [0] len, [1] data
+                let len_ptr = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = getelementptr inbounds %array, %array* {1}, i32 0, i32 0\n",
+                    len_ptr, array_ptr
+                ));
+                self.body
+                    .push_str(&format!("  store i32 {0}, i32* {1}\n", len, len_ptr));
+                let data_ptr_ptr = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = getelementptr inbounds %array, %array* {1}, i32 0, i32 1\n",
+                    data_ptr_ptr, array_ptr
+                ));
+                self.body.push_str(&format!(
+                    "  store i8* {0}, i8** {1}\n",
+                    data_i8, data_ptr_ptr
+                ));
+
+                (array_ptr, ast::Tipo::Lista(Box::new(elem0_tipo)))
+            }
+            ast::Expressao::AcessoIndice(obj, idx) => {
+                let (arr_reg, arr_tipo) = self.generate_expressao(obj);
+                let (idx_reg, _idx_tipo) = self.generate_expressao(idx);
+                let elem_tipo = match arr_tipo.clone() {
+                    ast::Tipo::Lista(boxed) => *boxed,
+                    _ => panic!("Acesso por índice requer array, obtido: {:?}", arr_tipo),
+                };
+                let (data_ptr, len_reg) = self.get_array_data_and_len(&arr_reg);
+                // Bounds
+                let neg = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = icmp slt i32 {1}, 0\n", neg, idx_reg));
+                let ge = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = icmp sge i32 {1}, {2}\n",
+                    ge, idx_reg, len_reg
+                ));
+                let oob = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = or i1 {1}, i1 {2}\n", oob, neg, ge));
+                let ok_label = self.get_unique_label("idx.ok");
+                let oob_label = self.get_unique_label("idx.oob");
+                let end_label = self.get_unique_label("idx.end");
+                self.body.push_str(&format!(
+                    "  br i1 {0}, label %{1}, label %{2}\n",
+                    oob, oob_label, ok_label
+                ));
+                // oob
+                self.body.push_str(&format!("{0}:\n", oob_label));
+                let msg_ptr = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = getelementptr inbounds [23 x i8], [23 x i8]* @.oob_msg, i32 0, i32 0\n",
+                    msg_ptr
+                ));
+                self.body.push_str(&format!(
+                    "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.println_fmt, i32 0, i32 0), i8* {0})\n",
+                    msg_ptr
+                ));
+                // valor padrão
+                let default_reg = self.zero_value_of(&elem_tipo);
+                self.body.push_str(&format!("  br label %{0}\n", end_label));
+                // ok
+                self.body.push_str(&format!("{0}:\n", ok_label));
+                let elem_ty_arg = self.map_type_to_llvm_arg(&elem_tipo);
+                let casted = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = bitcast i8* {1} to {2}*\n",
+                    casted, data_ptr, elem_ty_arg
+                ));
+                let slot = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = getelementptr inbounds {1}, {1}* {2}, i32 {3}\n",
+                    slot, elem_ty_arg, casted, idx_reg
+                ));
+                let loaded = self.get_unique_temp_name();
+                let elem_store_ty = self.map_type_to_llvm_storage(&elem_tipo);
+                self.body.push_str(&format!(
+                    "  {0} = load {1}, {1}* {2}\n",
+                    loaded, elem_store_ty, slot
+                ));
+                let phi = self.get_unique_temp_name();
+                // phi do resultado
+                self.body.push_str(&format!(
+                    "  br label %{0}\n{0}:\n  {1} = phi {2} [ {3}, %{4} ], [ {5}, %{6} ]\n",
+                    end_label,
+                    phi,
+                    self.map_type_to_llvm_arg(&elem_tipo),
+                    default_reg,
+                    oob_label,
+                    loaded,
+                    ok_label
+                ));
+                (phi, elem_tipo)
+            }
             ast::Expressao::Chamada(nome_funcao, argumentos) => {
                 let fqn_func_name = self
                     .type_checker
@@ -1468,9 +1714,31 @@ impl<'a> LlvmGenerator<'a> {
                         }
                     }
                 }
-
-                // Caso instância
+                // Caso instância: agora podemos avaliar o objeto
                 let (obj_reg, obj_type) = self.generate_expressao(obj_expr);
+                // Propriedade especial: tamanho em arrays e textos
+                if membro_nome == "tamanho" {
+                    match obj_type {
+                        ast::Tipo::Lista(_) => {
+                            let (_data, len_reg) = self.get_array_data_and_len(&obj_reg);
+                            return (len_reg, ast::Tipo::Inteiro);
+                        }
+                        ast::Tipo::Texto => {
+                            let safe = self.get_safe_string_ptr(&obj_reg);
+                            let len64 = self.get_unique_temp_name();
+                            self.body.push_str(&format!(
+                                "  {0} = call i64 @strlen(i8* {1})\n",
+                                len64, safe
+                            ));
+                            let len32 = self.get_unique_temp_name();
+                            self.body
+                                .push_str(&format!("  {0} = trunc i64 {1} to i32\n", len32, len64));
+                            return (len32, ast::Tipo::Inteiro);
+                        }
+                        _ => {}
+                    }
+                }
+                // obj_reg e obj_type já calculados acima
                 let class_name = match obj_type {
                     ast::Tipo::Classe(name) => name,
                     _ => panic!(
@@ -1845,6 +2113,7 @@ impl<'a> LlvmGenerator<'a> {
             ast::Tipo::Vazio => "void".to_string(),
             ast::Tipo::Enum(_) => "i32".to_string(),
             ast::Tipo::Classe(_) => self.map_type_to_llvm_ptr(tipo),
+            ast::Tipo::Lista(_) => "%array*".to_string(),
             _ => panic!("Tipo LLVM não mapeado para armazenamento: {:?}", tipo),
         }
     }
@@ -1862,6 +2131,7 @@ impl<'a> LlvmGenerator<'a> {
                 let sanitized_name = name.replace('.', "_");
                 format!("%class.{0}*", sanitized_name)
             }
+            ast::Tipo::Lista(_) => "%array**".to_string(),
             _ => panic!("Não é possível criar um ponteiro para o tipo: {:?}", tipo),
         }
     }
@@ -1877,6 +2147,7 @@ impl<'a> LlvmGenerator<'a> {
             ast::Tipo::Vazio => "void".to_string(),
             ast::Tipo::Enum(_) => "i32".to_string(),
             ast::Tipo::Classe(_) => self.map_type_to_llvm_ptr(tipo),
+            ast::Tipo::Lista(_) => "%array*".to_string(),
             _ => panic!("Tipo LLVM não mapeado para argumento: {:?}", tipo),
         }
     }
@@ -2011,5 +2282,47 @@ impl<'a> LlvmGenerator<'a> {
 
     fn get_namespace_from_full_name(&self, full: &str) -> String {
         self.get_namespace_from_fqn(full)
+    }
+
+    // Helpers para arrays
+    fn get_array_data_and_len(&mut self, arr_ptr_reg: &str) -> (String, String) {
+        // arr_ptr_reg: %array*
+        let len_ptr = self.get_unique_temp_name();
+        self.body.push_str(&format!(
+            "  {0} = getelementptr inbounds %array, %array* {1}, i32 0, i32 0\n",
+            len_ptr, arr_ptr_reg
+        ));
+        let len_reg = self.get_unique_temp_name();
+        self.body
+            .push_str(&format!("  {0} = load i32, i32* {1}\n", len_reg, len_ptr));
+        let data_ptr_ptr = self.get_unique_temp_name();
+        self.body.push_str(&format!(
+            "  {0} = getelementptr inbounds %array, %array* {1}, i32 0, i32 1\n",
+            data_ptr_ptr, arr_ptr_reg
+        ));
+        let data_ptr = self.get_unique_temp_name();
+        self.body.push_str(&format!(
+            "  {0} = load i8*, i8** {1}\n",
+            data_ptr, data_ptr_ptr
+        ));
+        (data_ptr, len_reg)
+    }
+
+    fn zero_value_of(&mut self, tipo: &ast::Tipo) -> String {
+        match tipo {
+            ast::Tipo::Inteiro | ast::Tipo::Enum(_) => "0".to_string(),
+            ast::Tipo::Booleano => "0".to_string(),
+            ast::Tipo::Flutuante => {
+                let z = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = fptrunc double 0.0 to float\n", z));
+                z
+            }
+            ast::Tipo::Duplo => "0.0".to_string(),
+            ast::Tipo::Texto | ast::Tipo::Decimal | ast::Tipo::Classe(_) | ast::Tipo::Lista(_) => {
+                "null".to_string()
+            }
+            _ => "0".to_string(),
+        }
     }
 }

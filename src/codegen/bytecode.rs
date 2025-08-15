@@ -633,6 +633,13 @@ impl<'a> BytecodeGenerator<'a> {
                     .push(format!("SET_PROPERTY {}", prop_nome)); // 3. Executa a atribuição
                 self.bytecode_instructions.push("POP".to_string()); // 4. Remove o objeto da pilha
             }
+            ast::Comando::AtribuirIndice(alvo, idx, expr) => {
+                // pilha: alvo, índice, valor
+                self.generate_expressao(alvo);
+                self.generate_expressao(idx);
+                self.generate_expressao(expr);
+                self.bytecode_instructions.push("SET_INDEX".to_string());
+            }
 
             ast::Comando::ChamarMetodo(objeto_expr, metodo, argumentos) => {
                 if let ast::Expressao::Identificador(ident) = &**objeto_expr {
@@ -781,8 +788,12 @@ impl<'a> BytecodeGenerator<'a> {
 
                 // Acesso a membro de instância
                 self.generate_expressao(obj_expr);
-                self.bytecode_instructions
-                    .push(format!("GET_PROPERTY {}", membro));
+                if membro == "tamanho" {
+                    self.bytecode_instructions.push("GET_LENGTH".to_string());
+                } else {
+                    self.bytecode_instructions
+                        .push(format!("GET_PROPERTY {}", membro));
+                }
             }
 
             // Expressão para criar um novo objeto
@@ -854,6 +865,20 @@ impl<'a> BytecodeGenerator<'a> {
                         self.bytecode_instructions.push("MOD".to_string())
                     }
                 }
+            }
+
+            ast::Expressao::ListaLiteral(itens) => {
+                for e in itens {
+                    self.generate_expressao(e);
+                }
+                self.bytecode_instructions
+                    .push(format!("NEW_ARRAY {}", itens.len()));
+            }
+
+            ast::Expressao::AcessoIndice(obj, idx) => {
+                self.generate_expressao(obj);
+                self.generate_expressao(idx);
+                self.bytecode_instructions.push("GET_INDEX".to_string());
             }
 
             // Adicionado: Operadores de Comparação

@@ -9,6 +9,10 @@ pub enum Token {
     TEntao,
     #[token("senão")]
     TSenao,
+    #[token("[")]
+    TColcheteEsq,
+    #[token("]")]
+    TColcheteDir,
     #[token("enquanto")]
     TEnquanto,
     #[token("para")]

@@ -24,6 +24,7 @@ enum Valor {
     Texto(String),
     Booleano(bool),
     Decimal(Decimal),
+    Array(Vec<Valor>),
     Nulo,
     Objeto {
         nome_classe: String,
@@ -65,6 +66,10 @@ impl fmt::Display for Valor {
             Valor::Booleano(b) => write!(f, "{}", if *b { "verdadeiro" } else { "falso" }),
             Valor::Decimal(d) => write!(f, "{}", d),
             Valor::Nulo => write!(f, "nulo"),
+            Valor::Array(v) => {
+                let s = v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", ");
+                write!(f, "[{}]", s)
+            }
 
             // ✅ NOVO: Display para objetos
             Valor::Objeto {
@@ -94,6 +99,7 @@ impl PartialEq for Valor {
             (Valor::Booleano(a), Valor::Booleano(b)) => a == b,
             (Valor::Decimal(a), Valor::Decimal(b)) => a == b,
             (Valor::Nulo, Valor::Nulo) => true,
+            (Valor::Array(a), Valor::Array(b)) => a == b,
             (Valor::Objeto { campos: a, .. }, Valor::Objeto { campos: b, .. }) => {
                 // Compara os ponteiros dos `Rc` para verificar se são a mesma instância.
                 Rc::ptr_eq(a, b)
@@ -696,6 +702,51 @@ impl VM {
                 "HALT" => {
                     // Para a execução da VM.
                     break;
+                }
+
+                "NEW_ARRAY" => {
+                    let n = partes
+                        .get(1)
+                        .ok_or("NEW_ARRAY requer tamanho")?
+                        .parse::<usize>()
+                        .map_err(|e| format!("Tamanho inválido: {}", e))?;
+                    if self.pilha.len() < n { return Err("Pilha insuficiente para NEW_ARRAY".into()); }
+                    let elems = self.pilha.split_off(self.pilha.len() - n);
+                    self.pilha.push(Valor::Array(elems));
+                }
+                "GET_INDEX" => {
+                    let idx = self.pilha.pop().ok_or("Pilha vazia para GET_INDEX idx")?;
+                    let arr = self.pilha.pop().ok_or("Pilha vazia para GET_INDEX arr")?;
+                    match (arr, idx) {
+                        (Valor::Array(v), Valor::Inteiro(i)) => {
+                            let i = if i < 0 { return Err("Índice negativo".into()); } else { i as usize };
+                            let val = v.get(i).cloned().ok_or("Índice fora do intervalo")?;
+                            self.pilha.push(val);
+                        }
+                        _ => return Err("GET_INDEX requer array e inteiro".into()),
+                    }
+                }
+                "SET_INDEX" => {
+                    let val = self.pilha.pop().ok_or("Pilha vazia para SET_INDEX val")?;
+                    let idx = self.pilha.pop().ok_or("Pilha vazia para SET_INDEX idx")?;
+                    let arr = self.pilha.pop().ok_or("Pilha vazia para SET_INDEX arr")?;
+                    match (arr, idx) {
+                        (Valor::Array(mut v), Valor::Inteiro(i)) => {
+                            let i = if i < 0 { return Err("Índice negativo".into()); } else { i as usize };
+                            if i >= v.len() { return Err("Índice fora do intervalo".into()); }
+                            v[i] = val;
+                            self.pilha.push(Valor::Array(v));
+                        }
+                        _ => return Err("SET_INDEX requer array e inteiro".into()),
+                    }
+                }
+                "GET_LENGTH" => {
+                    let arr = self.pilha.pop().ok_or("Pilha vazia para GET_LENGTH")?;
+                    match arr {
+                        Valor::Array(v) => self.pilha.push(Valor::Inteiro(v.len() as i64)),
+                        Valor::Texto(s) => self.pilha.push(Valor::Inteiro(s.len() as i64)),
+                        _ => return Err("GET_LENGTH requer array ou texto".into()),
+                    }
                 }
 
                 "LOAD_CONST_BOOL" => {

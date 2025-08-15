@@ -28,6 +28,21 @@ impl InferenciaTipos {
             Expressao::DuploLiteral(_) => Ok(Tipo::Duplo),
             Expressao::Decimal(_) => Ok(Tipo::Decimal),
             Expressao::NovoObjeto(c, _) => Ok(Tipo::Classe(c.clone())),
+            // Arrays: inferir tipo dos elementos
+            Expressao::ListaLiteral(itens) => {
+                if itens.is_empty() {
+                    Ok(Tipo::Lista(Box::new(Tipo::Inferido)))
+                } else {
+                    let primeiro = self.inferir_tipo(&itens[0])?;
+                    for e in &itens[1..] {
+                        let ti = self.inferir_tipo(e)?;
+                        if !self.tipos_compativeis(&primeiro, &ti) {
+                            return Err("Itens do array possuem tipos diferentes".into());
+                        }
+                    }
+                    Ok(Tipo::Lista(Box::new(primeiro)))
+                }
+            }
 
             Expressao::Aritmetica(op, esq, dir) => {
                 let t_esq = self.inferir_tipo(esq)?;
@@ -81,10 +96,18 @@ impl InferenciaTipos {
                 }
             }
 
-            // ✅ NOVO: Inferir tipo para acesso a membros com herança
+            // ✅ NOVO: Inferir tipo para acesso a membros com herança e arrays
             Expressao::AcessoMembro(obj_expr, membro) => {
                 let tipo_obj = self.inferir_tipo(obj_expr)?;
                 match tipo_obj {
+                    // Acesso especial em arrays
+                    Tipo::Lista(_) => {
+                        if membro == "tamanho" {
+                            Ok(Tipo::Inteiro)
+                        } else {
+                            Ok(Tipo::Vazio)
+                        }
+                    }
                     Tipo::Classe(classe_nome) => {
                         // Buscar membro na hierarquia de herança
                         self.inferir_tipo_membro_hierarquia(&classe_nome, membro)
@@ -95,6 +118,15 @@ impl InferenciaTipos {
                     )),
                 }
             }
+
+            // Acesso por índice em arrays
+            Expressao::AcessoIndice(base, _idx) => match self.inferir_tipo(base)? {
+                Tipo::Lista(elem) => Ok(*elem),
+                outro => Err(format!(
+                    "Tentativa de indexar tipo não-lista: {}",
+                    self.tipo_para_string(&outro)
+                )),
+            },
 
             // ✅ NOVO: Inferir tipo para chamadas de método com herança
             Expressao::ChamadaMetodo(obj_expr, metodo, _argumentos) => {
