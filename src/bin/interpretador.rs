@@ -1,9 +1,9 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fmt;
 use std::fs;
-use std::io::Read;
+use std::io::{self, Read, Write};
 use std::rc::Rc;
 
 use rust_decimal::Decimal;
@@ -67,7 +67,11 @@ impl fmt::Display for Valor {
             Valor::Decimal(d) => write!(f, "{}", d),
             Valor::Nulo => write!(f, "nulo"),
             Valor::Array(v) => {
-                let s = v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", ");
+                let s = v
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 write!(f, "[{}]", s)
             }
 
@@ -128,6 +132,26 @@ struct VM {
     loaded_modules: std::collections::HashSet<String>,
     // NOVO: Diretório base para resolver caminhos de módulos
     base_dir: std::path::PathBuf,
+    // Debugging support
+    debug: Option<Rc<RefCell<DebugState>>>,
+    code_id: String,
+}
+
+// Estado compartilhado do depurador entre VMs (para permitir step-into em chamadas)
+#[derive(Debug)]
+struct DebugState {
+    enabled: bool,
+    // breakpoints por código: code_id -> conjunto de IPs
+    breakpoints: HashMap<String, std::collections::HashSet<usize>>,
+    // modo de passo atual
+    step_mode: Option<StepMode>,
+    // última localização em que paramos (para comparar no step)
+    last_break_location: Option<(String, usize)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StepMode {
+    StepInto,
 }
 
 impl VM {
@@ -146,6 +170,8 @@ impl VM {
             functions: self.functions.clone(),
             loaded_modules: self.loaded_modules.clone(),
             base_dir: self.base_dir.clone(),
+            debug: self.debug.clone(),
+            code_id: format!("func:{}", func.nome),
         };
         // Mapear parâmetros
         for (idx, param_name) in func.parametros.iter().enumerate() {
@@ -171,6 +197,8 @@ impl VM {
             functions: HashMap::new(),
             loaded_modules: std::collections::HashSet::new(),
             base_dir,
+            debug: None,
+            code_id: "global".to_string(),
         }
     }
 
@@ -208,6 +236,8 @@ impl VM {
                 functions: self.functions.clone(),
                 loaded_modules: self.loaded_modules.clone(),
                 base_dir: self.base_dir.clone(),
+                debug: self.debug.clone(),
+                code_id: format!("ctor:{}", nome_classe),
             };
 
             // Adiciona 'este' e os argumentos ao escopo do construtor.
@@ -283,6 +313,8 @@ impl VM {
                     functions: self.functions.clone(),
                     loaded_modules: self.loaded_modules.clone(),
                     base_dir: self.base_dir.clone(),
+                    debug: self.debug.clone(),
+                    code_id: format!("method:{}::{}", nome_classe, nome_metodo),
                 };
 
                 vm_metodo.run()?;
@@ -324,6 +356,8 @@ impl VM {
                     functions: self.functions.clone(),
                     loaded_modules: self.loaded_modules.clone(),
                     base_dir: self.base_dir.clone(),
+                    debug: self.debug.clone(),
+                    code_id: format!("static:{}::{}", nome_classe, nome_metodo),
                 };
 
                 vm_metodo.run()?;
@@ -592,6 +626,9 @@ impl VM {
             let partes: Vec<&str> = instrucao_str.split_whitespace().collect();
             let op = partes.get(0).ok_or("Instrução vazia encontrada")?;
 
+            // Ponto de parada para debug antes de executar a instrução
+            self.debug_pause_if_needed(&instrucao_str)?;
+
             // Avança o ponteiro de instrução ANTES de executar, para evitar laços infinitos.
             // Apenas para JUMP e JUMP_IF_FALSE o IP é ajustado explicitamente.
             if !matches!(*op, "JUMP" | "JUMP_IF_FALSE") {
@@ -710,7 +747,9 @@ impl VM {
                         .ok_or("NEW_ARRAY requer tamanho")?
                         .parse::<usize>()
                         .map_err(|e| format!("Tamanho inválido: {}", e))?;
-                    if self.pilha.len() < n { return Err("Pilha insuficiente para NEW_ARRAY".into()); }
+                    if self.pilha.len() < n {
+                        return Err("Pilha insuficiente para NEW_ARRAY".into());
+                    }
                     let elems = self.pilha.split_off(self.pilha.len() - n);
                     self.pilha.push(Valor::Array(elems));
                 }
@@ -719,7 +758,11 @@ impl VM {
                     let arr = self.pilha.pop().ok_or("Pilha vazia para GET_INDEX arr")?;
                     match (arr, idx) {
                         (Valor::Array(v), Valor::Inteiro(i)) => {
-                            let i = if i < 0 { return Err("Índice negativo".into()); } else { i as usize };
+                            let i = if i < 0 {
+                                return Err("Índice negativo".into());
+                            } else {
+                                i as usize
+                            };
                             let val = v.get(i).cloned().ok_or("Índice fora do intervalo")?;
                             self.pilha.push(val);
                         }
@@ -732,8 +775,14 @@ impl VM {
                     let arr = self.pilha.pop().ok_or("Pilha vazia para SET_INDEX arr")?;
                     match (arr, idx) {
                         (Valor::Array(mut v), Valor::Inteiro(i)) => {
-                            let i = if i < 0 { return Err("Índice negativo".into()); } else { i as usize };
-                            if i >= v.len() { return Err("Índice fora do intervalo".into()); }
+                            let i = if i < 0 {
+                                return Err("Índice negativo".into());
+                            } else {
+                                i as usize
+                            };
+                            if i >= v.len() {
+                                return Err("Índice fora do intervalo".into());
+                            }
                             v[i] = val;
                             self.pilha.push(Valor::Array(v));
                         }
@@ -1350,6 +1399,8 @@ impl VM {
                         let default_expr_bytecode_str = partes[2..].join(" ");
                         let mut temp_vm =
                             VM::new(vec![default_expr_bytecode_str], self.base_dir.clone());
+                        temp_vm.debug = self.debug.clone();
+                        temp_vm.code_id = format!("expr-default:{}", nome_var);
                         temp_vm.run()?;
                         let valor = temp_vm.pilha.pop().unwrap_or(Valor::Nulo);
                         self.variaveis.insert(nome_var.to_string(), valor);
@@ -1390,6 +1441,8 @@ impl VM {
                                             functions: self.functions.clone(),
                                             loaded_modules: self.loaded_modules.clone(),
                                             base_dir: self.base_dir.clone(),
+                                            debug: self.debug.clone(),
+                                            code_id: format!("base_ctor:{}", parent_name),
                                         };
                                         constructor_vm
                                             .variaveis
@@ -1453,6 +1506,8 @@ impl VM {
                         functions: self.functions.clone(),
                         loaded_modules: self.loaded_modules.clone(),
                         base_dir: self.base_dir.clone(),
+                        debug: self.debug.clone(),
+                        code_id: format!("func:{}", func.nome),
                     };
                     vm.run()?;
                     self.pilha.push(vm.pilha.pop().unwrap_or(Valor::Nulo));
@@ -1512,6 +1567,8 @@ impl VM {
             functions: self.functions.clone(),
             loaded_modules: self.loaded_modules.clone(),
             base_dir: self.base_dir.clone(),
+            debug: self.debug.clone(),
+            code_id: "global:init".to_string(),
         };
 
         vm_global.run()
@@ -1605,6 +1662,145 @@ impl VM {
         }
         Ok(())
     }
+
+    fn debug_pause_if_needed(&mut self, instr: &str) -> Result<(), String> {
+        let Some(dbg_rc) = self.debug.clone() else {
+            return Ok(());
+        };
+        let mut st = dbg_rc.borrow_mut();
+        if !st.enabled {
+            return Ok(());
+        }
+
+        let mut should_pause = matches!(st.step_mode, Some(StepMode::StepInto));
+        if !should_pause {
+            if let Some(bps) = st.breakpoints.get(&self.code_id) {
+                // Para instruções não-JUMP, ip já foi incrementado no loop run
+                let cur_ip = self.ip.saturating_sub(1);
+                if bps.contains(&cur_ip) {
+                    should_pause = true;
+                }
+            }
+        }
+        if !should_pause {
+            return Ok(());
+        }
+
+        st.last_break_location = Some((self.code_id.clone(), self.ip.saturating_sub(1)));
+        drop(st);
+
+        loop {
+            println!(
+                "\n[depurador] {}@ip={} -> {}\ncomandos: c(continue), s(step), p(pilha), vars, v <nome>, dis [n], bp add|del <ip>|list, where, help, q(quit)",
+                self.code_id, self.ip.saturating_sub(1), instr
+            );
+            print!("dbg> ");
+            io::stdout().flush().ok();
+            let mut entrada = String::new();
+            io::stdin()
+                .read_line(&mut entrada)
+                .map_err(|e| e.to_string())?;
+            let cmd = entrada.trim();
+            if cmd.is_empty() || cmd == "c" || cmd == "cont" || cmd == "continue" {
+                if let Some(d) = &self.debug {
+                    d.borrow_mut().step_mode = None;
+                }
+                break;
+            } else if cmd == "s" || cmd == "step" || cmd == "next" || cmd == "n" {
+                if let Some(d) = &self.debug {
+                    d.borrow_mut().step_mode = Some(StepMode::StepInto);
+                }
+                break;
+            } else if cmd == "p" || cmd == "pilha" {
+                println!("pilha ({} itens):", self.pilha.len());
+                for (i, v) in self.pilha.iter().enumerate() {
+                    println!("  [{}] {}", i, v);
+                }
+            } else if cmd == "vars" {
+                println!("variaveis ({}):", self.variaveis.len());
+                for (k, v) in &self.variaveis {
+                    println!("  {} = {}", k, v);
+                }
+            } else if cmd.starts_with("v ") {
+                let nome = cmd.splitn(2, ' ').nth(1).unwrap_or("");
+                if let Some(v) = self.variaveis.get(nome) {
+                    println!("{} = {}", nome, v);
+                } else {
+                    println!("(sem variável '{}')", nome);
+                }
+            } else if cmd.starts_with("dis") {
+                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                let n: usize = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(8);
+                let start = self.ip.saturating_sub(1);
+                let end = (start + n).min(self.bytecode.len());
+                for i in start..end {
+                    let mark = if i + 1 == self.ip { "->" } else { "  " };
+                    println!("{} {:04}: {}", mark, i, self.bytecode[i]);
+                }
+            } else if cmd.starts_with("bp ") {
+                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    match parts[1] {
+                        "add" if parts.len() >= 3 => {
+                            if let Ok(ip) = parts[2].parse::<usize>() {
+                                if let Some(d) = &self.debug {
+                                    let mut s = d.borrow_mut();
+                                    let set = s
+                                        .breakpoints
+                                        .entry(self.code_id.clone())
+                                        .or_insert_with(HashSet::new);
+                                    set.insert(ip);
+                                    println!("Breakpoint adicionado em {}:{}", self.code_id, ip);
+                                }
+                            } else {
+                                println!("ip inválido");
+                            }
+                        }
+                        "del" if parts.len() >= 3 => {
+                            if let Ok(ip) = parts[2].parse::<usize>() {
+                                if let Some(d) = &self.debug {
+                                    let mut s = d.borrow_mut();
+                                    if let Some(set) = s.breakpoints.get_mut(&self.code_id) {
+                                        set.remove(&ip);
+                                    }
+                                    println!("Breakpoint removido em {}:{}", self.code_id, ip);
+                                }
+                            } else {
+                                println!("ip inválido");
+                            }
+                        }
+                        "list" => {
+                            if let Some(d) = &self.debug {
+                                let s = d.borrow();
+                                if let Some(set) = s.breakpoints.get(&self.code_id) {
+                                    println!("breakpoints em {}: {:?}", self.code_id, set);
+                                } else {
+                                    println!("sem breakpoints em {}", self.code_id);
+                                }
+                            }
+                        }
+                        _ => println!("uso: bp add <ip> | bp del <ip> | bp list"),
+                    }
+                } else {
+                    println!("uso: bp add <ip> | bp del <ip> | bp list");
+                }
+            } else if cmd == "where" {
+                println!(
+                    "em {} ip={} -> {}",
+                    self.code_id,
+                    self.ip.saturating_sub(1),
+                    instr
+                );
+            } else if cmd == "help" || cmd == "?" {
+                println!("comandos: c, s, p, vars, v <nome>, dis [n], bp add|del <ip>|list, where, help, q");
+            } else if cmd == "q" || cmd == "quit" || cmd == "exit" {
+                return Err("Execução abortada pelo usuário".to_string());
+            } else {
+                println!("comando desconhecido. digite 'help'.");
+            }
+        }
+        Ok(())
+    }
 }
 
 // Ponto de entrada do programa interpretador.
@@ -1633,6 +1829,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let caminho_arquivo = &args[1];
     let mut function_to_execute: Option<String> = None;
+    let mut usar_debug = false;
 
     let mut i = 2;
     while i < args.len() {
@@ -1643,6 +1840,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 return Err("Argumento --executar-funcao requer um nome de função".into());
             }
+        } else if args[i] == "--debug" {
+            usar_debug = true;
+            i += 1;
         } else {
             i += 1;
         }
@@ -1662,6 +1862,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut vm = VM::new(bytecode, base_dir);
+    if usar_debug {
+        let dbg = DebugState {
+            enabled: true,
+            breakpoints: HashMap::new(),
+            step_mode: Some(StepMode::StepInto),
+            last_break_location: None,
+        };
+        vm.debug = Some(Rc::new(RefCell::new(dbg)));
+    }
 
     // Carregar definições (classes, funções)
     if let Err(e) = vm.carregar_definicoes() {
@@ -1707,6 +1916,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             functions: vm.functions.clone(),
             loaded_modules: vm.loaded_modules.clone(),
             base_dir: vm.base_dir.clone(),
+            debug: vm.debug.clone(),
+            code_id: format!("main:{}", nome_funcao),
         };
 
         if let Err(e) = main_vm.run() {
