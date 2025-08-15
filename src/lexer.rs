@@ -53,6 +53,8 @@ pub enum Token {
     /* OOP */
     #[token("classe")]
     TClasse,
+    #[token("interface")]
+    TInterface,
     #[token("enumeração")]
     TEnumeracao,
     #[token("construtor")]

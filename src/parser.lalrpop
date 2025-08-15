@@ -81,6 +81,7 @@ Identificador: String = {
 Declaracao: ast::Declaracao = {
     <funcao:DeclaracaoFuncao> => ast::Declaracao::DeclaracaoFuncao(funcao),
     <classe:DeclaracaoClasse> => ast::Declaracao::DeclaracaoClasse(classe),
+    <interf:DeclaracaoInterface> => ast::Declaracao::DeclaracaoInterface(interf),
     <en:DeclaracaoEnumeracao> => ast::Declaracao::DeclaracaoEnum(en),
     <cmd:ComandoTopLevel> => ast::Declaracao::Comando(cmd),
 };
@@ -89,6 +90,19 @@ Declaracao: ast::Declaracao = {
 DeclaracaoEnumeracao: ast::DeclaracaoEnum = {
     "enumeração" <nome:IdentificadorSimples> "{" <valores:ListaIdentificadores?> "}" => {
         ast::DeclaracaoEnum { nome, valores: valores.unwrap_or_default() }
+    }
+};
+
+// === INTERFACE ===
+DeclaracaoInterface: ast::DeclaracaoInterface = {
+    "interface" <nome:IdentificadorSimples> "{" <metodos:AssinaturasMetodoInterface*> "}" => {
+        ast::DeclaracaoInterface { nome, metodos }
+    }
+};
+
+AssinaturasMetodoInterface: ast::AssinaturaMetodo = {
+    <macc:ModificadorAcesso?> <ret:Tipo> <nome:IdentificadorSimples> "(" <params:InnerParamList> ";" => {
+        ast::AssinaturaMetodo { nome, parametros: params, tipo_retorno: if ret == ast::Tipo::Vazio { None } else { Some(ret) }, modificador: macc.unwrap_or(ast::ModificadorAcesso::Publico) }
     }
 };
 
@@ -700,6 +714,7 @@ extern {
         "verdadeiro" => Token::TVerdadeiro,
         "falso" => Token::TFalso,
         "classe" => Token::TClasse,
+    "interface" => Token::TInterface,
     "enumeração" => Token::TEnumeracao,
     "construtor" => Token::TConstrutor,
         "publico" => Token::TPublico,
