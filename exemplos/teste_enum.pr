@@ -1,0 +1,15 @@
+usando Testes;
+
+espaco Testes {
+    enumeração Cor {
+        Vermelho, Verde, Azul
+    }
+
+    função Principal() {
+        Cor x = Cor.Verde;
+        imprima(x);
+        se (x == Cor.Verde) {
+            imprima(123);
+        }
+    }
+}

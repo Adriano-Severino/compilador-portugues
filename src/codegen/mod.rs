@@ -1,7 +1,7 @@
-pub mod llvm_ir;
+pub mod bytecode;
 pub mod cil;
 pub mod console;
-pub mod bytecode;
+pub mod llvm_ir;
 
 use crate::ast;
 use std::fs;
@@ -13,8 +13,14 @@ impl GeradorCodigo {
         Ok(Self)
     }
 
-    pub fn gerar_llvm_ir<'a>(&self, programa: &'a ast::Programa, type_checker: &'a mut crate::type_checker::VerificadorTipos<'a>, nome_base: &str) -> Result<(), String> {
-        let mut generator = llvm_ir::LlvmGenerator::new(programa, type_checker, &type_checker.resolved_classes);
+    pub fn gerar_llvm_ir<'a>(
+        &self,
+        programa: &'a ast::Programa,
+        type_checker: &'a mut crate::type_checker::VerificadorTipos<'a>,
+        nome_base: &str,
+    ) -> Result<(), String> {
+        let mut generator =
+            llvm_ir::LlvmGenerator::new(programa, type_checker, &type_checker.resolved_classes);
         let code = generator.generate();
         let ll_path = format!("{}.ll", nome_base);
         fs::write(&ll_path, code).map_err(|e| e.to_string())?;
@@ -73,4 +79,15 @@ impl GeradorCodigo {
         let bytecode = generator.generate();
         fs::write(format!("{}.pbc", nome_base), bytecode.join("\n")).map_err(|e| e.to_string())
     }
+}
+
+/// Gera apenas o LLVM IR (string), sem invocar o clang.
+/// Útil para testes que validam a geração de IR sem dependências externas.
+pub fn gerar_llvm_ir_puro<'a>(
+    programa: &'a ast::Programa,
+    type_checker: &'a mut crate::type_checker::VerificadorTipos<'a>,
+) -> String {
+    let mut generator =
+        llvm_ir::LlvmGenerator::new(programa, type_checker, &type_checker.resolved_classes);
+    generator.generate()
 }

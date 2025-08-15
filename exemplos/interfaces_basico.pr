@@ -1,0 +1,12 @@
+publico interface IPessoa {
+    publico vazio Falar();
+}
+
+publico classe Pessoa : IPessoa {
+    publico vazio Falar() { imprima("oi"); }
+}
+
+publico função vazio Principal() {
+    var p = novo Pessoa();
+    p.Falar();
+}

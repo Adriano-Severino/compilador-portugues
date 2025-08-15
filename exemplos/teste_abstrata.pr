@@ -1,0 +1,36 @@
+usando Testes;
+
+espaco Testes
+{
+    // Classe base abstrata
+    publico abstrata classe Forma
+    {
+        // Método abstrato sem corpo
+        publico abstrata duplo Area();
+    }
+
+    // Classe concreta que herda de Forma e implementa Area
+    publico classe Retangulo : Forma
+    {
+        publico duplo largura { obter; definir; }
+        publico duplo altura { obter; definir; }
+
+        publico Retangulo(duplo largura, duplo altura)
+        {
+            este.largura = largura;
+            este.altura = altura;
+        }
+
+        publico duplo Area()
+        {
+            retorne largura * altura;
+        }
+    }
+}
+
+// Função de entrada no escopo global
+publico função Principal()
+{
+    var r = novo Retangulo(3.0, 4.0);
+    imprima ( r.Area() ); // esperado: 12.0
+}

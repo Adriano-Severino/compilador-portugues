@@ -1,0 +1,17 @@
+usando V;
+
+espaco V {
+    publico classe Base {
+        publico redefinível vazio F() { imprima("Base.F"); }
+    }
+    publico classe Derivada : Base {
+        publico sobrescreve vazio F() { imprima("Derivada.F"); }
+    }
+}
+
+publico função vazio Principal() {
+    var b = novo Base();
+    var d = novo Derivada();
+    b.F();
+    d.F();
+}

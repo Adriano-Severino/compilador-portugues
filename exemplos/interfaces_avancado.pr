@@ -1,0 +1,212 @@
+publico interface IAnimal {
+    publico vazio Falar();
+}
+
+publico interface IMovel {
+    publico inteiro Mover(inteiro distancia);
+}
+
+publico interface IApresentavel {
+    publico texto Apresentar(texto nome);
+}
+
+publico interface IVoador {
+    publico vazio Voar(inteiro altura);
+}
+
+publico interface IComedor {
+    publico vazio Comer(texto comida);
+}
+
+// Classe base abstrata que implementa interface
+publico abstrata classe AnimalBase : IAnimal {
+    publico abstrata vazio Falar();
+    publico texto Categoria() { retorne "Animal"; }
+}
+
+// Classe concreta herda de AnimalBase e implementa múltiplas interfaces
+publico classe Cachorro : AnimalBase, IMovel, IApresentavel, IComedor {
+    publico sobrescreve vazio Falar() { imprima("Au au!"); }
+    
+    publico inteiro Mover(inteiro distancia) { 
+        imprima("Cachorro moveu metros correndo");
+        retorne distancia; 
+    }
+    
+    publico texto Apresentar(texto nome) { 
+        retorne "Eu sou um cachorro muito amigavel!"; 
+    }
+    
+    publico vazio Comer(texto comida) {
+        imprima("Cachorro esta comendo com muito apetite!");
+    }
+}
+
+// Outra hierarquia: classe base abstrata
+publico abstrata classe AveBase : IAnimal, IVoador {
+    publico abstrata vazio Falar();
+    publico abstrata vazio Voar(inteiro altura);
+    
+    publico texto TipoAnimal() { retorne "Ave"; }
+}
+
+publico classe Papagaio : AveBase, IApresentavel, IComedor {
+    publico sobrescreve vazio Falar() { imprima("Currupaco! Quer biscoito?"); }
+    
+    publico sobrescreve vazio Voar(inteiro altura) {
+        imprima("Papagaio voou ate metros de altura!");
+    }
+    
+    publico texto Apresentar(texto nome) { 
+        retorne "Ola! Sou um papagaio falante!"; 
+    }
+    
+    publico vazio Comer(texto comida) {
+        imprima("Papagaio bicou e comeu");
+    }
+}
+
+publico classe Aguia : AveBase {
+    publico sobrescreve vazio Falar() { imprima("Grito de aguia: SCREECH!"); }
+    
+    publico sobrescreve vazio Voar(inteiro altura) {
+        imprima("Aguia planando majestosamente!");
+    }
+}
+
+// Classe base concreta
+publico classe Veiculo {
+    protegido texto marca;
+    
+    publico Veiculo(texto marcaVeiculo) {
+        marca = marcaVeiculo;
+    }
+    
+    publico vazio Info() { 
+        imprima("Veiculo da marca Toyota"); 
+    }
+}
+
+publico classe Carro : Veiculo, IMovel, IApresentavel {
+    privado inteiro velocidade;
+    
+    publico Carro(texto marca) : base(marca) {
+        velocidade = 0;
+    }
+    
+    publico inteiro Mover(inteiro distancia) { 
+        velocidade = 60;
+        imprima("Carro dirigindo");
+        retorne distancia; 
+    }
+    
+    publico texto Apresentar(texto nome) { 
+        retorne "Este e o Corolla, um carro da marca Toyota"; 
+    }
+}
+
+publico classe Bicicleta : Veiculo, IMovel {
+    publico Bicicleta() : base("Generica") {}
+    
+    publico inteiro Mover(inteiro distancia) {
+        imprima("Pedalando a bicicleta");
+        retorne distancia;
+    }
+}
+
+publico classe Robo : IMovel, IApresentavel, IAnimal {
+    privado texto modelo;
+    
+    publico Robo(texto modeloRobo) {
+        modelo = modeloRobo;
+    }
+    
+    publico vazio Falar() { 
+        imprima("BEEP BOOP! Robo falando em linguagem sintetica!"); 
+    }
+    
+    publico inteiro Mover(inteiro distancia) {
+        imprima("Robo movendo-se");
+        retorne distancia;
+    }
+    
+    publico texto Apresentar(texto nome) {
+        retorne "Robo modelo R2D2, denominado Artoo";
+    }
+}
+
+publico função vazio Principal() {
+    imprima("=== TESTE DE INTERFACES AVANÇADO ===\n");
+    
+    // Teste Cachorro (herança + múltiplas interfaces)
+    imprima("--- TESTE CACHORRO ---");
+    var cachorro = novo Cachorro();
+    cachorro.Falar();
+    var distCachorro = cachorro.Mover(15);
+    imprima(cachorro.Apresentar("Rex"));
+    cachorro.Comer("racao premium");
+    imprima("Categoria: Animal");
+    imprima("");
+    
+    // Teste Papagaio (herança abstrata + interfaces)
+    imprima("--- TESTE PAPAGAIO ---");
+    var papagaio = novo Papagaio();
+    papagaio.Falar();
+    papagaio.Voar(50);
+    imprima(papagaio.Apresentar("Loro Jose"));
+    papagaio.Comer("sementes de girassol");
+    imprima("Tipo: Ave");
+    imprima("");
+    
+    // Teste Águia (só herança abstrata, sem outras interfaces)
+    imprima("--- TESTE AGUIA ---");
+    var aguia = novo Aguia();
+    aguia.Falar();
+    aguia.Voar(200);
+    imprima("");
+    
+    // Teste Carro (herança concreta + interfaces)
+    imprima("--- TESTE CARRO ---");
+    var carro = novo Carro("Toyota");
+    carro.Info();
+    var distCarro = carro.Mover(25);
+    imprima(carro.Apresentar("Corolla"));
+    imprima("");
+    
+    // Teste Bicicleta (herança + uma interface)
+    imprima("--- TESTE BICICLETA ---");
+    var bike = novo Bicicleta();
+    bike.Info();
+    bike.Mover(5);
+    imprima("");
+    
+    // Teste Robô (só interfaces, sem herança)
+    imprima("--- TESTE ROBO ---");
+    var robo = novo Robo("R2D2");
+    robo.Falar();
+    robo.Mover(10);
+    imprima(robo.Apresentar("Artoo"));
+    imprima("");
+    
+    // Teste de polimorfismo com interfaces
+    imprima("--- TESTE POLIMORFISMO ---");
+    // Falantes: todos que implementam IAnimal
+    var falantes = [cachorro, papagaio, aguia, robo];
+    var i = 0;
+    enquanto (i < 4) {
+        imprima("Testando objeto:");
+        falantes[i].Falar();
+        i = i + 1;
+    }
+    imprima("");
+    // Moveveis: todos que implementam IMovel
+    var moveveis = [cachorro, carro, bike, robo];
+    
+    // Teste de movimento de objetos
+    var j = 0;
+    enquanto (j < 4) {
+        imprima("Movendo objeto:");
+        moveveis[j].Mover(3);
+        j = j + 1;
+    }
+}

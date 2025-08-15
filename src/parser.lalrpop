@@ -126,8 +126,6 @@ DeclaracaoClasse: ast::DeclaracaoClasse = {
     <modificador:ModificadorAcesso?> <classe_abstrata:("abstrata")?> <estatica:("estática")?> "classe" <nome:IdentificadorSimples>
     // Estilo C#: ':' Base, I1, I2... (primeiro é base, demais são interfaces)
     <lista_cabecalho:(":" <ListaIdentificadores>)?>
-    // Compatibilidade opcional: 'implementa I1, I2'
-    <impls:("implementa" <ListaIdentificadores>)?>
     "{" <membros:MembroClasse*> "}" => {
         let mut campos = Vec::new();
         let mut propriedades = Vec::new();
@@ -152,7 +150,6 @@ DeclaracaoClasse: ast::DeclaracaoClasse = {
                 interfaces.extend(lista.into_iter());
             }
         }
-    if let Some(lst) = impls { interfaces.extend(lst.into_iter()); }
 
         ast::DeclaracaoClasse {
             nome,
@@ -429,28 +426,68 @@ ComandoSimplesSemSe: ast::Comando = {     // Tudo que está em ComandoSimples ex
     "var" <nome:IdentificadorSimples> "=" <expr:Expressao> ";" => {
         ast::Comando::DeclaracaoVar(nome, expr)
     },
-    <tipo:Tipo> <nome:IdentificadorSimples> "=" <expr:Expressao> ";" => {
-        match expr {
-            ast::Expressao::NovoObjeto(classe, args) => {
-                ast::Comando::CriarObjeto(nome, classe, args)
-            },
-            _ => ast::Comando::DeclaracaoVariavel(tipo, nome, Some(expr))
-        }
-    },
-    <tipo:Tipo> <nome:IdentificadorSimples> ";" => {
-        ast::Comando::DeclaracaoVariavel(tipo, nome, None)
-    },
     <cmd:ComandosBasicos> => cmd,
 };
 
 ComandosBasicos: ast::Comando = {
+    // Declarações tipadas (com tipos primitivos específicos para evitar conflito)
+    "inteiro" <nome:IdentificadorSimples> "=" <expr:Expressao> ";" => {
+        ast::Comando::DeclaracaoVariavel(ast::Tipo::Inteiro, nome, Some(expr))
+    },
+    "inteiro" <nome:IdentificadorSimples> ";" => {
+        ast::Comando::DeclaracaoVariavel(ast::Tipo::Inteiro, nome, None)
+    },
+    "texto" <nome:IdentificadorSimples> "=" <expr:Expressao> ";" => {
+        ast::Comando::DeclaracaoVariavel(ast::Tipo::Texto, nome, Some(expr))
+    },
+    "texto" <nome:IdentificadorSimples> ";" => {
+        ast::Comando::DeclaracaoVariavel(ast::Tipo::Texto, nome, None)
+    },
+    "booleano" <nome:IdentificadorSimples> "=" <expr:Expressao> ";" => {
+        ast::Comando::DeclaracaoVariavel(ast::Tipo::Booleano, nome, Some(expr))
+    },
+    "booleano" <nome:IdentificadorSimples> ";" => {
+        ast::Comando::DeclaracaoVariavel(ast::Tipo::Booleano, nome, None)
+    },
+    "flutuante" <nome:IdentificadorSimples> "=" <expr:Expressao> ";" => {
+        ast::Comando::DeclaracaoVariavel(ast::Tipo::Flutuante, nome, Some(expr))
+    },
+    "flutuante" <nome:IdentificadorSimples> ";" => {
+        ast::Comando::DeclaracaoVariavel(ast::Tipo::Flutuante, nome, None)
+    },
+    "duplo" <nome:IdentificadorSimples> "=" <expr:Expressao> ";" => {
+        ast::Comando::DeclaracaoVariavel(ast::Tipo::Duplo, nome, Some(expr))
+    },
+    "duplo" <nome:IdentificadorSimples> ";" => {
+        ast::Comando::DeclaracaoVariavel(ast::Tipo::Duplo, nome, None)
+    },
+    "decimal" <nome:IdentificadorSimples> "=" <expr:Expressao> ";" => {
+        ast::Comando::DeclaracaoVariavel(ast::Tipo::Decimal, nome, Some(expr))
+    },
+    "decimal" <nome:IdentificadorSimples> ";" => {
+        ast::Comando::DeclaracaoVariavel(ast::Tipo::Decimal, nome, None)
+    },
+
     // obj.metodo(arg1, …);
-    <obj:ExpressaoAtomo> "." <metodo:IdentificadorSimples> "(" <args:InnerArgList> ";" => {
+    <obj:ExpressaoPostfixa> "." <metodo:IdentificadorSimples> "(" <args:InnerArgList> ";" => {
         ast::Comando::ChamarMetodo(Box::new(obj), metodo, args)
     },
 
+    // chamada de função sozinha: nome(arg1, arg2 …);
+    <nome:IdentificadorSimples> "(" <args:InnerArgList> ";" =>
+        ast::Comando::Expressao(ast::Expressao::Chamada(nome, args)),
+
+    // Declaração de classe: NomeClasse nome = expr; ou NomeClasse nome;
+    // Isso precisa vir DEPOIS das chamadas de função para não causar conflito
+    <tipo_nome:IdentificadorSimples> <var_nome:IdentificadorSimples> "=" <expr:Expressao> ";" => {
+        ast::Comando::DeclaracaoVariavel(ast::Tipo::Classe(tipo_nome), var_nome, Some(expr))
+    },
+    <tipo_nome:IdentificadorSimples> <var_nome:IdentificadorSimples> ";" => {
+        ast::Comando::DeclaracaoVariavel(ast::Tipo::Classe(tipo_nome), var_nome, None)
+    },
+
     // obj.propriedade = expr;
-    <obj:ExpressaoAtomo> "." <prop:IdentificadorSimples> "=" <expr:Expressao> ";" => {
+    <obj:ExpressaoPostfixa> "." <prop:IdentificadorSimples> "=" <expr:Expressao> ";" => {
         ast::Comando::AtribuirPropriedade(Box::new(obj), prop, expr)
     },
 
@@ -493,27 +530,18 @@ Tipo: ast::Tipo = {
     <nome:TIdentificador> "[" "]" => ast::Tipo::Lista(Box::new(ast::Tipo::Classe(nome))),
 };
 
+// Tipos permitidos em declaração local (incluindo classes)
 // === COMANDOS - ✅ ESTRUTURA SIMPLIFICADA ===
 ComandoTopLevel: ast::Comando = {
     <cmd:ComandoSimples> => cmd,
 };
 
 ComandoSimples: ast::Comando = {
-    // Declarações de variáveis
-    <tipo:Tipo> <nome:TIdentificador> "=" <expr:Expressao> ";" => {
-    ast::Comando::DeclaracaoVariavel(tipo, nome, Some(expr))
-    },
-    <tipo:Tipo> <nome:TIdentificador> ";" => {
-    ast::Comando::DeclaracaoVariavel(tipo, nome, None)
-    },
-
     "var" <nome:TIdentificador> "=" <expr:Expressao> ";" => {
         ast::Comando::DeclaracaoVar(nome, expr)
     },
-    // Comandos de expressão e bloco
-    <cmd:ChamadaMetodoOuBloco> => cmd,
-    // Declarações e atribuições
-    <cmd:AtribuicaoOuDeclaracao> => cmd,
+    // Comandos básicos (atribuições, chamadas, retorno, bloco, etc.)
+    <cmd:ComandosBasicos> => cmd,
     // Se e outros comandos
     <cmd:ComandoSe> => cmd,
     "enquanto" "(" <cond:Expressao> ")" <bloco:ComandoSimples> => {
@@ -527,37 +555,6 @@ ComandoSimples: ast::Comando = {
             Box::new(bloco)
         )
     },
-};
-
-ChamadaMetodoOuBloco: ast::Comando = {
-    // obj.metodo(arg1, arg2 …);
-    <obj:ExpressaoAtomo> "." <metodo:IdentificadorSimples> "(" <args:InnerArgList> ";" => {
-        ast::Comando::ChamarMetodo(Box::new(obj), metodo, args)
-    },
-    
-    <bloco:BlocoComando> => ast::Comando::Bloco(bloco),
-};
-
-AtribuicaoOuDeclaracao: ast::Comando = {
-    // obj.propriedade = expr;
-    <obj:ExpressaoAtomo> "." <prop:TIdentificador> "=" <expr:Expressao> ";" => {
-        ast::Comando::AtribuirPropriedade(Box::new(obj), prop, expr)
-    },
-
-    // nome = expr;
-    <nome:TIdentificador> "=" <expr:Expressao> ";" =>
-        ast::Comando::Atribuicao(nome, expr),
-
-    // comandos de fluxo, etc.
-    "imprima" "(" <expr:Expressao> ")" ";" =>
-        ast::Comando::Imprima(expr),
-
-    "retorne" <expr:Expressao?> ";" =>
-        ast::Comando::Retorne(expr),
-
-    // chamada de função sozinha:  função(arg1, arg2 …);
-    <nome:TIdentificador> "(" <args:InnerArgList> ";" =>
-        ast::Comando::Expressao(ast::Expressao::Chamada(nome, args)),
 };
 
 
@@ -638,6 +635,10 @@ ExpressaoUnaria: ast::Expressao = {
 
 ExpressaoPostfixa: ast::Expressao = {
     <base:ExpressaoAtomo> => base,
+    // Indexação de arrays e coleções: obj[expr]
+    <obj:ExpressaoPostfixa> "[" <idx:Expressao> "]" => {
+        ast::Expressao::AcessoIndice(Box::new(obj), Box::new(idx))
+    },
     <obj:ExpressaoPostfixa> "." <membro:TIdentificador> "(" <args:InnerArgList> => {
         ast::Expressao::ChamadaMetodo(Box::new(obj), membro, args)
     },
@@ -658,6 +659,9 @@ ExpressaoAtomo: ast::Expressao = {
     },
     <obj:CriacaoObjeto> => obj,
     "(" <expr:Expressao> ")" => expr,
+    "[" <elementos:ListaElementosArray?> "]" => { // Array literal
+        ast::Expressao::ListaLiteral(elementos.unwrap_or_else(Vec::new))
+    },
     "este" => ast::Expressao::Este,    // Moved este after specific TIdentificador rules
     <nome:TIdentificador> => ast::Expressao::Identificador(nome), // Variable access (last among identifier-like atoms)
 };
@@ -732,7 +736,6 @@ extern {
         "falso" => Token::TFalso,
         "classe" => Token::TClasse,
     "interface" => Token::TInterface,
-    "implementa" => Token::TImplementa,
     "enumeração" => Token::TEnumeracao,
     "construtor" => Token::TConstrutor,
         "publico" => Token::TPublico,

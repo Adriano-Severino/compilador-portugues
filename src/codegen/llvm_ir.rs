@@ -1486,9 +1486,39 @@ impl<'a> LlvmGenerator<'a> {
             }
             ast::Expressao::ChamadaMetodo(obj_expr, metodo_nome, argumentos) => {
                 let (obj_reg, obj_type) = self.generate_expressao(obj_expr);
+                // Suporte a intrínsecos: tamanho()/comprimento() em listas e textos
+                if (metodo_nome == "tamanho" || metodo_nome == "comprimento")
+                    && argumentos.is_empty()
+                {
+                    match obj_type.clone() {
+                        ast::Tipo::Lista(_) => {
+                            let (_data, len_reg) = self.get_array_data_and_len(&obj_reg);
+                            return (len_reg, ast::Tipo::Inteiro);
+                        }
+                        ast::Tipo::Texto => {
+                            let safe = self.get_safe_string_ptr(&obj_reg);
+                            let len64 = self.get_unique_temp_name();
+                            self.body.push_str(&format!(
+                                "  {0} = call i64 @strlen(i8* {1})\n",
+                                len64, safe
+                            ));
+                            let len32 = self.get_unique_temp_name();
+                            self.body
+                                .push_str(&format!("  {0} = trunc i64 {1} to i32\n", len32, len64));
+                            return (len32, ast::Tipo::Inteiro);
+                        }
+                        _ => {}
+                    }
+                }
+
                 let class_name = match obj_type {
                     ast::Tipo::Classe(ref name) => name.clone(),
-                    _ => panic!("Chamada de método em algo que não é um objeto."),
+                    _ => panic!(
+                        "Chamada de método em algo que não é um objeto. metodo='{}' obj_type={:?} obj_expr={:?}",
+                        metodo_nome,
+                        obj_type,
+                        obj_expr
+                    ),
                 };
 
                 let fqn_class_name = self
@@ -1716,8 +1746,8 @@ impl<'a> LlvmGenerator<'a> {
                 }
                 // Caso instância: agora podemos avaliar o objeto
                 let (obj_reg, obj_type) = self.generate_expressao(obj_expr);
-                // Propriedade especial: tamanho em arrays e textos
-                if membro_nome == "tamanho" {
+                // Propriedade especial: tamanho/comprimento em arrays e textos
+                if membro_nome == "tamanho" || membro_nome == "comprimento" {
                     match obj_type {
                         ast::Tipo::Lista(_) => {
                             let (_data, len_reg) = self.get_array_data_and_len(&obj_reg);

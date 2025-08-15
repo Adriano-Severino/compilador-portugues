@@ -279,3 +279,64 @@ fn test_negative_three_level_circular_inheritance_should_fail() {
     let (code, _o, _e) = run_compiler(&args);
     assert_ne!(code, 0, "Deveria falhar por herança circular A->B->C->A");
 }
+
+#[test]
+fn test_interfaces_avancado_example_ok() {
+    // Compila e executa o exemplo avançado de interfaces/arrays
+    assert_example_ok("exemplos/interfaces_avancado.pr", None);
+}
+
+#[test]
+fn test_array_with_interface_dispatch() {
+    // Programa mínimo: interface + duas classes + array literal + chamada por índice
+    let temp_dir = repo_root()
+        .join("target")
+        .join("test-temp-arrays-interfaces");
+    std::fs::create_dir_all(&temp_dir).ok();
+    let p = temp_dir.join("array_interface_min.pr");
+    let src = r#"
+publico interface IFalante {
+    publico vazio Falar();
+}
+
+publico classe A : IFalante {
+    publico vazio Falar() { imprima("A"); }
+}
+
+publico classe B : IFalante {
+    publico vazio Falar() { imprima("B"); }
+}
+
+publico função vazio Principal() {
+    var falantes = [ novo A(), novo B() ];
+    var i = 0;
+    enquanto (i < 2) {
+        falantes[i].Falar();
+        i = i + 1;
+    }
+}
+"#;
+    std::fs::write(&p, src).unwrap();
+
+    // Compila e roda, conferindo saída
+    let path_str = p.to_string_lossy().to_string();
+    let args = vec![path_str.as_str(), "--target=bytecode"];
+    let (c_code, _c_out, c_err) = run_compiler(&args);
+    assert_eq!(c_code, 0, "compiler failed: {}", c_err);
+
+    // O bytecode é gerado na raiz com o nome do stem
+    let pbc = repo_root().join("array_interface_min.pbc");
+    assert!(pbc.exists(), "pbc nao gerado: {}", pbc.display());
+
+    let (i_code, i_out, i_err) = run_interpreter(&pbc);
+    assert_eq!(i_code, 0, "interpretador falhou: {}", i_err);
+
+    let expected = "A\nB\n";
+    let expected_norm = normalize_for_compare(expected);
+    let got = normalize_for_compare(&i_out);
+    assert_eq!(
+        got.trim(),
+        expected_norm.trim(),
+        "saida incorreta do programa minimo"
+    );
+}

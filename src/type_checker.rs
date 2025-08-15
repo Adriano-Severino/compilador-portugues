@@ -50,8 +50,13 @@ impl<'a> VerificadorTipos<'a> {
             (Classe(dest), Classe(orig)) => {
                 if dest == orig {
                     true
+                } else if self.is_subclass_of(orig, dest) {
+                    true
+                } else if self.is_interface_type(dest) {
+                    // Permite classe que implementa a interface
+                    self.class_implements_interface(orig, dest)
                 } else {
-                    self.is_subclass_of(orig, dest)
+                    false
                 }
             }
             // Enums: somente o mesmo enum é compatível implicitamente
@@ -64,6 +69,47 @@ impl<'a> VerificadorTipos<'a> {
             (Duplo, Flutuante) => true,
             _ => false,
         }
+    }
+
+    // Retorna true se o nome for uma interface conhecida
+    fn is_interface_type(&self, nome: &str) -> bool {
+        self.interfaces.contains_key(nome)
+    }
+
+    // Verifica se uma classe (FQN) implementa uma interface (FQN), considerando herança
+    fn class_implements_interface(&self, class_fqn: &str, iface_fqn: &str) -> bool {
+        let ifaces = self.get_all_interfaces_of_class(class_fqn);
+        ifaces.contains(iface_fqn)
+    }
+
+    // Coleta todas as interfaces implementadas por uma classe, incluindo as herdadas do pai
+    fn get_all_interfaces_of_class(&self, class_fqn: &str) -> std::collections::HashSet<String> {
+        use std::collections::HashSet;
+        let mut set: HashSet<String> = HashSet::new();
+        let mut current = Some(class_fqn.to_string());
+        while let Some(cls) = current {
+            if let Some(ci) = self.resolved_classes.get(&cls) {
+                let ns = self.get_namespace_from_full_name(&ci.name);
+                for i in &ci.interfaces {
+                    let fqn = self.resolver_nome_interface(i, &ns);
+                    set.insert(fqn);
+                }
+                current = ci.parent_name.clone();
+            } else if let Some(decl) = self.classes.get(&cls) {
+                let ns = self.get_namespace_from_full_name(&cls);
+                for i in &decl.interfaces {
+                    let fqn = self.resolver_nome_interface(i, &ns);
+                    set.insert(fqn);
+                }
+                current = decl
+                    .classe_pai
+                    .as_ref()
+                    .map(|p| self.resolver_nome_classe(p, &ns));
+            } else {
+                break;
+            }
+        }
+        set
     }
 
     // Verifica se `sub` é subclasse (direta ou indireta) de `base`. Parâmetros são FQN.
@@ -624,7 +670,8 @@ impl<'a> VerificadorTipos<'a> {
                             if let Some(base_m) = self
                                 .encontrar_metodo_na_base(Some(parent_fqn.clone()), &metodo.nome)
                             {
-                                if !base_m.eh_virtual {
+                                // Em C#, métodos abstratos são implicitamente virtuais (overridáveis)
+                                if !(base_m.eh_virtual || base_m.eh_abstrato) {
                                     self.erros.push(format!(
                                         "Método '{}' em '{}' usa 'sobrescreve' mas o método da classe base não é 'redefinível'. Dica: marque o método da base como 'redefinível'.",
                                         metodo.nome, fqn
@@ -928,9 +975,52 @@ impl<'a> VerificadorTipos<'a> {
                 }
             }
             Comando::ChamarMetodo(obj_expr, _, args) => {
-                self.inferir_tipo_expressao(obj_expr, namespace_atual, classe_atual, escopo_vars);
+                // Verifica tipo do objeto e existência do método no tipo estático
+                let obj_tipo = self.inferir_tipo_expressao(
+                    obj_expr,
+                    namespace_atual,
+                    classe_atual,
+                    escopo_vars,
+                );
                 for arg in args {
                     self.inferir_tipo_expressao(arg, namespace_atual, classe_atual, escopo_vars);
+                }
+                // Descobre o nome do método a partir do comando
+                let metodo_nome = match comando {
+                    Comando::ChamarMetodo(_, m, _) => m,
+                    _ => unreachable!(),
+                };
+
+                match obj_tipo {
+                    Tipo::Classe(ref nome) => {
+                        // Pode ser interface ou classe
+                        if self.interfaces.contains_key(nome) {
+                            // Método deve existir na interface
+                            if let Some(iface) = self.interfaces.get(nome) {
+                                if !iface.metodos.iter().any(|s| &s.nome == metodo_nome) {
+                                    self.erros.push(format!(
+                                        "Método '{}' não existe na interface '{}'.",
+                                        metodo_nome, nome
+                                    ));
+                                }
+                            }
+                        } else if let Some(class_info) = self.resolved_classes.get(nome) {
+                            if !class_info.methods.contains_key(metodo_nome) {
+                                // Pode existir em declaração bruta, mas resolved já inclui herdados
+                                self.erros.push(format!(
+                                    "Método '{}' não existe na classe '{}'.",
+                                    metodo_nome, nome
+                                ));
+                            }
+                        }
+                    }
+                    _ => {
+                        // outros tipos por ora não têm métodos
+                        self.erros.push(format!(
+                            "Chamando método '{}' em tipo que não é objeto: {:?}",
+                            metodo_nome, obj_tipo
+                        ));
+                    }
                 }
             }
             Comando::AcessarCampo(obj, _campo) => {
@@ -1046,28 +1136,67 @@ impl<'a> VerificadorTipos<'a> {
                 Tipo::Inferido
             }
             Expressao::ListaLiteral(items) => {
-                // Homogeneidade: infere tipo comum, por ora exige todos iguais
+                // Inferência de tipo para listas: tenta encontrar tipo comum
                 if items.is_empty() {
                     return Tipo::Lista(Box::new(Tipo::Inferido));
                 }
-                let first = self.inferir_tipo_expressao(
-                    &items[0],
-                    namespace_atual,
-                    classe_atual,
-                    escopo_vars,
-                );
-                for e in &items[1..] {
-                    let te =
-                        self.inferir_tipo_expressao(e, namespace_atual, classe_atual, escopo_vars);
-                    if !self.tipos_compativeis_atribuicao(&first, &te)
-                        || !self.tipos_compativeis_atribuicao(&te, &first)
+                // Coletar tipos de todos os itens
+                let tipos: Vec<Tipo> = items
+                    .iter()
+                    .map(|e| {
+                        self.inferir_tipo_expressao(e, namespace_atual, classe_atual, escopo_vars)
+                    })
+                    .collect();
+
+                // 1) Se todos compatíveis com o primeiro (e vice-versa), use o primeiro
+                let first = tipos[0].clone();
+                let mut todos_compat = true;
+                for t in &tipos[1..] {
+                    if !self.tipos_compativeis_atribuicao(&first, t)
+                        || !self.tipos_compativeis_atribuicao(t, &first)
                     {
-                        self.erros
-                            .push("Elementos do array devem ter tipos compatíveis".into());
+                        todos_compat = false;
                         break;
                     }
                 }
-                return Tipo::Lista(Box::new(first));
+                if todos_compat {
+                    return Tipo::Lista(Box::new(first));
+                }
+
+                // 2) Se todos forem classes, tentar achar interface comum
+                let classes: Option<Vec<String>> = tipos
+                    .iter()
+                    .map(|t| {
+                        if let Tipo::Classe(c) = t {
+                            Some(c.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if let Some(cls_vec) = classes {
+                    if !cls_vec.is_empty() {
+                        use std::collections::HashSet;
+                        // Começa com interfaces do primeiro e intersecta com os demais
+                        let mut intersec: HashSet<String> =
+                            self.get_all_interfaces_of_class(&cls_vec[0]);
+                        for c in &cls_vec[1..] {
+                            let si = self.get_all_interfaces_of_class(c);
+                            intersec = intersec.intersection(&si).cloned().collect::<HashSet<_>>();
+                            if intersec.is_empty() {
+                                break;
+                            }
+                        }
+                        if let Some(iface_fqn) = intersec.into_iter().next() {
+                            return Tipo::Lista(Box::new(Tipo::Classe(iface_fqn)));
+                        }
+                    }
+                }
+
+                // 3) Falha — tipos heterogêneos sem supertipo comum
+                self.erros
+                    .push("Elementos do array devem ter tipos compatíveis".into());
+                Tipo::Lista(Box::new(Tipo::Inferido))
             }
             Expressao::AcessoIndice(obj, idx) => {
                 let t_obj =
