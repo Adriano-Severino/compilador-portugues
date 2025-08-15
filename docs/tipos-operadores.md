@@ -11,7 +11,7 @@
 ## Declaração e atribuição
 ```pordosol
 inteiro idade = 25;
-texto nome = "Maria";
+texto nome = "Mara";
 booleano ativo = verdadeiro;
 var total = 10 + 5;
 ```
