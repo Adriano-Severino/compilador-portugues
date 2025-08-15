@@ -708,6 +708,30 @@ espaco principal
 
 Essas extensões fornecem realce de sintaxe, auto-complete, diagnósticos e integração moderna para desenvolvimento com a linguagem Por do Sol no VS Code.
 
+## 📚 Documentação por funcionalidade
+
+Para tópicos detalhados e exemplos de uso, consulte os guias em `docs/`:
+
+- `docs/tipos-operadores.md` — Tipos, variáveis e operadores
+- `docs/funcoes-metodos.md` — Funções, métodos, parâmetros opcionais e strings interpoladas
+- `docs/classes-heranca.md` — Classes, propriedades, herança, abstratos e override
+- `docs/interfaces.md` — Interfaces, múltiplas implementações e polimorfismo
+- `docs/arrays.md` — Arrays, indexador, tamanho/comprimento e inferência
+- `docs/build-e-testes.md` — Como compilar e rodar apenas os testes de exemplos por alvo
+- `docs/controle-fluxo.md` — `se`/`senão`, `enquanto` e exemplos
+- `README-enum.md` — Suporte a enumerações (declaração, uso e regras de tipo)
+
+Atalhos rápidos (PowerShell):
+
+- Testes dos exemplos (bytecode):
+    ```powershell
+    cargo test --test examples_test -- --nocapture
+    ```
+- Geração de IR LLVM dos exemplos:
+    ```powershell
+    cargo test --test llvm_examples_test -- --nocapture
+    ```
+
 ## 🏗️ Estrutura do Projeto
 
 ```text
