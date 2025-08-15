@@ -1691,7 +1691,7 @@ impl VM {
 
         loop {
             println!(
-                "\n[depurador] {}@ip={} -> {}\ncomandos: c(continue), s(step), p(pilha), vars, v <nome>, dis [n], bp add|del <ip>|list, where, help, q(quit)",
+                "\n[depurador] {}@ip={} -> {}\ncomandos: c(continue), s(step), p(pilha), vars, v <nome>, dis [n], bp add|del <ip>|list, bp add|del <code_id> <ip>, bp list [code_id], where, help, q(quit)",
                 self.code_id, self.ip.saturating_sub(1), instr
             );
             print!("dbg> ");
@@ -1741,48 +1741,45 @@ impl VM {
                 let parts: Vec<&str> = cmd.split_whitespace().collect();
                 if parts.len() >= 2 {
                     match parts[1] {
-                        "add" if parts.len() >= 3 => {
+                        // bp add <ip>
+                        "add" if parts.len() == 3 => {
                             if let Ok(ip) = parts[2].parse::<usize>() {
-                                if let Some(d) = &self.debug {
-                                    let mut s = d.borrow_mut();
-                                    let set = s
-                                        .breakpoints
-                                        .entry(self.code_id.clone())
-                                        .or_insert_with(HashSet::new);
-                                    set.insert(ip);
-                                    println!("Breakpoint adicionado em {}:{}", self.code_id, ip);
-                                }
-                            } else {
-                                println!("ip inválido");
-                            }
+                                if let Some(d) = &self.debug { let mut s = d.borrow_mut(); let set = s.breakpoints.entry(self.code_id.clone()).or_insert_with(HashSet::new); set.insert(ip); }
+                                println!("Breakpoint adicionado em {}:{}", self.code_id, ip);
+                            } else { println!("ip inválido"); }
                         }
-                        "del" if parts.len() >= 3 => {
+                        // bp add <code_id> <ip>
+                        "add" if parts.len() >= 4 => {
+                            let code_id = parts[2].to_string();
+                            if let Ok(ip) = parts[3].parse::<usize>() {
+                                if let Some(d) = &self.debug { let mut s = d.borrow_mut(); let set = s.breakpoints.entry(code_id.clone()).or_insert_with(HashSet::new); set.insert(ip); }
+                                println!("Breakpoint adicionado em {}:{}", code_id, ip);
+                            } else { println!("ip inválido"); }
+                        }
+                        // bp del <ip>
+                        "del" if parts.len() == 3 => {
                             if let Ok(ip) = parts[2].parse::<usize>() {
-                                if let Some(d) = &self.debug {
-                                    let mut s = d.borrow_mut();
-                                    if let Some(set) = s.breakpoints.get_mut(&self.code_id) {
-                                        set.remove(&ip);
-                                    }
-                                    println!("Breakpoint removido em {}:{}", self.code_id, ip);
-                                }
-                            } else {
-                                println!("ip inválido");
-                            }
+                                if let Some(d) = &self.debug { let mut s = d.borrow_mut(); if let Some(set) = s.breakpoints.get_mut(&self.code_id) { set.remove(&ip); } }
+                                println!("Breakpoint removido em {}:{}", self.code_id, ip);
+                            } else { println!("ip inválido"); }
                         }
+                        // bp del <code_id> <ip>
+                        "del" if parts.len() >= 4 => {
+                            let code_id = parts[2].to_string();
+                            if let Ok(ip) = parts[3].parse::<usize>() {
+                                if let Some(d) = &self.debug { let mut s = d.borrow_mut(); if let Some(set) = s.breakpoints.get_mut(&code_id) { set.remove(&ip); } }
+                                println!("Breakpoint removido em {}:{}", code_id, ip);
+                            } else { println!("ip inválido"); }
+                        }
+                        // bp list [code_id]
                         "list" => {
-                            if let Some(d) = &self.debug {
-                                let s = d.borrow();
-                                if let Some(set) = s.breakpoints.get(&self.code_id) {
-                                    println!("breakpoints em {}: {:?}", self.code_id, set);
-                                } else {
-                                    println!("sem breakpoints em {}", self.code_id);
-                                }
-                            }
+                            let target = if parts.len() >= 3 { parts[2] } else { &self.code_id };
+                            if let Some(d) = &self.debug { let s = d.borrow(); if let Some(set) = s.breakpoints.get(target) { println!("breakpoints em {}: {:?}", target, set); } else { println!("sem breakpoints em {}", target); } }
                         }
-                        _ => println!("uso: bp add <ip> | bp del <ip> | bp list"),
+                        _ => println!("uso: bp add <ip> | bp add <code_id> <ip> | bp del <ip> | bp del <code_id> <ip> | bp list [code_id]"),
                     }
                 } else {
-                    println!("uso: bp add <ip> | bp del <ip> | bp list");
+                    println!("uso: bp add <ip> | bp add <code_id> <ip> | bp del <ip> | bp del <code_id> <ip> | bp list [code_id]");
                 }
             } else if cmd == "where" {
                 println!(
@@ -1792,7 +1789,7 @@ impl VM {
                     instr
                 );
             } else if cmd == "help" || cmd == "?" {
-                println!("comandos: c, s, p, vars, v <nome>, dis [n], bp add|del <ip>|list, where, help, q");
+                println!("comandos: c, s, p, vars, v <nome>, dis [n], bp add|del <ip>|list, bp add|del <code_id> <ip>, bp list [code_id], where, help, q");
             } else if cmd == "q" || cmd == "quit" || cmd == "exit" {
                 return Err("Execução abortada pelo usuário".to_string());
             } else {
