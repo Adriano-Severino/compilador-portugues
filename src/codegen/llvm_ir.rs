@@ -591,7 +591,7 @@ impl<'a> LlvmGenerator<'a> {
                 ));
                 let oob = self.get_unique_temp_name();
                 self.body
-                    .push_str(&format!("  {0} = or i1 {1}, i1 {2}\n", oob, neg, ge));
+                    .push_str(&format!("  {0} = or i1 {1}, {2}\n", oob, neg, ge));
                 let ok_label = self.get_unique_label("idx.ok");
                 let oob_label = self.get_unique_label("idx.oob");
                 let end_label = self.get_unique_label("idx.end");
@@ -1370,7 +1370,7 @@ impl<'a> LlvmGenerator<'a> {
                 ));
                 let oob = self.get_unique_temp_name();
                 self.body
-                    .push_str(&format!("  {0} = or i1 {1}, i1 {2}\n", oob, neg, ge));
+                    .push_str(&format!("  {0} = or i1 {1}, {2}\n", oob, neg, ge));
                 let ok_label = self.get_unique_label("idx.ok");
                 let oob_label = self.get_unique_label("idx.oob");
                 let end_label = self.get_unique_label("idx.end");
