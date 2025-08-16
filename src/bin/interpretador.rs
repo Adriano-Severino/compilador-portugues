@@ -1482,6 +1482,42 @@ impl VM {
                     }
                     // argumentos em ordem
                     let args = self.pilha.split_off(self.pilha.len() - nargs);
+
+                    // Intrínsecas simples de I/O: EscreverLinha e LerLinha
+                    // Suporta nomes qualificados com namespace: pega o último segmento após '.'
+                    let nome_simples = {
+                        let full = *nome;
+                        match full.rsplit('.').next() {
+                            Some(s) => s,
+                            None => full,
+                        }
+                    };
+                    match nome_simples {
+                        "EscreverLinha" => {
+                            if args.is_empty() {
+                                println!("");
+                            } else {
+                                let mut texto = String::new();
+                                for v in &args {
+                                    texto.push_str(&v.to_string());
+                                }
+                                println!("{}", texto);
+                            }
+                            // Retorna nulo
+                            self.pilha.push(Valor::Nulo);
+                            continue;
+                        }
+                        "LerLinha" => {
+                            let mut entrada = String::new();
+                            io::stdin()
+                                .read_line(&mut entrada)
+                                .map_err(|e| format!("Erro ao ler entrada: {}", e))?;
+                            let s = entrada.trim_end_matches(['\r', '\n']).to_string();
+                            self.pilha.push(Valor::Texto(s));
+                            continue;
+                        }
+                        _ => {}
+                    }
                     // procura função
                     let func = self
                         .functions
@@ -1590,8 +1626,9 @@ impl VM {
                     match *op {
                         "LOAD_CONST_STR" => {
                             let valor = partes[1..].join(" ");
-                            self.pilha
-                                .push(Valor::Texto(valor.trim_matches('"').to_string()));
+                            // Remove aspas se presentes (compatibilidade com emissões antigas e novas)
+                            let texto = valor.trim_matches('"').to_string();
+                            self.pilha.push(Valor::Texto(texto));
                         }
                         "LOAD_CONST_BOOL" => {
                             let valor = partes

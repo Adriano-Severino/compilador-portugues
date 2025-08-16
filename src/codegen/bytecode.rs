@@ -696,9 +696,12 @@ impl<'a> BytecodeGenerator<'a> {
 
     fn generate_expressao(&mut self, expr: &ast::Expressao) {
         match expr {
-            ast::Expressao::Texto(s) => self
-                .bytecode_instructions
-                .push(format!("LOAD_CONST_STR {}", s)),
+            ast::Expressao::Texto(s) => {
+                // Emite com aspas para preservar espaços
+                let escaped = s.replace('"', "\\\"");
+                self.bytecode_instructions
+                    .push(format!("LOAD_CONST_STR \"{}\"", escaped));
+            }
             ast::Expressao::Inteiro(n) => self
                 .bytecode_instructions
                 .push(format!("LOAD_CONST_INT {}", n)),
@@ -928,8 +931,9 @@ impl<'a> BytecodeGenerator<'a> {
                 for parte in partes {
                     match parte {
                         ast::PartStringInterpolada::Texto(s) => {
+                            let escaped = s.replace('"', "\\\"");
                             self.bytecode_instructions
-                                .push(format!("LOAD_CONST_STR {}", s));
+                                .push(format!("LOAD_CONST_STR \"{}\"", escaped));
                         }
                         ast::PartStringInterpolada::Expressao(e) => {
                             self.generate_expressao(e);
