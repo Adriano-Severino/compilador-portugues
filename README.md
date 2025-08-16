@@ -719,6 +719,7 @@ Para tópicos detalhados e exemplos de uso, consulte os guias em `docs/`:
 - `docs/arrays.md` — Arrays, indexador, tamanho/comprimento e inferência
 - `docs/build-e-testes.md` — Como compilar e rodar apenas os testes de exemplos por alvo
 - `docs/controle-fluxo.md` — `se`/`senão`, `enquanto` e exemplos
+- `docs/debug.md` — Guia de depuração no interpretador (breakpoints, step, inspeção)
 - `README-enum.md` — Suporte a enumerações (declaração, uso e regras de tipo)
 
 Atalhos rápidos (PowerShell):
