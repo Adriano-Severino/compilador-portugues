@@ -1,0 +1,13 @@
+espaco sistemaIo
+{
+    publico função Principal()
+    {
+        EscreverLinha("Digite seu nome:");
+        texto nome = LerLinha();
+        EscreverLinha("Olá, ", nome);
+
+        EscreverLinha("Digite sua idade:");
+        texto idade = LerLinha();
+        EscreverLinha("Você tem ", idade, " anos.");
+    }
+}

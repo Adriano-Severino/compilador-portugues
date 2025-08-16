@@ -85,10 +85,7 @@ impl<'a> LlvmGenerator<'a> {
         }
 
         // Se existir uma função Principal, chama-a ao final
-        if let Some(principal_func) = self.find_principal_function() {
-            let fqn = self
-                .type_checker
-                .resolver_nome_funcao(&principal_func.nome, &self.namespace_path);
+        if let Some(fqn) = self.find_principal_function_fqn() {
             self.body
                 .push_str(&format!("  call void @\"{}\"()\n", fqn.replace(".", "_")));
         }
@@ -104,19 +101,22 @@ impl<'a> LlvmGenerator<'a> {
         format!("{}{}", self.header, self.body)
     }
 
-    fn find_principal_function(&self) -> Option<&'a ast::DeclaracaoFuncao> {
+    fn find_principal_function_fqn(&self) -> Option<String> {
+        // Procura no escopo global
         for decl in &self.programa.declaracoes {
             if let ast::Declaracao::DeclaracaoFuncao(func) = decl {
                 if func.nome == "Principal" {
-                    return Some(func);
+                    // No global, FQN é apenas o nome simples
+                    return Some("Principal".to_string());
                 }
             }
         }
+        // Procura dentro dos namespaces e retorna o FQN
         for ns in &self.programa.namespaces {
             for decl in &ns.declaracoes {
                 if let ast::Declaracao::DeclaracaoFuncao(func) = decl {
                     if func.nome == "Principal" {
-                        return Some(func);
+                        return Some(format!("{}.{}", ns.nome, func.nome));
                     }
                 }
             }
@@ -475,6 +475,7 @@ impl<'a> LlvmGenerator<'a> {
         self.header
             .push_str("target triple = \"x86_64-pc-windows-msvc\"\n");
         self.header.push_str("declare i32 @printf(i8*, ...)\n");
+        self.header.push_str("declare i32 @scanf(i8*, ...)\n");
         self.header.push_str("declare i8* @malloc(i64)\n");
         self.header
             .push_str("declare i32 @sprintf(i8*, i8*, ...)\n");
@@ -497,6 +498,9 @@ impl<'a> LlvmGenerator<'a> {
         );
         self.header
             .push_str("@.empty_str = private unnamed_addr constant [1 x i8] c\"\\00\", align 1\n");
+        // Formato para ler uma linha inteira (até CR/LF), consumindo finais de linha
+        // "%255[^\r\n]%*[\r\n]" em C; em IR usamos escapes hex: \0D (CR) e \0A (LF)
+        self.header.push_str("@.scanline_fmt = private unnamed_addr constant [16 x i8] c\"%255[^\\0D\\0A]%*[\\0D\\0A]\\00\", align 1\n");
         self.header.push_str("@.oob_msg = private unnamed_addr constant [23 x i8] c\"Indice fora dos limites\", align 1\n");
     }
 
@@ -1425,6 +1429,66 @@ impl<'a> LlvmGenerator<'a> {
                 let fqn_func_name = self
                     .type_checker
                     .resolver_nome_funcao(nome_funcao, &self.namespace_path);
+
+                // Intrínsecos no backend LLVM: EscreverLinha(...) e LerLinha()
+                // - EscreverLinha: converte todos argumentos para string, concatena e imprime via printf com newline.
+                // - LerLinha: retorna string vazia por enquanto (somente geração de IR é necessária nos testes).
+                let short_name = fqn_func_name
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or(fqn_func_name.as_str());
+                if short_name == "EscreverLinha" {
+                    // Converte args para i8* e concatena
+                    let mut partes: Vec<String> = Vec::new();
+                    for arg in argumentos {
+                        let (areg, atype) = self.generate_expressao(arg);
+                        let as_str = self.ensure_string(&areg, &atype);
+                        partes.push(as_str);
+                    }
+
+                    // Gera string final (ou vazia)
+                    let final_ptr = if partes.is_empty() {
+                        let empty_ptr = self.get_unique_temp_name();
+                        self.body.push_str(&format!(
+                            "  {0} = getelementptr inbounds [1 x i8], [1 x i8]* @.empty_str, i32 0, i32 0\n",
+                            empty_ptr
+                        ));
+                        empty_ptr
+                    } else {
+                        let mut acc = partes[0].clone();
+                        for p in partes.iter().skip(1) {
+                            acc = self.concatenate_strings(&acc, p);
+                        }
+                        acc
+                    };
+
+                    // printf("%s\n", final_ptr)
+                    self.body.push_str(&format!(
+                        "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.println_fmt, i32 0, i32 0), i8* {0})\n",
+                        final_ptr
+                    ));
+                    return ("".to_string(), ast::Tipo::Vazio);
+                }
+                if short_name == "LerLinha" {
+                    // Implementação real usando scanf("%255[^\r\n]%*[\r\n]", buffer)
+                    // 1) Aloca um buffer local [256 x i8]
+                    let buf_alloca = self.get_unique_temp_name();
+                    self.body
+                        .push_str(&format!("  {0} = alloca [256 x i8], align 1\n", buf_alloca));
+                    // 2) GEP para i8* do início
+                    let buf_ptr = self.get_unique_temp_name();
+                    self.body.push_str(&format!(
+                        "  {0} = getelementptr inbounds [256 x i8], [256 x i8]* {1}, i32 0, i32 0\n",
+                        buf_ptr, buf_alloca
+                    ));
+                    // 3) scanf no buffer
+                    self.body.push_str(&format!(
+                        "  call i32 (i8*, ...) @scanf(i8* getelementptr inbounds ([16 x i8], [16 x i8]* @.scanline_fmt, i32 0, i32 0), i8* {0})\n",
+                        buf_ptr
+                    ));
+                    // 4) Retorna i8* para o buffer
+                    return (buf_ptr, ast::Tipo::Texto);
+                }
                 let func = self
                     .programa
                     .declaracoes
@@ -1454,8 +1518,27 @@ impl<'a> LlvmGenerator<'a> {
                                 _ => None,
                             })
                         })
+                    });
+
+                let func = match func.or_else(|| {
+                    self.programa.namespaces.iter().find_map(|ns| {
+                        ns.declaracoes.iter().find_map(|d| match d {
+                            ast::Declaracao::DeclaracaoFuncao(f)
+                                if self.type_checker.resolver_nome_funcao(&f.nome, &ns.nome)
+                                    == fqn_func_name =>
+                            {
+                                Some(f)
+                            }
+                            _ => None,
+                        })
                     })
-                    .unwrap();
+                }) {
+                    Some(f) => f,
+                    None => panic!(
+                        "Função '{}' não encontrada nem como intrínseca nem no código do usuário",
+                        fqn_func_name
+                    ),
+                };
                 let return_type_decl = func.tipo_retorno.clone().unwrap_or(ast::Tipo::Vazio);
                 let return_type = self.resolve_type(&return_type_decl, &self.namespace_path);
                 let return_type_llvm = self.map_type_to_llvm_arg(&return_type);
