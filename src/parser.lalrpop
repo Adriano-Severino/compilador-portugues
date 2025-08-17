@@ -88,15 +88,20 @@ Declaracao: ast::Declaracao = {
 
 // === ENUMERAÇÃO ===
 DeclaracaoEnumeracao: ast::DeclaracaoEnum = {
-    "enumeração" <nome:IdentificadorSimples> "{" <valores:ListaIdentificadores?> "}" => {
+    "enumeração" <nome:IdentificadorSimples> "{" <valores:ListaIdentificadoresEnum?> "}" => {
         ast::DeclaracaoEnum { nome, valores: valores.unwrap_or_default() }
     }
 };
 
 // === INTERFACE ===
 DeclaracaoInterface: ast::DeclaracaoInterface = {
+    // Com parâmetros genéricos
+    <_macc:ModificadorAcesso?> "interface" <nome:IdentificadorSimples> <generics:GenericParamsDecl> "{" <metodos:AssinaturasMetodoInterface*> "}" => {
+        ast::DeclaracaoInterface { nome, generic_params: generics, metodos }
+    },
+    // Sem parâmetros genéricos
     <_macc:ModificadorAcesso?> "interface" <nome:IdentificadorSimples> "{" <metodos:AssinaturasMetodoInterface*> "}" => {
-        ast::DeclaracaoInterface { nome, metodos }
+        ast::DeclaracaoInterface { nome, generic_params: vec![], metodos }
     }
 };
 
@@ -106,7 +111,9 @@ AssinaturasMetodoInterface: ast::AssinaturaMetodo = {
     }
 };
 
-ListaIdentificadores: Vec<String> = {
+// Listas específicas para evitar conflitos com listas de Tipos
+#[inline]
+ListaIdentificadoresEnum: Vec<String> = {
     <primeiro:IdentificadorSimples> <rest:("," IdentificadorSimples)*> => {
         let mut v = vec![primeiro];
         v.extend(rest.into_iter().map(|(_, id)| id));
@@ -123,9 +130,9 @@ ModificadorAcesso: ast::ModificadorAcesso = {
 
 // === CLASSES ===
 DeclaracaoClasse: ast::DeclaracaoClasse = {
-    <modificador:ModificadorAcesso?> <classe_abstrata:("abstrata")?> <estatica:("estática")?> "classe" <nome:IdentificadorSimples>
-    // Estilo C#: ':' Base, I1, I2... (primeiro é base, demais são interfaces)
-    <lista_cabecalho:(":" <ListaIdentificadores>)?>
+    // Com parâmetros genéricos
+    <modificador:ModificadorAcesso?> <classe_abstrata:("abstrata")?> <estatica:("estática")?> "classe" <nome_classe:IdentificadorSimples> <generic_params:GenericParamsDecl>
+    <lista_cabecalho:(":" <ListaTiposNomeados>)?>
     "{" <membros:MembroClasse*> "}" => {
         let mut campos = Vec::new();
         let mut propriedades = Vec::new();
@@ -141,20 +148,83 @@ DeclaracaoClasse: ast::DeclaracaoClasse = {
             }
         }
 
-        // Determina base e interfaces
-    let mut classe_pai: Option<String> = None;
-    let mut interfaces: Vec<String> = Vec::new();
-    if let Some(mut lista) = lista_cabecalho {
+        // Determina base e interfaces (apenas nomes por enquanto)
+        let mut classe_pai: Option<String> = None;
+        let mut interfaces: Vec<String> = Vec::new();
+        if let Some(mut lista) = lista_cabecalho {
             if !lista.is_empty() {
-                classe_pai = Some(lista.remove(0));
-                interfaces.extend(lista.into_iter());
+                let base_nome = match &lista[0] {
+                    ast::Tipo::Classe(n) => n.clone(),
+                    _ => unreachable!("Tipo inválido em cabeçalho de classe"),
+                };
+                classe_pai = Some(base_nome);
+                for t in lista.into_iter().skip(1) {
+                    let nome_iface = match t {
+                        ast::Tipo::Classe(n) => n,
+                        _ => unreachable!("Tipo inválido em lista de interfaces"),
+                    };
+                    interfaces.push(nome_iface);
+                }
+            }
+        }
+
+    ast::DeclaracaoClasse {
+            nome: nome_classe,
+            classe_pai,
+            interfaces,
+        generic_params,
+            modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
+            campos,
+            propriedades,
+            metodos,
+            construtores,
+            eh_abstrata: classe_abstrata.is_some(),
+            eh_estatica: estatica.is_some(),
+        }
+    },
+    // Sem parâmetros genéricos
+    <modificador:ModificadorAcesso?> <classe_abstrata:("abstrata")?> <estatica:("estática")?> "classe" <nome_classe:IdentificadorSimples>
+    <lista_cabecalho:(":" <ListaTiposNomeados>)?>
+    "{" <membros:MembroClasse*> "}" => {
+        let mut campos = Vec::new();
+        let mut propriedades = Vec::new();
+        let mut metodos = Vec::new();
+        let mut construtores = Vec::new();
+
+        for membro in membros {
+            match membro {
+                ast::MembroClasse::Campo(campo) => campos.push(campo),
+                ast::MembroClasse::Propriedade(prop) => propriedades.push(prop),
+                ast::MembroClasse::Metodo(metodo) => metodos.push(metodo),
+                ast::MembroClasse::Construtor(construtor) => construtores.push(construtor),
+            }
+        }
+
+        // Determina base e interfaces (apenas nomes por enquanto)
+        let mut classe_pai: Option<String> = None;
+        let mut interfaces: Vec<String> = Vec::new();
+        if let Some(mut lista) = lista_cabecalho {
+            if !lista.is_empty() {
+                let base_nome = match &lista[0] {
+                    ast::Tipo::Classe(n) => n.clone(),
+                    _ => unreachable!("Tipo inválido em cabeçalho de classe"),
+                };
+                classe_pai = Some(base_nome);
+                for t in lista.into_iter().skip(1) {
+                    let nome_iface = match t {
+                        ast::Tipo::Classe(n) => n,
+                        _ => unreachable!("Tipo inválido em lista de interfaces"),
+                    };
+                    interfaces.push(nome_iface);
+                }
             }
         }
 
         ast::DeclaracaoClasse {
-            nome,
+            nome: nome_classe,
             classe_pai,
             interfaces,
+            generic_params: vec![],
             modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
             campos,
             propriedades,
@@ -262,11 +332,12 @@ AcessorPropriedade: (bool, Option<ast::ModificadorAcesso>) = {
 };
 // === FUNÇÕES E MÉTODOS ===
 DeclaracaoFuncao: ast::DeclaracaoFuncao = {
-    // 1. [mod] [estática] função nome (params) { corpo }      → retorno implícito = Vazio
+    // A. [mod] [estática] função nome (params) { corpo } → retorno = Vazio
     <m:ModificadorAcesso?> <estatica:("estática")?> "função"
     <nome:IdentificadorSimples> "(" <params:InnerParamList> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
             nome,
+            generic_params: vec![],
             parametros: params,
             tipo_retorno: Some(ast::Tipo::Vazio),
             modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
@@ -274,13 +345,13 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
             eh_estatica: estatica.is_some(),
         }
     },
-
-    // 2. [mod] [estática] função nome (params) => Tipo { corpo }
+    // B. [mod] [estática] função nome (params) => Tipo { corpo }
     <m:ModificadorAcesso?> <estatica:("estática")?> "função"
     <nome:IdentificadorSimples>
     "(" <params:InnerParamList> "=>" <ret:Tipo> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
             nome,
+            generic_params: vec![],
             parametros: params,
             tipo_retorno: Some(ret),
             modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
@@ -289,12 +360,13 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
         }
     },
 
-    // 3. [mod] [estática] função Tipo nome (params) { corpo }  – tipo antes do nome
+    // E. [mod] [estática] função TipoSimples nome<Ts>? (params) { corpo }
     <m:ModificadorAcesso?> <estatica:("estática")?> "função"
-    <ret:Tipo> <nome:IdentificadorSimples>
+    <ret:TipoRetornoSimples> <nome:IdentificadorSimples> <generic_params:GenericParamsDecl?>
     "(" <params:InnerParamList> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
             nome,
+            generic_params: generic_params.unwrap_or_default(),
             parametros: params,
             tipo_retorno: Some(ret),
             modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
@@ -304,21 +376,45 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
     },
 };
 
+
+// Tipo de retorno simples (sem tipo aplicado Nome<...>) para reduzir ambiguidades após "função"
+TipoRetornoSimples: ast::Tipo = {
+    <base:TipoRetornoBase> <sufs:("[" "]")*> => {
+        let mut t = base;
+        for _ in sufs { t = ast::Tipo::Lista(Box::new(t)); }
+        t
+    }
+};
+
+TipoRetornoBase: ast::Tipo = {
+    "inteiro" => ast::Tipo::Inteiro,
+    "texto" => ast::Tipo::Texto,
+    "booleano" => ast::Tipo::Booleano,
+    "flutuante" => ast::Tipo::Flutuante,
+    "duplo" => ast::Tipo::Duplo,
+    "decimal" => ast::Tipo::Decimal,
+    "vazio" => ast::Tipo::Vazio,
+    <nome:TIdentificador> => ast::Tipo::Classe(nome),
+};
+
 // — MÉTODO DE INSTÂNCIA ----------------------------------------------------
 MetodoClasse: ast::MetodoClasse = {
+    // Método com corpo (genéricos opcionais)
     <m:ModificadorAcesso?>            // publico | privado | protegido
     <estatica:("estática")?>
     <abstrato:("abstrata")?>
-    <redefinivel:("redefinível")?> 
-    <sobrescreve:("sobrescreve")?> 
+    <redefinivel:("redefinível")?>
+    <sobrescreve:("sobrescreve")?>
     <ret:Tipo>                       // inteiro | texto | Classe ...
-    <nome:IdentificadorSimples>      // apresentar
-    "(" <p:InnerParamList>    // (...)
-    <b:BlocoComando>                 // { ... }
+    <nome_metodo:IdentificadorSimples>
+    <generic_params:GenericParamsDecl?>
+    "(" <p:InnerParamList>
+    <b:BlocoComando>
         => ast::MetodoClasse {
-            nome,
-            parametros: p, // InnerParamList directly returns Vec
-            tipo_retorno: if ret == ast::Tipo::Vazio { None } else { Some(ret) }, // Handle 'vazio' for methods
+            nome: nome_metodo.clone(),
+            generic_params: generic_params.unwrap_or_default(),
+            parametros: p,
+            tipo_retorno: if ret == ast::Tipo::Vazio { None } else { Some(ret) },
             modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
             corpo: b,
             eh_virtual: redefinivel.is_some(),
@@ -327,23 +423,25 @@ MetodoClasse: ast::MetodoClasse = {
             eh_estatica: estatica.is_some(),
         },
 
-    // Versão abstrata: sem corpo, termina com ';' (exige 'abstrata')
+    // Método abstrato (termina com ';' e exige 'abstrata'; genéricos opcionais)
     <m:ModificadorAcesso?>
     <estatica:("estática")?>
     "abstrata"
-    <redefinivel:("redefinível")?> 
-    <sobrescreve:("sobrescreve")?> 
+    <redefinivel:("redefinível")?>
+    <sobrescreve:("sobrescreve")?>
     <ret:Tipo>
-    <nome:IdentificadorSimples>
+    <nome_metodo:IdentificadorSimples>
+    <generic_params:GenericParamsDecl?>
     "(" <p:InnerParamList> ";" => ast::MetodoClasse {
-        nome,
+        nome: nome_metodo,
+        generic_params: generic_params.unwrap_or_default(),
         parametros: p,
         tipo_retorno: if ret == ast::Tipo::Vazio { None } else { Some(ret) },
         modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
         corpo: vec![],
         eh_virtual: redefinivel.is_some(),
         eh_override: sobrescreve.is_some(),
-        eh_abstrato: true, // requer palavra 'abstrato' via regra acima, mas reforçamos aqui
+        eh_abstrato: true,
         eh_estatica: estatica.is_some(),
     },
 };
@@ -392,13 +490,15 @@ ListaParametros: Vec<ast::Parametro> = {
     }
 };
 
+#[inline]
 ParametroSimples: ast::Parametro = {
-      // Parâmetro com valor padrão (C#-style)
-    <tipo:Tipo> <nome:TIdentificador> "=" <valor:ExpressaoAtomo> => 
-        ast::Parametro::opcional(nome, tipo, valor),
-     // Parâmetro obrigatório
-    <tipo:Tipo> <nome:TIdentificador> => 
-        ast::Parametro::obrigatorio(nome, tipo),
+    // Colocar a forma com '=' primeiro ajuda a resolver shift/reduce em alguns estados
+    <tipo:Tipo> <nome:TIdentificador> "=" <valor:ExpressaoAtomo> => {
+        ast::Parametro::opcional(nome, tipo, valor)
+    },
+    <tipo:Tipo> <nome:TIdentificador> => {
+        ast::Parametro::obrigatorio(nome, tipo)
+    },
 };
 
 // Lista de elementos de array
@@ -410,23 +510,68 @@ ListaElementosArray: Vec<ast::Expressao> = {
     }
 };
 
-// === COMANDOS SE/SENÃO ===
-ComandoSe: ast::Comando = {
-    // Se sem else
-    "se" "(" <cond:Expressao> ")" <then_block:ComandoSimplesSemSe> => {
-        ast::Comando::Se(cond, Box::new(then_block), None)
-    },
-    // Se com else
-    "se" "(" <cond:Expressao> ")" <then_block:ComandoSimplesSemSe> "senão" <else_block:ComandoSimplesSemSe> => {
-        ast::Comando::Se(cond, Box::new(then_block), Some(Box::new(else_block)))
-    },
+// === COMANDOS SE/SENÃO (matched/unmatched) ===
+Comando: ast::Comando = {
+    <c:ComandoCasado> => c,
+    <u:ComandoDescasado> => u,
 };
 
-ComandoSimplesSemSe: ast::Comando = {     // Tudo que está em ComandoSimples exceto o comando Se
+ComandoOutro: ast::Comando = {
     "var" <nome:IdentificadorSimples> "=" <expr:Expressao> ";" => {
         ast::Comando::DeclaracaoVar(nome, expr)
     },
     <cmd:ComandosBasicos> => cmd,
+};
+
+ComandoCasado: ast::Comando = {
+    // if-else casado
+    "se" "(" <cond:Expressao> ")" <t:ComandoCasado> "senão" <e:ComandoCasado> => {
+        ast::Comando::Se(cond, Box::new(t), Some(Box::new(e)))
+    },
+    // while e for com corpo casado
+    "enquanto" "(" <cond:Expressao> ")" <corpo:ComandoCasado> => {
+        ast::Comando::Enquanto(cond, Box::new(corpo))
+    },
+    "para" "(" <init:ForHeaderCmd?> ";" <cond:Expressao?> ";" <incr:ForHeaderCmd?> ")" <corpo:ComandoCasado> => {
+        ast::Comando::Para(
+            init.map(Box::new),
+            cond,
+            incr.map(Box::new),
+            Box::new(corpo)
+        )
+    },
+    <outro:ComandoOutro> => outro,
+};
+
+ComandoDescasado: ast::Comando = {
+    // if sem else (o corpo pode ser qualquer Comando)
+    "se" "(" <cond:Expressao> ")" <t:Comando> => {
+        ast::Comando::Se(cond, Box::new(t), None)
+    },
+    // if-else onde o 'then' é casado mas o 'else' ainda não está completo
+    "se" "(" <cond:Expressao> ")" <t:ComandoCasado> "senão" <e:ComandoDescasado> => {
+        ast::Comando::Se(cond, Box::new(t), Some(Box::new(e)))
+    },
+    // while e for com corpo potencialmente descasado
+    "enquanto" "(" <cond:Expressao> ")" <corpo:ComandoDescasado> => {
+        ast::Comando::Enquanto(cond, Box::new(corpo))
+    },
+    "para" "(" <init:ForHeaderCmd?> ";" <cond:Expressao?> ";" <incr:ForHeaderCmd?> ")" <corpo:ComandoDescasado> => {
+        ast::Comando::Para(
+            init.map(Box::new),
+            cond,
+            incr.map(Box::new),
+            Box::new(corpo)
+        )
+    },
+};
+
+// partes de cabeçalho do 'para' sem consumir ';'
+ForHeaderCmd: ast::Comando = {
+    "var" <nome:IdentificadorSimples> "=" <expr:Expressao> => {
+        ast::Comando::DeclaracaoVar(nome, expr)
+    },
+    <expr:Expressao> => ast::Comando::Expressao(expr),
 };
 
 ComandosBasicos: ast::Comando = {
@@ -468,14 +613,8 @@ ComandosBasicos: ast::Comando = {
         ast::Comando::DeclaracaoVariavel(ast::Tipo::Decimal, nome, None)
     },
 
-    // obj.metodo(arg1, …);
-    <obj:ExpressaoPostfixa> "." <metodo:IdentificadorSimples> "(" <args:InnerArgList> ";" => {
-        ast::Comando::ChamarMetodo(Box::new(obj), metodo, args)
-    },
-
-    // chamada de função sozinha: nome(arg1, arg2 …);
-    <nome:IdentificadorSimples> "(" <args:InnerArgList> ";" =>
-        ast::Comando::Expressao(ast::Expressao::Chamada(nome, args)),
+    // qualquer expressão standalone como comando
+    <expr:Expressao> ";" => ast::Comando::Expressao(expr),
 
     // Declaração de classe: NomeClasse nome = expr; ou NomeClasse nome;
     // Isso precisa vir DEPOIS das chamadas de função para não causar conflito
@@ -506,8 +645,17 @@ ComandosBasicos: ast::Comando = {
 };
 
 // === TIPOS E IDENTIFICADORES ===
-// Tipo primitivo ou classe
+// Tipo com sufixos de array pós-fixados (ex.: inteiro[][], Lista<Texto>[])
 Tipo: ast::Tipo = {
+    <base:TipoBase> <sufs:("[" "]")*> => {
+        let mut t = base;
+        for _ in sufs { t = ast::Tipo::Lista(Box::new(t)); }
+        t
+    }
+};
+
+// Componentes básicos de tipo (sem arrays)
+TipoBase: ast::Tipo = {
     // Tipos primitivos
     "inteiro" => ast::Tipo::Inteiro,
     "texto" => ast::Tipo::Texto,
@@ -516,50 +664,77 @@ Tipo: ast::Tipo = {
     "duplo" => ast::Tipo::Duplo,
     "decimal" => ast::Tipo::Decimal,
     "vazio" => ast::Tipo::Vazio,
-    
-    // Arrays de tipos primitivos
-    "inteiro" "[" "]" => ast::Tipo::Lista(Box::new(ast::Tipo::Inteiro)),
-    "texto" "[" "]" => ast::Tipo::Lista(Box::new(ast::Tipo::Texto)),
-    "booleano" "[" "]" => ast::Tipo::Lista(Box::new(ast::Tipo::Booleano)),
-    "flutuante" "[" "]" => ast::Tipo::Lista(Box::new(ast::Tipo::Flutuante)),
-    "duplo" "[" "]" => ast::Tipo::Lista(Box::new(ast::Tipo::Duplo)),
-    "decimal" "[" "]" => ast::Tipo::Lista(Box::new(ast::Tipo::Decimal)),
-    
-    // Tipos customizados e arrays de tipos customizados
+
+    // Tipos aplicados Nome<...>
+    <t:TipoAplicadoSimples> => t,
+
+    // Tipos customizados simples
     <nome:TIdentificador> => ast::Tipo::Classe(nome),
-    <nome:TIdentificador> "[" "]" => ast::Tipo::Lista(Box::new(ast::Tipo::Classe(nome))),
+};
+
+// Tipo de retorno restrito a tipos primitivos e vazio (para desambiguar com genéricos de função)
+#[inline]
+TipoPrimitivoOuVazio: ast::Tipo = {
+    "inteiro" => ast::Tipo::Inteiro,
+    "texto" => ast::Tipo::Texto,
+    "booleano" => ast::Tipo::Booleano,
+    "flutuante" => ast::Tipo::Flutuante,
+    "duplo" => ast::Tipo::Duplo,
+    "decimal" => ast::Tipo::Decimal,
+    "vazio" => ast::Tipo::Vazio,
+};
+
+// Tipo aplicado Nome<T1, T2, ...> (exige pelo menos 1 argumento)
+#[inline]
+TipoAplicadoSimples: ast::Tipo = {
+    <nome:TIdentificador> "<" <primeiro:Tipo> <rest:("," Tipo)*> ">" => {
+        let mut v = vec![primeiro];
+        v.extend(rest.into_iter().map(|(_, t)| t));
+        ast::Tipo::Aplicado { nome, args: v }
+    }
+};
+
+// Lista de tipos (se necessário em outros locais)
+#[inline]
+ListaTipos: Vec<ast::Tipo> = {
+    <primeiro:Tipo> <rest:("," Tipo)*> => {
+        let mut v = vec![primeiro];
+        v.extend(rest.into_iter().map(|(_, t)| t));
+        v
+    }
+};
+
+// Parâmetros genéricos em contexto de declaração (apenas nomes) - exige pelo menos 1
+GenericParamsDecl: Vec<String> = {
+    "<" <params:ListaIdentificadoresEnum> ">" => params,
 };
 
 // Tipos permitidos em declaração local (incluindo classes)
 // === COMANDOS - ✅ ESTRUTURA SIMPLIFICADA ===
 ComandoTopLevel: ast::Comando = {
-    <cmd:ComandoSimples> => cmd,
+    <cmd:Comando> => cmd,
 };
 
-ComandoSimples: ast::Comando = {
-    "var" <nome:TIdentificador> "=" <expr:Expressao> ";" => {
-        ast::Comando::DeclaracaoVar(nome, expr)
-    },
-    // Comandos básicos (atribuições, chamadas, retorno, bloco, etc.)
-    <cmd:ComandosBasicos> => cmd,
-    // Se e outros comandos
-    <cmd:ComandoSe> => cmd,
-    "enquanto" "(" <cond:Expressao> ")" <bloco:ComandoSimples> => {
-        ast::Comando::Enquanto(cond, Box::new(bloco))
-    },
-    "para" "(" <init:ComandoSimples?> ";" <cond:Expressao?> ";" <incr:ComandoSimples?> ")" <bloco:ComandoSimples> => {
-        ast::Comando::Para(
-            init.map(Box::new),
-            cond,
-            incr.map(Box::new),
-            Box::new(bloco)
-        )
-    },
-};
+ComandoSimples: ast::Comando = <cmd:Comando> => cmd;
 
 
 BlocoComando: Vec<ast::Comando> = {
-    "{" <comandos:ComandoSimples*> "}" => comandos
+    "{" <comandos:Comando*> "}" => comandos
+};
+
+// Lista para cabeçalho de classe: Base e interfaces – apenas nomes simples por enquanto
+#[inline]
+ListaTiposNomeados: Vec<ast::Tipo> = {
+    <primeiro:TipoNomeadoHeader> <rest:("," TipoNomeadoHeader)*> => {
+        let mut v = vec![primeiro];
+        v.extend(rest.into_iter().map(|(_, t)| t));
+        v
+    }
+};
+
+// Tipo nomeado usado no cabeçalho (sem primitivos e sem genéricos aplicados por enquanto)
+TipoNomeadoHeader: ast::Tipo = {
+    <nome:TIdentificador> => ast::Tipo::Classe(nome),
 };
 
 // === EXPRESSÕES - ✅ HIERARQUIA LIMPA ===

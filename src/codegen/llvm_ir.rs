@@ -2194,25 +2194,31 @@ impl<'a> LlvmGenerator<'a> {
     }
 
     fn resolve_type(&self, tipo: &ast::Tipo, namespace: &str) -> ast::Tipo {
-        if let ast::Tipo::Classe(unresolved_name) = tipo {
-            // Primeiro tenta resolver como classe
-            let fqn_class = self
-                .type_checker
-                .resolver_nome_classe(unresolved_name, namespace);
-            if self.type_checker.classes.contains_key(&fqn_class) {
-                return ast::Tipo::Classe(fqn_class);
+        match tipo {
+            ast::Tipo::Classe(unresolved_name) => {
+                // Primeiro tenta resolver como classe
+                let fqn_class = self
+                    .type_checker
+                    .resolver_nome_classe(unresolved_name, namespace);
+                if self.type_checker.classes.contains_key(&fqn_class) {
+                    return ast::Tipo::Classe(fqn_class);
+                }
+                // Depois tenta como enumeração
+                let fqn_enum = self
+                    .type_checker
+                    .resolver_nome_enum(unresolved_name, namespace);
+                if self.type_checker.enums.contains_key(&fqn_enum) {
+                    return ast::Tipo::Enum(fqn_enum);
+                }
+                // Mantém original caso não resolva
+                tipo.clone()
             }
-            // Depois tenta como enumeração
-            let fqn_enum = self
-                .type_checker
-                .resolver_nome_enum(unresolved_name, namespace);
-            if self.type_checker.enums.contains_key(&fqn_enum) {
-                return ast::Tipo::Enum(fqn_enum);
+            ast::Tipo::Aplicado { nome, args: _ } => {
+                let fqn_class = self.type_checker.resolver_nome_classe(nome, namespace);
+                ast::Tipo::Classe(fqn_class)
             }
-            // Mantém original caso não resolva
-            return tipo.clone();
+            other => other.clone(),
         }
-        tipo.clone()
     }
 
     fn map_type_to_llvm_storage(&self, tipo: &ast::Tipo) -> String {
@@ -2226,6 +2232,7 @@ impl<'a> LlvmGenerator<'a> {
             ast::Tipo::Vazio => "void".to_string(),
             ast::Tipo::Enum(_) => "i32".to_string(),
             ast::Tipo::Classe(_) => self.map_type_to_llvm_ptr(tipo),
+            ast::Tipo::Aplicado { .. } => self.map_type_to_llvm_ptr(tipo),
             ast::Tipo::Lista(_) => "%array*".to_string(),
             _ => panic!("Tipo LLVM não mapeado para armazenamento: {:?}", tipo),
         }
@@ -2244,6 +2251,10 @@ impl<'a> LlvmGenerator<'a> {
                 let sanitized_name = name.replace('.', "_");
                 format!("%class.{0}*", sanitized_name)
             }
+            ast::Tipo::Aplicado { nome, .. } => {
+                let sanitized_name = nome.replace('.', "_");
+                format!("%class.{0}*", sanitized_name)
+            }
             ast::Tipo::Lista(_) => "%array**".to_string(),
             _ => panic!("Não é possível criar um ponteiro para o tipo: {:?}", tipo),
         }
@@ -2260,6 +2271,7 @@ impl<'a> LlvmGenerator<'a> {
             ast::Tipo::Vazio => "void".to_string(),
             ast::Tipo::Enum(_) => "i32".to_string(),
             ast::Tipo::Classe(_) => self.map_type_to_llvm_ptr(tipo),
+            ast::Tipo::Aplicado { .. } => self.map_type_to_llvm_ptr(tipo),
             ast::Tipo::Lista(_) => "%array*".to_string(),
             _ => panic!("Tipo LLVM não mapeado para argumento: {:?}", tipo),
         }

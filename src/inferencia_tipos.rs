@@ -404,6 +404,14 @@ impl InferenciaTipos {
                 format!("função({}) -> {}", params_str, self.tipo_para_string(ret))
             }
             Tipo::Generico(nome) => format!("generico<{}>", nome),
+            Tipo::Aplicado { nome, args } => {
+                let inner = args
+                    .iter()
+                    .map(|a| self.tipo_para_string(a))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}<{}>", nome, inner)
+            }
             Tipo::Opcional(tipo_interno) => {
                 format!("opcional<{}>", self.tipo_para_string(tipo_interno))
             }

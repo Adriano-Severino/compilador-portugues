@@ -39,6 +39,108 @@ impl<'a> VerificadorTipos<'a> {
         }
     }
 
+    // Normaliza tipos para comparação e armazena FQNs quando aplicável.
+    // Também valida a aridade de tipos genéricos aplicados (Nome<args...>) e retorna erros coletados.
+    fn normalize_tipo_ro(&self, t: &Tipo, namespace_atual: &str) -> (Tipo, Vec<String>) {
+        use Tipo::*;
+        match t {
+            Lista(inner) => {
+                let (norm, errs) = self.normalize_tipo_ro(inner, namespace_atual);
+                (Lista(Box::new(norm)), { errs })
+            }
+            Classe(n) => (
+                Classe(self.resolver_nome_classe(n, namespace_atual)),
+                vec![],
+            ),
+            Enum(n) => (Enum(self.resolver_nome_enum(n, namespace_atual)), vec![]),
+            Aplicado { nome, args } => {
+                // Resolve nome para FQN de classe ou interface
+                let fqn_cls = self.resolver_nome_classe(nome, namespace_atual);
+                let fqn_iface = self.resolver_nome_interface(nome, namespace_atual);
+                let (is_class, is_iface, resolved_name) = (
+                    self.classes.contains_key(&fqn_cls),
+                    self.interfaces.contains_key(&fqn_iface),
+                    if self.classes.contains_key(&fqn_cls) {
+                        fqn_cls.clone()
+                    } else if self.interfaces.contains_key(&fqn_iface) {
+                        fqn_iface.clone()
+                    } else {
+                        // Não encontrado; mantém nome simples para evitar cascata de erros
+                        nome.clone()
+                    },
+                );
+
+                let mut erros: Vec<String> = Vec::new();
+                // Verifica aridade se encontrou a declaração alvo
+                if is_class {
+                    if let Some(decl) = self.classes.get(&fqn_cls) {
+                        let expected = decl.generic_params.len();
+                        if expected == 0 {
+                            erros.push(format!(
+                                "Tipo '{}' não é genérico, mas foi usado como '{}' com argumentos.",
+                                fqn_cls, nome
+                            ));
+                        } else if expected != args.len() {
+                            erros.push(format!(
+                                "Aridade genérica incorreta para '{}': esperados {}, recebidos {}.",
+                                fqn_cls,
+                                expected,
+                                args.len()
+                            ));
+                        }
+                    }
+                } else if is_iface {
+                    if let Some(decl) = self.interfaces.get(&fqn_iface) {
+                        let expected = decl.generic_params.len();
+                        if expected == 0 {
+                            erros.push(format!(
+                                "Interface '{}' não é genérica, mas foi usada como '{}' com argumentos.",
+                                fqn_iface, nome
+                            ));
+                        } else if expected != args.len() {
+                            erros.push(format!(
+                                "Aridade genérica incorreta para interface '{}': esperados {}, recebidos {}.",
+                                fqn_iface, expected, args.len()
+                            ));
+                        }
+                    }
+                }
+
+                let mut norm_args: Vec<Tipo> = Vec::new();
+                for a in args.iter() {
+                    let (na, mut e) = self.normalize_tipo_ro(a, namespace_atual);
+                    norm_args.push(na);
+                    erros.append(&mut e);
+                }
+
+                (
+                    Aplicado {
+                        nome: resolved_name,
+                        args: norm_args,
+                    },
+                    erros,
+                )
+            }
+            Funcao(params, ret) => {
+                let mut erros = Vec::new();
+                let mut norm_params: Vec<Tipo> = Vec::new();
+                for p in params.iter() {
+                    let (np, mut e) = self.normalize_tipo_ro(p, namespace_atual);
+                    norm_params.push(np);
+                    erros.append(&mut e);
+                }
+                let (nr, mut e2) = self.normalize_tipo_ro(ret, namespace_atual);
+                erros.append(&mut e2);
+                (Funcao(norm_params, Box::new(nr)), erros)
+            }
+            Opcional(inner) => {
+                let (norm, errs) = self.normalize_tipo_ro(inner, namespace_atual);
+                (Opcional(Box::new(norm)), { errs })
+            }
+            other => (other.clone(), vec![]),
+        }
+    }
+
     // Compatibilidade de tipos para atribuição: permite promoções numéricas (widening)
     fn tipos_compativeis_atribuicao(&self, destino: &Tipo, origem: &Tipo) -> bool {
         use Tipo::*;
@@ -46,6 +148,10 @@ impl<'a> VerificadorTipos<'a> {
             return true;
         }
         match (destino, origem) {
+            // Aplicado é tratado como Classe do mesmo nome por enquanto
+            (Aplicado { nome: dn, .. }, Aplicado { nome: on, .. }) if dn == on => true,
+            (Classe(dn), Aplicado { nome: on, .. }) if dn == on => true,
+            (Aplicado { nome: dn, .. }, Classe(on)) if dn == on => true,
             // Subtipagem de classes: permite atribuir derivada em variável do tipo base
             (Classe(dest), Classe(orig)) => {
                 if dest == orig {
@@ -212,34 +318,33 @@ impl<'a> VerificadorTipos<'a> {
                 let iface_fqn = self.resolver_nome_interface(iface_nome, &ns_atual);
                 if let Some(iface) = self.interfaces.get(&iface_fqn) {
                     for sig in &iface.metodos {
-                        let ret_i = sig
-                            .tipo_retorno
-                            .clone()
-                            .or(Some(Tipo::Vazio))
-                            .map(|t| match t {
-                                Tipo::Classe(ref n) => {
-                                    Tipo::Classe(self.resolver_nome_classe(n, &ns_atual))
-                                }
-                                Tipo::Enum(ref n) => {
-                                    Tipo::Enum(self.resolver_nome_enum(n, &ns_atual))
-                                }
-                                other => other,
-                            })
-                            .unwrap();
-                        let params_i: Vec<Tipo> = sig
-                            .parametros
-                            .iter()
-                            .map(|p| match &p.tipo {
-                                Tipo::Classe(n) => {
-                                    Tipo::Classe(self.resolver_nome_classe(n, &ns_atual))
-                                }
-                                Tipo::Enum(n) => Tipo::Enum(self.resolver_nome_enum(n, &ns_atual)),
-                                other => other.clone(),
-                            })
-                            .collect();
+                        let (ret_i, mut errs1) = self.normalize_tipo_ro(
+                            &sig.tipo_retorno.clone().or(Some(Tipo::Vazio)).unwrap(),
+                            &ns_atual,
+                        );
+                        self.erros.append(&mut errs1);
+                        let mut params_i: Vec<Tipo> = Vec::new();
+                        for p in sig.parametros.iter() {
+                            let (tp, mut e) = self.normalize_tipo_ro(&p.tipo, &ns_atual);
+                            self.erros.append(&mut e);
+                            params_i.push(tp);
+                        }
 
                         if let Some(m) = resolved_methods.get(&sig.nome) {
-                            let (ret_c, params_c) = self.assinatura_metodo(m);
+                            let (ret_c_opt, params_c_orig) = self.assinatura_metodo(m);
+                            let mut ret_c = ret_c_opt.clone();
+                            if let Some(r) = ret_c_opt.as_ref() {
+                                let (nr, mut e) = self.normalize_tipo_ro(r, &ns_atual);
+                                self.erros.append(&mut e);
+                                ret_c = Some(nr);
+                            }
+                            let mut params_c_norm: Vec<Tipo> = Vec::new();
+                            for p in params_c_orig.into_iter() {
+                                let (np, mut e) = self.normalize_tipo_ro(&p, &ns_atual);
+                                self.erros.append(&mut e);
+                                params_c_norm.push(np);
+                            }
+                            let params_c = params_c_norm;
                             if ret_c != Some(ret_i.clone()) || params_c != params_i {
                                 self.erros.push(format!(
                                     "Classe '{}' não implementa corretamente método '{}' da interface '{}'. Assinatura esperada: ({:?}) -> {:?}",
@@ -695,24 +800,9 @@ impl<'a> VerificadorTipos<'a> {
                         }
                     }
                     for param in &metodo.parametros {
-                        let resolved_param_type = match &param.tipo {
-                            Tipo::Classe(nome_classe) => {
-                                let fqn_cls =
-                                    self.resolver_nome_classe(nome_classe, namespace_atual);
-                                if self.classes.contains_key(&fqn_cls) {
-                                    Tipo::Classe(fqn_cls)
-                                } else {
-                                    let fqn_en =
-                                        self.resolver_nome_enum(nome_classe, namespace_atual);
-                                    if self.enums.contains_key(&fqn_en) {
-                                        Tipo::Enum(fqn_en)
-                                    } else {
-                                        param.tipo.clone()
-                                    }
-                                }
-                            }
-                            _ => param.tipo.clone(),
-                        };
+                        let (resolved_param_type, mut e) =
+                            self.normalize_tipo_ro(&param.tipo, namespace_atual);
+                        self.erros.append(&mut e);
                         metodo_vars.insert(param.nome.clone(), resolved_param_type);
                     }
                     println!(

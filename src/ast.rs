@@ -17,6 +17,8 @@ pub enum Tipo {
     Enum(String),   // Enumeração (FQN)
     Funcao(Vec<Tipo>, Box<Tipo>),
     Generico(String),
+    // Tipo genérico aplicado: Nome<Arg1, Arg2, ...>
+    Aplicado { nome: String, args: Vec<Tipo> },
     Opcional(Box<Tipo>),
     Inferido,
 }
@@ -93,6 +95,8 @@ pub struct DeclaracaoModulo {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeclaracaoInterface {
     pub nome: String,
+    // Parâmetros de tipo da interface: interface Nome<T, U>
+    pub generic_params: Vec<String>,
     pub metodos: Vec<AssinaturaMetodo>,
 }
 
@@ -137,6 +141,8 @@ pub struct DeclaracaoClasse {
     pub classe_pai: Option<String>,
     // Lista de interfaces implementadas (nomes simples ou FQN conforme parser)
     pub interfaces: Vec<String>,
+    // Parâmetros de tipo da classe: classe Nome<T, U>
+    pub generic_params: Vec<String>,
     pub modificador: ModificadorAcesso,
     pub campos: Vec<CampoClasse>,
     pub propriedades: Vec<PropriedadeClasse>,
@@ -183,6 +189,8 @@ pub struct AcessorPropriedade {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MetodoClasse {
     pub nome: String,
+    // Parâmetros de tipo do método: apresentar<T>(...)
+    pub generic_params: Vec<String>,
     pub parametros: Vec<Parametro>,
     pub tipo_retorno: Option<Tipo>,
     pub modificador: ModificadorAcesso,
@@ -208,6 +216,8 @@ pub struct ConstrutorClasse {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeclaracaoFuncao {
     pub nome: String,
+    // Parâmetros de tipo da função: função Nome<T>(...)
+    pub generic_params: Vec<String>,
     pub parametros: Vec<Parametro>,
     pub tipo_retorno: Option<Tipo>,
     pub modificador: ModificadorAcesso,
