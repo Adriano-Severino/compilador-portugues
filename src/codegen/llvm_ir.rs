@@ -394,9 +394,7 @@ impl<'a> LlvmGenerator<'a> {
                     ast::Tipo::Aplicado { nome, .. } => nome.as_str(),
                     _ => "",
                 };
-                let parent_fqn = self
-                    .type_checker
-                    .resolver_nome_classe(base_name, namespace);
+                let parent_fqn = self.type_checker.resolver_nome_classe(base_name, namespace);
 
                 if let Some(parent_decl) = self.type_checker.classes.get(&parent_fqn) {
                     // Seleciona o melhor construtor do pai com base em argumentos fornecidos + defaults
@@ -1720,13 +1718,12 @@ impl<'a> LlvmGenerator<'a> {
                         .unwrap_or_else(|| fqn_class_name.clone());
                     let fqn_method =
                         format!("{0}::{1}", declaring_class, metodo_nome).replace('.', "_");
-                    let args_vals: Vec<String> =
-                        std::iter::once((obj_reg.clone(), obj_type.clone()))
-                            .chain(args_values.into_iter())
-                            .map(|(reg, ty)| {
-                                format!("{0} {1}", self.map_type_to_llvm_arg(&ty), reg)
-                            })
-                            .collect();
+                    // args_values já inclui o objeto (self) como primeiro argumento;
+                    // não duplique o self aqui.
+                    let args_vals: Vec<String> = args_values
+                        .into_iter()
+                        .map(|(reg, ty)| format!("{0} {1}", self.map_type_to_llvm_arg(&ty), reg))
+                        .collect();
                     let args_str = args_vals.join(", ");
                     if return_type == ast::Tipo::Vazio {
                         self.body.push_str(&format!(
