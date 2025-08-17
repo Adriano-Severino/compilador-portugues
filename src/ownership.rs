@@ -603,7 +603,7 @@ impl AnalisadorOwnership {
     fn metodo_existe_na_hierarquia(&self, classe: &str, metodo: &str) -> bool {
         let mut classe_atual = Some(classe.to_string());
 
-        while let Some(nome_classe) = classe_atual {
+    while let Some(nome_classe) = classe_atual {
             if let Some(def_classe) = self.classes.get(&nome_classe) {
                 // Verificar se método existe nesta classe
                 for metodo_classe in &def_classe.metodos {
@@ -613,7 +613,14 @@ impl AnalisadorOwnership {
                 }
 
                 // Ir para classe pai
-                classe_atual = def_classe.classe_pai.clone();
+                classe_atual = def_classe
+                    .classe_pai
+                    .as_ref()
+                    .and_then(|t| match t {
+                        crate::ast::Tipo::Classe(n) => Some(n.clone()),
+                        crate::ast::Tipo::Aplicado { nome, .. } => Some(nome.clone()),
+                        _ => None,
+                    });
             } else {
                 break;
             }
@@ -626,7 +633,7 @@ impl AnalisadorOwnership {
     fn membro_existe_na_hierarquia(&self, classe: &str, membro: &str) -> bool {
         let mut classe_atual = Some(classe.to_string());
 
-        while let Some(nome_classe) = classe_atual {
+    while let Some(nome_classe) = classe_atual {
             if let Some(def_classe) = self.classes.get(&nome_classe) {
                 // Verificar propriedades
                 for prop in &def_classe.propriedades {
@@ -643,7 +650,14 @@ impl AnalisadorOwnership {
                 }
 
                 // Ir para classe pai
-                classe_atual = def_classe.classe_pai.clone();
+                classe_atual = def_classe
+                    .classe_pai
+                    .as_ref()
+                    .and_then(|t| match t {
+                        crate::ast::Tipo::Classe(n) => Some(n.clone()),
+                        crate::ast::Tipo::Aplicado { nome, .. } => Some(nome.clone()),
+                        _ => None,
+                    });
             } else {
                 break;
             }

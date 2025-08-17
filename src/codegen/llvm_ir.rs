@@ -49,6 +49,8 @@ impl<'a> LlvmGenerator<'a> {
         // Constrói vtables antes de definir structs
         self.build_all_vtables();
         self.define_all_structs();
+        // Define tipos para interfaces como structs mínimos para uso em assinaturas
+        self.define_all_interface_structs();
         self.define_all_vtable_globals();
         self.define_static_globals();
 
@@ -99,6 +101,22 @@ impl<'a> LlvmGenerator<'a> {
         self.variables = old_vars;
 
         format!("{}{}", self.header, self.body)
+    }
+
+    fn define_all_interface_structs(&mut self) {
+        // Cria um tipo LLVM identificado para cada interface conhecida para que possamos
+        // referenciá-lo em parâmetros/retornos (%class.Interface*). Usa um layout mínimo
+        // compatível com classes (primeiro campo: ponteiro para vtable i8**), embora
+        // atualmente não haja vtable específica para interfaces.
+        for (iface_fqn, _iface_decl) in &self.type_checker.interfaces {
+            // Evita colisão caso exista uma classe com o mesmo FQN já definida
+            if self.resolved_classes.contains_key(iface_fqn) {
+                continue;
+            }
+            let sanitized = iface_fqn.replace('.', "_");
+            let def = format!("%class.{0} = type {{ i8** }}\n", sanitized);
+            self.header.push_str(&def);
+        }
     }
 
     fn find_principal_function_fqn(&self) -> Option<String> {
@@ -371,9 +389,14 @@ impl<'a> LlvmGenerator<'a> {
                 .get(&classe_nome)
                 .expect("Declaração da classe atual não encontrada");
             if let Some(nome_base_simples) = &classe_decl_atual.classe_pai {
+                let base_name = match nome_base_simples {
+                    ast::Tipo::Classe(n) => n.as_str(),
+                    ast::Tipo::Aplicado { nome, .. } => nome.as_str(),
+                    _ => "",
+                };
                 let parent_fqn = self
                     .type_checker
-                    .resolver_nome_classe(nome_base_simples, namespace);
+                    .resolver_nome_classe(base_name, namespace);
 
                 if let Some(parent_decl) = self.type_checker.classes.get(&parent_fqn) {
                     // Seleciona o melhor construtor do pai com base em argumentos fornecidos + defaults

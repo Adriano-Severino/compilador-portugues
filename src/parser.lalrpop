@@ -148,23 +148,14 @@ DeclaracaoClasse: ast::DeclaracaoClasse = {
             }
         }
 
-        // Determina base e interfaces (apenas nomes por enquanto)
-        let mut classe_pai: Option<String> = None;
-        let mut interfaces: Vec<String> = Vec::new();
+        // Determina base e interfaces: agora aceitando tipos aplicados (ex.: Base<T>, I1<Texto>)
+        let mut classe_pai: Option<ast::Tipo> = None;
+        let mut interfaces: Vec<ast::Tipo> = Vec::new();
         if let Some(mut lista) = lista_cabecalho {
             if !lista.is_empty() {
-                let base_nome = match &lista[0] {
-                    ast::Tipo::Classe(n) => n.clone(),
-                    _ => unreachable!("Tipo inválido em cabeçalho de classe"),
-                };
-                classe_pai = Some(base_nome);
-                for t in lista.into_iter().skip(1) {
-                    let nome_iface = match t {
-                        ast::Tipo::Classe(n) => n,
-                        _ => unreachable!("Tipo inválido em lista de interfaces"),
-                    };
-                    interfaces.push(nome_iface);
-                }
+                let base = lista.remove(0);
+                classe_pai = Some(base);
+                for t in lista.into_iter() { interfaces.push(t); }
             }
         }
 
@@ -200,23 +191,14 @@ DeclaracaoClasse: ast::DeclaracaoClasse = {
             }
         }
 
-        // Determina base e interfaces (apenas nomes por enquanto)
-        let mut classe_pai: Option<String> = None;
-        let mut interfaces: Vec<String> = Vec::new();
+        // Determina base e interfaces: agora aceitando tipos aplicados (ex.: Base<T>, I1<Texto>)
+        let mut classe_pai: Option<ast::Tipo> = None;
+        let mut interfaces: Vec<ast::Tipo> = Vec::new();
         if let Some(mut lista) = lista_cabecalho {
             if !lista.is_empty() {
-                let base_nome = match &lista[0] {
-                    ast::Tipo::Classe(n) => n.clone(),
-                    _ => unreachable!("Tipo inválido em cabeçalho de classe"),
-                };
-                classe_pai = Some(base_nome);
-                for t in lista.into_iter().skip(1) {
-                    let nome_iface = match t {
-                        ast::Tipo::Classe(n) => n,
-                        _ => unreachable!("Tipo inválido em lista de interfaces"),
-                    };
-                    interfaces.push(nome_iface);
-                }
+                let base = lista.remove(0);
+                classe_pai = Some(base);
+                for t in lista.into_iter() { interfaces.push(t); }
             }
         }
 
@@ -722,7 +704,7 @@ BlocoComando: Vec<ast::Comando> = {
     "{" <comandos:Comando*> "}" => comandos
 };
 
-// Lista para cabeçalho de classe: Base e interfaces – apenas nomes simples por enquanto
+// Lista para cabeçalho de classe: Base e interfaces – aceita nomes simples e tipos aplicados
 #[inline]
 ListaTiposNomeados: Vec<ast::Tipo> = {
     <primeiro:TipoNomeadoHeader> <rest:("," TipoNomeadoHeader)*> => {
@@ -732,8 +714,9 @@ ListaTiposNomeados: Vec<ast::Tipo> = {
     }
 };
 
-// Tipo nomeado usado no cabeçalho (sem primitivos e sem genéricos aplicados por enquanto)
+// Tipo nomeado usado no cabeçalho (sem primitivos), permitindo tipos aplicados Nome<...>
 TipoNomeadoHeader: ast::Tipo = {
+    <t:TipoAplicadoSimples> => t,
     <nome:TIdentificador> => ast::Tipo::Classe(nome),
 };
 

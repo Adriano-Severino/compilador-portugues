@@ -125,7 +125,14 @@ impl ContextoExecucao {
 
         let classe_compilada = ClasseCompilada {
             nome: classe.nome.clone(),
-            classe_pai: classe.classe_pai.clone(),
+            classe_pai: classe
+                .classe_pai
+                .as_ref()
+                .and_then(|t| match t {
+                    Tipo::Classe(n) => Some(n.clone()),
+                    Tipo::Aplicado { nome, .. } => Some(nome.clone()),
+                    _ => None,
+                }),
             propriedades,
             metodos,
             construtores,

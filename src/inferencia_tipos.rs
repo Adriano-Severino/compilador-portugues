@@ -192,7 +192,11 @@ impl InferenciaTipos {
                 }
 
                 // Ir para classe pai
-                classe_atual = def_classe.classe_pai.clone();
+                classe_atual = def_classe.classe_pai.as_ref().and_then(|t| match t {
+                    Tipo::Classe(n) => Some(n.clone()),
+                    Tipo::Aplicado { nome, .. } => Some(nome.clone()),
+                    _ => None,
+                });
             } else {
                 break;
             }
@@ -219,7 +223,11 @@ impl InferenciaTipos {
                 }
 
                 // Ir para classe pai
-                classe_atual = def_classe.classe_pai.clone();
+                classe_atual = def_classe.classe_pai.as_ref().and_then(|t| match t {
+                    Tipo::Classe(n) => Some(n.clone()),
+                    Tipo::Aplicado { nome, .. } => Some(nome.clone()),
+                    _ => None,
+                });
             } else {
                 break;
             }
@@ -366,10 +374,15 @@ impl InferenciaTipos {
         while let Some(nome_classe) = atual {
             if let Some(def_classe) = self.classes.get(&nome_classe) {
                 if let Some(pai) = &def_classe.classe_pai {
-                    if pai == classe_pai {
+                    let pai_nome = match pai {
+                        Tipo::Classe(n) => n,
+                        Tipo::Aplicado { nome, .. } => nome,
+                        _ => "",
+                    };
+                    if pai_nome == classe_pai {
                         return true;
                     }
-                    atual = Some(pai.clone());
+                    atual = Some(pai_nome.to_string());
                 } else {
                     break;
                 }

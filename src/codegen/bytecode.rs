@@ -182,14 +182,18 @@ impl<'a> BytecodeGenerator<'a> {
             // Reconhece e processa a declaração de classe
             ast::Declaracao::DeclaracaoClasse(classe_def) => {
                 let full_class_name = self.qual(&classe_def.nome);
-                let parent_class_name =
-                    classe_def
-                        .classe_pai
-                        .as_ref()
-                        .map_or("NULO".to_string(), |p| {
-                            self.type_checker
-                                .resolver_nome_classe(p, &self.namespace_path)
-                        });
+                let parent_class_name = classe_def
+                    .classe_pai
+                    .as_ref()
+                    .map_or("NULO".to_string(), |p| {
+                        let base = match p {
+                            ast::Tipo::Classe(n) => n.as_str(),
+                            ast::Tipo::Aplicado { nome, .. } => nome.as_str(),
+                            _ => "",
+                        };
+                        self.type_checker
+                            .resolver_nome_classe(base, &self.namespace_path)
+                    });
 
                 let mut all_props = self
                     .props_por_classe
@@ -520,9 +524,19 @@ impl<'a> BytecodeGenerator<'a> {
                                 is_prop = true;
                                 break;
                             }
-                            current_class =
-                                class_decl.classe_pai.as_ref().and_then(|parent_name| {
-                                    self.type_checker.classes.get(parent_name).copied()
+                            current_class = class_decl
+                                .classe_pai
+                                .as_ref()
+                                .and_then(|parent_tipo| {
+                                    let base = match parent_tipo {
+                                        ast::Tipo::Classe(n) => n.as_str(),
+                                        ast::Tipo::Aplicado { nome, .. } => nome.as_str(),
+                                        _ => return None,
+                                    };
+                                    let fqn = self
+                                        .type_checker
+                                        .resolver_nome_classe(base, &self.namespace_path);
+                                    self.type_checker.classes.get(&fqn).copied()
                                 });
                         }
                     }
@@ -748,9 +762,19 @@ impl<'a> BytecodeGenerator<'a> {
                                     break; // há variável local; cair para LOAD_VAR nome
                                 }
                             }
-                            current_class =
-                                class_decl.classe_pai.as_ref().and_then(|parent_name| {
-                                    self.type_checker.classes.get(parent_name).copied()
+                            current_class = class_decl
+                                .classe_pai
+                                .as_ref()
+                                .and_then(|parent_tipo| {
+                                    let base = match parent_tipo {
+                                        ast::Tipo::Classe(n) => n.as_str(),
+                                        ast::Tipo::Aplicado { nome, .. } => nome.as_str(),
+                                        _ => return None,
+                                    };
+                                    let fqn = self
+                                        .type_checker
+                                        .resolver_nome_classe(base, &self.namespace_path);
+                                    self.type_checker.classes.get(&fqn).copied()
                                 });
                         }
                     }

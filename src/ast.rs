@@ -138,9 +138,9 @@ pub struct Exportacao {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeclaracaoClasse {
     pub nome: String,
-    pub classe_pai: Option<String>,
-    // Lista de interfaces implementadas (nomes simples ou FQN conforme parser)
-    pub interfaces: Vec<String>,
+    pub classe_pai: Option<Tipo>,
+    // Lista de interfaces implementadas (pode incluir tipos aplicados ex.: I<T>)
+    pub interfaces: Vec<Tipo>,
     // Parâmetros de tipo da classe: classe Nome<T, U>
     pub generic_params: Vec<String>,
     pub modificador: ModificadorAcesso,

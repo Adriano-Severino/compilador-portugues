@@ -39,6 +39,41 @@ impl<'a> VerificadorTipos<'a> {
         }
     }
 
+    // Substitui parâmetros genéricos por tipos concretos em um tipo arbitrário.
+    // Ex.: T -> Texto, Lista<T> -> Lista<Texto>, Funcao<[T], Vazio> -> Funcao<[Texto], Vazio>
+    fn substitute_generics_in_tipo(
+        &self,
+        t: &Tipo,
+        subst: &std::collections::HashMap<String, Tipo>,
+    ) -> Tipo {
+        use Tipo::*;
+        match t {
+            Generico(nome) => subst.get(nome).cloned().unwrap_or_else(|| t.clone()),
+            Classe(nome) => subst.get(nome).cloned().unwrap_or_else(|| t.clone()),
+            Lista(inner) => Lista(Box::new(self.substitute_generics_in_tipo(inner, subst))),
+            Opcional(inner) => Opcional(Box::new(self.substitute_generics_in_tipo(inner, subst))),
+            Aplicado { nome, args } => {
+                let novos_args = args
+                    .iter()
+                    .map(|a| self.substitute_generics_in_tipo(a, subst))
+                    .collect();
+                Aplicado {
+                    nome: nome.clone(),
+                    args: novos_args,
+                }
+            }
+            Funcao(params, ret) => {
+                let novos_params = params
+                    .iter()
+                    .map(|p| self.substitute_generics_in_tipo(p, subst))
+                    .collect();
+                let novo_ret = self.substitute_generics_in_tipo(ret, subst);
+                Funcao(novos_params, Box::new(novo_ret))
+            }
+            _ => t.clone(),
+        }
+    }
+
     // Normaliza tipos para comparação e armazena FQNs quando aplicável.
     // Também valida a aridade de tipos genéricos aplicados (Nome<args...>) e retorna erros coletados.
     fn normalize_tipo_ro(&self, t: &Tipo, namespace_atual: &str) -> (Tipo, Vec<String>) {
@@ -204,13 +239,19 @@ impl<'a> VerificadorTipos<'a> {
             } else if let Some(decl) = self.classes.get(&cls) {
                 let ns = self.get_namespace_from_full_name(&cls);
                 for i in &decl.interfaces {
-                    let fqn = self.resolver_nome_interface(i, &ns);
+                    let nome = match i {
+                        Tipo::Classe(n) => n.as_str(),
+                        Tipo::Aplicado { nome, .. } => nome.as_str(),
+                        _ => "",
+                    };
+                    let fqn = self.resolver_nome_interface(nome, &ns);
                     set.insert(fqn);
                 }
-                current = decl
-                    .classe_pai
-                    .as_ref()
-                    .map(|p| self.resolver_nome_classe(p, &ns));
+                current = decl.classe_pai.as_ref().map(|p| match p {
+                    Tipo::Classe(n) => self.resolver_nome_classe(n, &ns),
+                    Tipo::Aplicado { nome, .. } => self.resolver_nome_classe(nome, &ns),
+                    _ => String::new(),
+                });
             } else {
                 break;
             }
@@ -227,8 +268,13 @@ impl<'a> VerificadorTipos<'a> {
         while let Some(cls_fqn) = current {
             if let Some(decl) = self.classes.get(&cls_fqn) {
                 if let Some(parent_simple) = &decl.classe_pai {
+                    let parent_name = match parent_simple {
+                        Tipo::Classe(n) => n.as_str(),
+                        Tipo::Aplicado { nome, .. } => nome.as_str(),
+                        _ => "",
+                    };
                     let parent_fqn = self.resolver_nome_classe(
-                        parent_simple,
+                        parent_name,
                         &self.get_namespace_from_full_name(&cls_fqn),
                     );
                     if parent_fqn == base {
@@ -305,7 +351,15 @@ impl<'a> VerificadorTipos<'a> {
                 .cloned()
                 .unwrap_or_default();
             // lista de interfaces implementadas: AST + detectadas na resolução
-            let mut ifaces_lista: Vec<String> = classe.interfaces.clone();
+            let mut ifaces_lista: Vec<String> = classe
+                .interfaces
+                .iter()
+                .map(|t| match t {
+                    Tipo::Classe(n) => n.clone(),
+                    Tipo::Aplicado { nome, .. } => nome.clone(),
+                    _ => String::new(),
+                })
+                .collect();
             if let Some(ci) = self.resolved_classes.get(fqn) {
                 for i in &ci.interfaces {
                     if !ifaces_lista.contains(i) {
@@ -317,17 +371,52 @@ impl<'a> VerificadorTipos<'a> {
             for iface_nome in &ifaces_lista {
                 let iface_fqn = self.resolver_nome_interface(iface_nome, &ns_atual);
                 if let Some(iface) = self.interfaces.get(&iface_fqn) {
+                    // Se a classe implementa a interface como tipo aplicado (ex.: I<TTexto>),
+                    // criamos um mapa de substituição dos parâmetros genéricos da interface.
+                    let mut subst_map: std::collections::HashMap<String, Tipo> =
+                        std::collections::HashMap::new();
+                    if let Some(iface_aplicada) = classe.interfaces.iter().find(|t| match t {
+                        Tipo::Aplicado { nome, .. } => {
+                            self.resolver_nome_interface(nome, &ns_atual) == iface_fqn
+                        }
+                        Tipo::Classe(n) => self.resolver_nome_interface(n, &ns_atual) == iface_fqn,
+                        _ => false,
+                    }) {
+                        if let Tipo::Aplicado { nome: _, args } = iface_aplicada {
+                            if !iface.generic_params.is_empty()
+                                && iface.generic_params.len() == args.len()
+                            {
+                                for (g, a) in iface.generic_params.iter().zip(args.iter()) {
+                                    let (a_norm, mut e) = self.normalize_tipo_ro(a, &ns_atual);
+                                    self.erros.append(&mut e);
+                                    subst_map.insert(g.clone(), a_norm);
+                                }
+                            }
+                        }
+                    }
                     for sig in &iface.metodos {
-                        let (ret_i, mut errs1) = self.normalize_tipo_ro(
+                        let (ret_i_norm, mut errs1) = self.normalize_tipo_ro(
                             &sig.tipo_retorno.clone().or(Some(Tipo::Vazio)).unwrap(),
                             &ns_atual,
                         );
                         self.erros.append(&mut errs1);
                         let mut params_i: Vec<Tipo> = Vec::new();
                         for p in sig.parametros.iter() {
-                            let (tp, mut e) = self.normalize_tipo_ro(&p.tipo, &ns_atual);
+                            let (tp_norm, mut e) = self.normalize_tipo_ro(&p.tipo, &ns_atual);
                             self.erros.append(&mut e);
-                            params_i.push(tp);
+                            params_i.push(tp_norm);
+                        }
+                        // Aplica substituição de genéricos nas assinaturas da interface, se houver
+                        let ret_i = if subst_map.is_empty() {
+                            ret_i_norm.clone()
+                        } else {
+                            self.substitute_generics_in_tipo(&ret_i_norm, &subst_map)
+                        };
+                        if !subst_map.is_empty() {
+                            params_i = params_i
+                                .into_iter()
+                                .map(|t| self.substitute_generics_in_tipo(&t, &subst_map))
+                                .collect();
                         }
 
                         if let Some(m) = resolved_methods.get(&sig.nome) {
@@ -409,8 +498,14 @@ impl<'a> VerificadorTipos<'a> {
                 if let Some(found) = parent_decl.metodos.iter().find(|m| m.nome == nome) {
                     return Some(found);
                 }
-                parent_name = parent_decl.classe_pai.clone().map(|simple| {
-                    self.resolver_nome_classe(&simple, &self.get_namespace_from_full_name(&pn))
+                parent_name = parent_decl.classe_pai.clone().map(|p| match p {
+                    Tipo::Classe(ref n) => {
+                        self.resolver_nome_classe(n, &self.get_namespace_from_full_name(&pn))
+                    }
+                    Tipo::Aplicado { ref nome, .. } => {
+                        self.resolver_nome_classe(nome, &self.get_namespace_from_full_name(&pn))
+                    }
+                    _ => String::new(),
                 });
             } else {
                 break;
@@ -458,11 +553,32 @@ impl<'a> VerificadorTipos<'a> {
             .collect();
 
         // Vamos calcular dinamicamente o pai e as interfaces finais, pois o primeiro item após ':' pode ser uma interface
-        let mut interfaces_final: Vec<String> = class_decl.interfaces.clone();
+        let mut interfaces_final: Vec<String> = class_decl
+            .interfaces
+            .iter()
+            .map(|t| match t {
+                ast::Tipo::Classe(n) => n.clone(),
+                ast::Tipo::Aplicado { nome, .. } => nome.clone(),
+                _ => {
+                    self.get_declaracao_nome(&ast::Declaracao::DeclaracaoClasse(class_decl.clone()))
+                }
+            })
+            .collect();
         let mut parent_effective: Option<String> = None;
         if let Some(parent_name_simple) = &class_decl.classe_pai {
+            let parent_name_simple = match parent_name_simple {
+                ast::Tipo::Classe(n) => n.clone(),
+                ast::Tipo::Aplicado { nome, .. } => nome.clone(),
+                other => {
+                    self.erros.push(format!(
+                        "Tipo inválido no cabeçalho da classe como base: {:?}",
+                        other
+                    ));
+                    return;
+                }
+            };
             let parent_name = self.resolver_nome_classe(
-                parent_name_simple,
+                &parent_name_simple,
                 &self.get_namespace_from_full_name(class_name),
             );
 
@@ -490,7 +606,7 @@ impl<'a> VerificadorTipos<'a> {
             } else {
                 // Não é classe — pode ser uma interface listada após ':' (estilo C#)
                 let iface_fqn = self.resolver_nome_interface(
-                    parent_name_simple,
+                    &parent_name_simple,
                     &self.get_namespace_from_full_name(class_name),
                 );
                 if self.interfaces.contains_key(&iface_fqn) {
@@ -770,7 +886,12 @@ impl<'a> VerificadorTipos<'a> {
                     let mut metodo_vars = escopo_vars.clone();
                     // Validação de override/virtual
                     if let Some(parent_simple) = &classe.classe_pai {
-                        let parent_fqn = self.resolver_nome_classe(parent_simple, namespace_atual);
+                        let base = match parent_simple {
+                            Tipo::Classe(n) => n.as_str(),
+                            Tipo::Aplicado { nome, .. } => nome.as_str(),
+                            _ => "",
+                        };
+                        let parent_fqn = self.resolver_nome_classe(base, namespace_atual);
                         if metodo.eh_override {
                             if let Some(base_m) = self
                                 .encontrar_metodo_na_base(Some(parent_fqn.clone()), &metodo.nome)
