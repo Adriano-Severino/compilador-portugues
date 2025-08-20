@@ -1,0 +1,28 @@
+// Teste mínimo dos recursos de genéricos atualmente disponíveis
+// Observação: neste estágio, o parser aceita tipos aplicados (Nome<T>)
+// em posições de tipo (variáveis, parâmetros, retornos), mas NÃO em:
+// - Cabeçalhos de classe/interface após ':' (restritos a nomes simples)
+// - Expressão de criação: "novo Nome<...>" ainda não suportado
+
+interface IRepositorio<T> {
+    publico vazio Salvar();
+}
+
+classe Caixa<T> {
+    publico vazio Mostrar() {
+        imprima("Caixa<T> funcionando");
+    }
+}
+
+// Tipos aplicados em assinaturas de funções (suportado pelo parser atual)
+publico função usar_caixa(Caixa<inteiro> c) {
+    imprima("assinatura com Caixa<inteiro>");
+}
+
+publico função usar_repo(IRepositorio<texto> repo) {
+    imprima("assinatura com IRepositorio<texto>");
+}
+
+publico função Principal() {
+    imprima("Teste de genéricos: assinaturas OK");
+}

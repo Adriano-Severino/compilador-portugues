@@ -20,6 +20,11 @@ pub struct LlvmGenerator<'a> {
     vtables: HashMap<String, Vec<(String, String)>>,
     // Índices rápidos: FQN -> (metodo -> índice)
     vtable_index: HashMap<String, HashMap<String, usize>>,
+    // Instanciações genéricas coletadas no programa
+    // classe_fqn -> lista de args (cada args é uma lista de Tipos já normalizados)
+    applied_class_insts: HashMap<String, Vec<Vec<ast::Tipo>>>,
+    // interface_fqn -> lista de args
+    applied_iface_insts: HashMap<String, Vec<Vec<ast::Tipo>>>,
 }
 
 impl<'a> LlvmGenerator<'a> {
@@ -41,16 +46,22 @@ impl<'a> LlvmGenerator<'a> {
             classe_atual: None,
             vtables: HashMap::new(),
             vtable_index: HashMap::new(),
+            applied_class_insts: HashMap::new(),
+            applied_iface_insts: HashMap::new(),
         }
     }
 
     pub fn generate(&mut self) -> String {
+        // Coleta instâncias genéricas (Aplicado) usadas no programa, antes de gerar tipos
+        self.collect_applied_instantiations();
         self.prepare_header();
         // Constrói vtables antes de definir structs
         self.build_all_vtables();
         self.define_all_structs();
         // Define tipos para interfaces como structs mínimos para uso em assinaturas
         self.define_all_interface_structs();
+        // Define tipos especializados para interfaces aplicadas (I<T> -> %class.I$T)
+        self.define_all_applied_interface_structs();
         self.define_all_vtable_globals();
         self.define_static_globals();
 
@@ -103,6 +114,192 @@ impl<'a> LlvmGenerator<'a> {
         format!("{}{}", self.header, self.body)
     }
 
+    // Nome canônico e estável para tipos em mangling
+    fn mangle_tipo_simple(&self, t: &ast::Tipo) -> String {
+        match t {
+            ast::Tipo::Booleano => "bool".to_string(),
+            ast::Tipo::Inteiro => "int".to_string(),
+            ast::Tipo::Flutuante => "f32".to_string(),
+            ast::Tipo::Duplo => "f64".to_string(),
+            ast::Tipo::Decimal => "dec".to_string(),
+            ast::Tipo::Texto => "texto".to_string(),
+            ast::Tipo::Vazio => "vazio".to_string(),
+            ast::Tipo::Enum(n) => n.replace('.', "_"),
+            ast::Tipo::Classe(n) => n.replace('.', "_"),
+            ast::Tipo::Aplicado { nome, args } => {
+                let base = nome.replace('.', "_");
+                let parts: Vec<String> = args.iter().map(|a| self.mangle_tipo_simple(a)).collect();
+                format!("{0}${1}", base, parts.join("_"))
+            }
+            ast::Tipo::Lista(elem) => format!("lista${}", self.mangle_tipo_simple(elem)),
+            ast::Tipo::Opcional(inner) => format!("opt${}", self.mangle_tipo_simple(inner)),
+            ast::Tipo::Funcao(params, ret) => {
+                let mut v: Vec<String> =
+                    params.iter().map(|p| self.mangle_tipo_simple(p)).collect();
+                v.push(self.mangle_tipo_simple(ret));
+                format!("fn${}", v.join("_"))
+            }
+            _ => "t".to_string(),
+        }
+    }
+
+    fn mangle_aplicado_name(&self, base_fqn: &str, args: &[ast::Tipo]) -> String {
+        let mangled_args: Vec<String> = args.iter().map(|a| self.mangle_tipo_simple(a)).collect();
+        if mangled_args.is_empty() {
+            base_fqn.to_string()
+        } else {
+            format!("{0}${1}", base_fqn, mangled_args.join("_"))
+        }
+    }
+
+    // Substituição local de genéricos por tipos concretos (para layout especializado)
+    fn subst_generics_local(&self, t: &ast::Tipo, subst: &HashMap<String, ast::Tipo>) -> ast::Tipo {
+        use ast::Tipo::*;
+        match t {
+            Generico(n) => subst.get(n).cloned().unwrap_or_else(|| t.clone()),
+            Classe(n) => subst.get(n).cloned().unwrap_or_else(|| t.clone()),
+            Lista(inner) => Lista(Box::new(self.subst_generics_local(inner, subst))),
+            Opcional(inner) => Opcional(Box::new(self.subst_generics_local(inner, subst))),
+            Aplicado { nome, args } => {
+                let novos: Vec<ast::Tipo> = args
+                    .iter()
+                    .map(|a| self.subst_generics_local(a, subst))
+                    .collect();
+                Aplicado {
+                    nome: nome.clone(),
+                    args: novos,
+                }
+            }
+            Funcao(params, ret) => {
+                let p2: Vec<ast::Tipo> = params
+                    .iter()
+                    .map(|p| self.subst_generics_local(p, subst))
+                    .collect();
+                let r2 = self.subst_generics_local(ret, subst);
+                Funcao(p2, Box::new(r2))
+            }
+            _ => t.clone(),
+        }
+    }
+
+    fn collect_applied_instantiations(&mut self) {
+        // Varre AST para encontrar todos os Tipos::Aplicado usados e registra em maps
+        fn collect_in_tipo<'a>(this: &mut LlvmGenerator<'a>, tipo: &ast::Tipo, ns: &str) {
+            if let ast::Tipo::Aplicado { nome, args } = tipo {
+                // Tenta resolver como classe ou interface
+                let fqn_cls = this.type_checker.resolver_nome_classe(nome, ns);
+                let fqn_iface = this.type_checker.resolver_nome_interface(nome, ns);
+                let mut norm_args: Vec<ast::Tipo> = Vec::new();
+                for a in args {
+                    // resolve recursivamente nomes dentro de args (mínimo)
+                    norm_args.push(this.resolve_type(a, ns));
+                }
+                if this.type_checker.classes.contains_key(&fqn_cls) {
+                    this.applied_class_insts
+                        .entry(fqn_cls.clone())
+                        .or_default()
+                        .push(norm_args);
+                } else if this.type_checker.interfaces.contains_key(&fqn_iface) {
+                    this.applied_iface_insts
+                        .entry(fqn_iface.clone())
+                        .or_default()
+                        .push(norm_args);
+                }
+            }
+            // Descer nos filhos
+            match tipo {
+                ast::Tipo::Lista(inner) | ast::Tipo::Opcional(inner) => {
+                    collect_in_tipo(this, inner, ns)
+                }
+                ast::Tipo::Aplicado { args, .. } => {
+                    for a in args {
+                        collect_in_tipo(this, a, ns)
+                    }
+                }
+                ast::Tipo::Funcao(params, ret) => {
+                    for p in params {
+                        collect_in_tipo(this, p, ns);
+                    }
+                    collect_in_tipo(this, ret, ns);
+                }
+                _ => {}
+            }
+        }
+
+        fn collect_in_decl<'a>(this: &mut LlvmGenerator<'a>, decl: &'a ast::Declaracao, ns: &str) {
+            match decl {
+                ast::Declaracao::DeclaracaoClasse(c) => {
+                    if let Some(tp) = &c.classe_pai {
+                        collect_in_tipo(this, tp, ns);
+                    }
+                    for i in &c.interfaces {
+                        collect_in_tipo(this, i, ns);
+                    }
+                    for f in &c.campos {
+                        collect_in_tipo(this, &f.tipo, ns);
+                    }
+                    for p in &c.propriedades {
+                        collect_in_tipo(this, &p.tipo, ns);
+                    }
+                    for m in &c.metodos {
+                        if let Some(ret) = &m.tipo_retorno {
+                            collect_in_tipo(this, ret, ns);
+                        }
+                        for p in &m.parametros {
+                            collect_in_tipo(this, &p.tipo, ns);
+                        }
+                    }
+                }
+                ast::Declaracao::DeclaracaoInterface(i) => {
+                    for m in &i.metodos {
+                        if let Some(ret) = &m.tipo_retorno {
+                            collect_in_tipo(this, ret, ns);
+                        }
+                        for p in &m.parametros {
+                            collect_in_tipo(this, &p.tipo, ns);
+                        }
+                    }
+                }
+                ast::Declaracao::DeclaracaoFuncao(f) => {
+                    if let Some(ret) = &f.tipo_retorno {
+                        collect_in_tipo(this, ret, ns);
+                    }
+                    for p in &f.parametros {
+                        collect_in_tipo(this, &p.tipo, ns);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // raiz
+        for d in &self.programa.declaracoes {
+            collect_in_decl(self, d, "");
+        }
+        // namespaces
+        for ns in &self.programa.namespaces {
+            for d in &ns.declaracoes {
+                collect_in_decl(self, d, &ns.nome);
+            }
+        }
+
+        // Deduplica args iguais
+        fn dedup(map: &mut HashMap<String, Vec<Vec<ast::Tipo>>>) {
+            for (_k, v) in map.iter_mut() {
+                let mut uniq: Vec<Vec<ast::Tipo>> = Vec::new();
+                'outer: for args in v.drain(..) {
+                    if uniq.iter().any(|e| e == &args) {
+                        continue 'outer;
+                    }
+                    uniq.push(args);
+                }
+                *v = uniq;
+            }
+        }
+        dedup(&mut self.applied_class_insts);
+        dedup(&mut self.applied_iface_insts);
+    }
+
     fn define_all_interface_structs(&mut self) {
         // Cria um tipo LLVM identificado para cada interface conhecida para que possamos
         // referenciá-lo em parâmetros/retornos (%class.Interface*). Usa um layout mínimo
@@ -114,6 +311,22 @@ impl<'a> LlvmGenerator<'a> {
                 continue;
             }
             let sanitized = iface_fqn.replace('.', "_");
+            let def = format!("%class.{0} = type {{ i8** }}\n", sanitized);
+            self.header.push_str(&def);
+        }
+    }
+
+    fn define_all_applied_interface_structs(&mut self) {
+        // snapshot para evitar empréstimos conflitantes
+        let mut items: Vec<(String, Vec<ast::Tipo>)> = Vec::new();
+        for (iface_fqn, insts) in &self.applied_iface_insts {
+            for args in insts {
+                items.push((iface_fqn.clone(), args.clone()));
+            }
+        }
+        for (iface_fqn, args) in items {
+            let mangled = self.mangle_aplicado_name(&iface_fqn, &args);
+            let sanitized = mangled.replace('.', "_");
             let def = format!("%class.{0} = type {{ i8** }}\n", sanitized);
             self.header.push_str(&def);
         }
@@ -149,6 +362,18 @@ impl<'a> LlvmGenerator<'a> {
         for fqn in fqns {
             self.define_struct(fqn.as_str());
         }
+
+        // Define structs especializados para classes aplicadas (monomorfização superficial)
+        // snapshot para evitar empréstimo duplo
+        let mut items: Vec<(String, Vec<ast::Tipo>)> = Vec::new();
+        for (base_fqn, insts) in &self.applied_class_insts {
+            for args in insts {
+                items.push((base_fqn.clone(), args.clone()));
+            }
+        }
+        for (base_fqn, args) in items {
+            self.define_applied_struct(&base_fqn, &args);
+        }
     }
 
     fn define_struct(&mut self, fqn: &str) {
@@ -171,6 +396,45 @@ impl<'a> LlvmGenerator<'a> {
         let struct_body = field_types_llvm.join(", ");
         let sanitized_fqn = fqn.replace('.', "_");
         let struct_def = format!("%class.{0} = type {{ {1} }}\n", sanitized_fqn, struct_body);
+        self.header.push_str(&struct_def);
+    }
+
+    fn define_applied_struct(&mut self, base_fqn: &str, args: &Vec<ast::Tipo>) {
+        // Monta substituição: parâmetros genéricos da classe -> args
+        let class_decl = match self.type_checker.classes.get(base_fqn) {
+            Some(c) => *c,
+            None => return,
+        };
+        if class_decl.generic_params.is_empty() {
+            return;
+        }
+        if class_decl.generic_params.len() != args.len() {
+            return;
+        }
+
+        let mut subst: HashMap<String, ast::Tipo> = HashMap::new();
+        for (g, a) in class_decl.generic_params.iter().zip(args.iter()) {
+            subst.insert(g.clone(), a.clone());
+        }
+
+        // Começa sempre com vptr como primeiro campo
+        let mut field_types_llvm = vec!["i8**".to_string()];
+        // Herdar campos da classe base resolvida (já expandida por herança)
+        if let Some(resolved_info) = self.resolved_classes.get(base_fqn) {
+            let mut all_fields: Vec<&ast::Tipo> =
+                resolved_info.fields.iter().map(|f| &f.tipo).collect();
+            all_fields.extend(resolved_info.properties.iter().map(|p| &p.tipo));
+
+            for t in all_fields {
+                let t2 = self.subst_generics_local(t, &subst);
+                field_types_llvm.push(self.map_type_to_llvm_storage(&t2));
+            }
+        }
+
+        let mangled = self.mangle_aplicado_name(base_fqn, args);
+        let struct_body = field_types_llvm.join(", ");
+        let sanitized = mangled.replace('.', "_");
+        let struct_def = format!("%class.{0} = type {{ {1} }}\n", sanitized, struct_body);
         self.header.push_str(&struct_def);
     }
 
@@ -2233,9 +2497,31 @@ impl<'a> LlvmGenerator<'a> {
                 // Mantém original caso não resolva
                 tipo.clone()
             }
-            ast::Tipo::Aplicado { nome, args: _ } => {
-                let fqn_class = self.type_checker.resolver_nome_classe(nome, namespace);
-                ast::Tipo::Classe(fqn_class)
+            ast::Tipo::Aplicado { nome, args } => {
+                // Pode ser classe ou interface aplicada
+                let fqn_cls = self.type_checker.resolver_nome_classe(nome, namespace);
+                let fqn_iface = self.type_checker.resolver_nome_interface(nome, namespace);
+                let mut norm_args: Vec<ast::Tipo> = Vec::new();
+                for a in args {
+                    norm_args.push(self.resolve_type(a, namespace));
+                }
+                if self.type_checker.classes.contains_key(&fqn_cls) {
+                    let mangled = self.mangle_aplicado_name(&fqn_cls, &norm_args);
+                    ast::Tipo::Aplicado {
+                        nome: mangled,
+                        args: vec![],
+                    }
+                } else if self.type_checker.interfaces.contains_key(&fqn_iface) {
+                    let mangled = self.mangle_aplicado_name(&fqn_iface, &norm_args);
+                    ast::Tipo::Aplicado {
+                        nome: mangled,
+                        args: vec![],
+                    }
+                } else {
+                    // fallback para classe
+                    let fqn_class = self.type_checker.resolver_nome_classe(nome, namespace);
+                    ast::Tipo::Classe(fqn_class)
+                }
             }
             other => other.clone(),
         }
@@ -2272,6 +2558,7 @@ impl<'a> LlvmGenerator<'a> {
                 format!("%class.{0}*", sanitized_name)
             }
             ast::Tipo::Aplicado { nome, .. } => {
+                // 'nome' aqui já deve estar mangled via resolve_type
                 let sanitized_name = nome.replace('.', "_");
                 format!("%class.{0}*", sanitized_name)
             }

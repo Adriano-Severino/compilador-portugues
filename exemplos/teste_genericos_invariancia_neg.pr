@@ -1,0 +1,11 @@
+espaco TesteGenericosInvarianciaNeg {
+    interface ICoisa<T> { publico vazio f(T t); }
+    classe C1 : ICoisa<inteiro> { publico vazio f(inteiro t) { } }
+
+    publico função vazio Principal() {
+        var a: ICoisa<inteiro> = novo C1();
+        // Invariância: não pode atribuir ICoisa<inteiro> para ICoisa<texto>
+        var b: ICoisa<texto>;
+        b = a; // deve falhar no verificador
+    }
+}

@@ -183,10 +183,10 @@ impl<'a> VerificadorTipos<'a> {
             return true;
         }
         match (destino, origem) {
-            // Aplicado é tratado como Classe do mesmo nome por enquanto
-            (Aplicado { nome: dn, .. }, Aplicado { nome: on, .. }) if dn == on => true,
-            (Classe(dn), Aplicado { nome: on, .. }) if dn == on => true,
-            (Aplicado { nome: dn, .. }, Classe(on)) if dn == on => true,
+            // Genéricos aplicados são invariantes: requerem mesmo nome e mesmos argumentos (igualdade estrutural)
+            (Aplicado { nome: dn, args: da }, Aplicado { nome: on, args: oa }) if dn == on => {
+                da == oa
+            }
             // Subtipagem de classes: permite atribuir derivada em variável do tipo base
             (Classe(dest), Classe(orig)) => {
                 if dest == orig {
@@ -375,13 +375,40 @@ impl<'a> VerificadorTipos<'a> {
                     // criamos um mapa de substituição dos parâmetros genéricos da interface.
                     let mut subst_map: std::collections::HashMap<String, Tipo> =
                         std::collections::HashMap::new();
-                    if let Some(iface_aplicada) = classe.interfaces.iter().find(|t| match t {
-                        Tipo::Aplicado { nome, .. } => {
-                            self.resolver_nome_interface(nome, &ns_atual) == iface_fqn
-                        }
-                        Tipo::Classe(n) => self.resolver_nome_interface(n, &ns_atual) == iface_fqn,
-                        _ => false,
-                    }) {
+                    // Procura a interface aplicada tanto na lista de interfaces quanto no campo classe_pai
+                    let iface_aplicada_opt: Option<&Tipo> = classe
+                        .interfaces
+                        .iter()
+                        .find(|t| match t {
+                            Tipo::Aplicado { nome, .. } => {
+                                self.resolver_nome_interface(nome, &ns_atual) == iface_fqn
+                            }
+                            Tipo::Classe(n) => {
+                                self.resolver_nome_interface(n, &ns_atual) == iface_fqn
+                            }
+                            _ => false,
+                        })
+                        .or_else(|| {
+                            classe.classe_pai.as_ref().and_then(|p| match p {
+                                Tipo::Aplicado { nome, .. } => {
+                                    if self.resolver_nome_interface(nome, &ns_atual) == iface_fqn {
+                                        Some(p)
+                                    } else {
+                                        None
+                                    }
+                                }
+                                Tipo::Classe(n) => {
+                                    if self.resolver_nome_interface(n, &ns_atual) == iface_fqn {
+                                        Some(p)
+                                    } else {
+                                        None
+                                    }
+                                }
+                                _ => None,
+                            })
+                        });
+
+                    if let Some(iface_aplicada) = iface_aplicada_opt {
                         if let Tipo::Aplicado { nome: _, args } = iface_aplicada {
                             if !iface.generic_params.is_empty()
                                 && iface.generic_params.len() == args.len()

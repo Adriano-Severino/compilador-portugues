@@ -126,4 +126,19 @@ fn test_negative_cases_should_fail() {
         "expected failure for teste_enum_neg_membro_invalido.pr, got success"
     );
     assert!(e2.contains("não existe no enum") || e2.to_lowercase().contains("erro"));
+
+    // aridade incorreta em generics
+    let (code3, _o3, _e3) = run_compiler(&["teste_genericos_arity_neg.pr", "--target=bytecode"]);
+    assert_ne!(
+        code3, 0,
+        "expected failure for teste_genericos_arity_neg.pr, got success"
+    );
+
+    // invariância de tipos aplicados
+    let (code4, _o4, _e4) =
+        run_compiler(&["teste_genericos_invariancia_neg.pr", "--target=bytecode"]);
+    assert_ne!(
+        code4, 0,
+        "expected failure for teste_genericos_invariancia_neg.pr, got success"
+    );
 }

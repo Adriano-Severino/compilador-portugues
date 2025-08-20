@@ -1,0 +1,17 @@
+espaco TesteGenericosRetorno {
+    interface IBox<T> {
+        publico T pegar();
+    }
+
+    classe CaixaTexto : IBox<texto> {
+        publico texto pegar() {
+            retorne "x";
+        }
+    }
+
+    publico função vazio Principal() {
+        var c = novo CaixaTexto();
+        var s = c.pegar();
+        EscreverLinha(s);
+    }
+}

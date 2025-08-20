@@ -1,0 +1,19 @@
+espaco TesteGenericos {
+    interface IRepositorio<T> {
+    publico vazio adicionar(T item);
+    }
+
+    classe Base<T> {
+    }
+
+    classe RepoTexto : Base<texto>, IRepositorio<texto> {
+    publico vazio adicionar(texto item) {
+            EscreverLinha(item);
+        }
+    }
+
+    publico função vazio Principal() {
+        var repo = novo RepoTexto();
+        repo.adicionar("ok");
+    }
+}

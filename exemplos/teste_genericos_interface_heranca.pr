@@ -1,0 +1,12 @@
+espaco TesteGenericosHeranca {
+    interface IRepo<T> { publico vazio add(T x); }
+    classe Base<T> { }
+    classe Deriv : Base<texto>, IRepo<texto> {
+        publico vazio add(texto x) { EscreverLinha(x); }
+    }
+
+    publico função vazio Principal() {
+        var d = novo Deriv();
+        d.add("her");
+    }
+}

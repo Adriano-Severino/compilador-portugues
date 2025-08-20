@@ -1,0 +1,10 @@
+espaco TesteGenericosAridadeNeg {
+    interface IPar<T, U> { publico vazio x(T a, U b); }
+    classe Ok : IPar<inteiro, inteiro> { publico vazio x(inteiro a, inteiro b) { } }
+
+    // Uso incorreto de aridade
+    publico função vazio Principal() {
+        var i: IPar<inteiro>;
+        EscreverLinha("nao deve compilar");
+    }
+}

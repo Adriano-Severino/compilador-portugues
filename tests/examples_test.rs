@@ -126,7 +126,12 @@ fn list_exemplos() -> Vec<String> {
             if path.extension().and_then(|s| s.to_str()) == Some("pr") {
                 // guarda caminho relativo a partir do root
                 if let Ok(rel) = path.strip_prefix(&root) {
-                    v.push(rel.to_string_lossy().replace('\\', "/"));
+                    let rel_str = rel.to_string_lossy().replace('\\', "/");
+                    // pula casos negativos
+                    if rel_str.contains("/_neg.pr") || rel_str.ends_with("_neg.pr") {
+                        continue;
+                    }
+                    v.push(rel_str);
                 }
             }
         }
