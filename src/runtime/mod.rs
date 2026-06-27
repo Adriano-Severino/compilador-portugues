@@ -10,14 +10,14 @@ use crate::ast::*;
 pub fn executar_programa_otimizado(programa: &Programa) -> Result<(), String> {
     let mut contexto = ContextoExecucao::new();
 
-    // ✅ CORREÇÃO: Registrar classes do nível raiz
+    //Registrar classes do nível raiz
     for decl in &programa.declaracoes {
         if let Declaracao::DeclaracaoClasse(classe) = decl {
             contexto.registrar_classe_compilada(classe)?;
         }
     }
 
-    // ✅ CORREÇÃO: Também registrar classes dentro de namespaces
+    //Também registrar classes dentro de namespaces
     for namespace in &programa.namespaces {
         for decl in &namespace.declaracoes {
             if let Declaracao::DeclaracaoClasse(classe) = decl {

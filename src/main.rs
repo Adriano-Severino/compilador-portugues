@@ -75,32 +75,39 @@ enum TargetCompilacao {
     Bytecode,
 }
 
-// ✅ NOVO: Função para exibir a ajuda
+//Função para exibir a ajuda
 fn exibir_ajuda() {
-    println!("Compilador da Linguagem em Português (v0.1.0)");
-    println!("=============================================\n");
-    println!("Uso: compilador <arquivo.pr> [OPÇÃO]");
-    println!("\nOPÇÕES:");
-    println!("  --target=<alvo>    Define o formato de saída da compilação.");
-    println!("  --help             Exibe esta mensagem de ajuda.\n");
-    println!("ALVOS DISPONÍVEIS:");
-    println!("  llvm-ir            Gera código intermediário LLVM (.ll), otimizado para compilação nativa com Clang.");
-    println!("  cil-bytecode       Gera código CIL (.il) para a plataforma .NET.");
-    println!("  console            Cria um projeto de console .NET completo, pronto para ser executado com 'dotnet run'.");
-    println!("  bytecode           Gera um arquivo de bytecode customizado (.pbc) para ser executado pelo interpretador.");
-    println!(
-        "  universal          Executa a compilação para todos os alvos disponíveis (padrão).\n"
+    print!(
+        "Compilador da Linguagem em Português (v0.1.0)
+=============================================
+
+Uso: compilador <arquivo.pr> [OPÇÃO]
+
+OPÇÕES:
+  --target=<alvo>    Define o formato de saída da compilação.
+  --help             Exibe esta mensagem de ajuda.
+
+ALVOS DISPONÍVEIS:
+  llvm-ir            Gera código intermediário LLVM (.ll), otimizado para compilação nativa com Clang.
+  cil-bytecode       Gera código CIL (.il) para a plataforma .NET.
+  console            Cria um projeto de console .NET completo, pronto para ser executado com 'dotnet run'.
+  bytecode           Gera um arquivo de bytecode customizado (.pbc) para ser executado pelo interpretador.
+  universal          Executa a compilação para todos os alvos disponíveis (padrão).
+
+EXEMPLOS DE USO:
+  # Compilar para LLVM IR e gerar um executável nativo
+  cargo run --bin compilador -- teste.pr --target=llvm-ir
+  clang teste.ll -o teste_nativo
+
+  # Criar e executar um projeto de console .NET
+  cargo run --bin compilador -- teste.pr --target=console
+  cd teste && dotnet run
+
+  # Gerar bytecode e executá-lo com o interpretador
+  cargo run --bin compilador -- teste.pr --target=bytecode
+  cargo run --bin interpretador -- teste.pbc
+"
     );
-    println!("EXEMPLOS DE USO:");
-    println!("  # Compilar para LLVM IR e gerar um executável nativo");
-    println!("  cargo run --bin compilador -- teste.pr --target=llvm-ir");
-    println!("  clang teste.ll -o teste_nativo\n");
-    println!("  # Criar e executar um projeto de console .NET");
-    println!("  cargo run --bin compilador -- teste.pr --target=console");
-    println!("  cd teste && dotnet run\n");
-    println!("  # Gerar bytecode e executá-lo com o interpretador");
-    println!("  cargo run --bin compilador -- teste.pr --target=bytecode");
-    println!("  cargo run --bin interpretador -- teste.pbc");
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -24,7 +24,7 @@ pub struct InfoOwnership {
     pub escopo_criacao: usize,
     pub ultimo_uso: Option<usize>,
     pub pode_ser_movido: bool,
-    pub eh_parametro_este: bool, // ✅ NOVO: Marcar se é contexto 'este'
+    pub eh_parametro_este: bool, //Marcar se é contexto 'este'
 }
 
 #[derive(Debug, Clone)]
@@ -44,8 +44,8 @@ pub struct AnalisadorOwnership {
     instrucao_atual: usize,
     erros: Vec<String>,
     warnings: Vec<String>,
-    classes: HashMap<String, DeclaracaoClasse>, // ✅ NOVO: Armazenar classes para herança
-    contexto_metodo_atual: Option<String>,      // ✅ NOVO: Rastrear método atual
+    classes: HashMap<String, DeclaracaoClasse>, //   Armazenar classes para herança
+    contexto_metodo_atual: Option<String>,      //   Rastrear método atual
 }
 
 impl AnalisadorOwnership {
@@ -56,18 +56,18 @@ impl AnalisadorOwnership {
             instrucao_atual: 0,
             erros: Vec::new(),
             warnings: Vec::new(),
-            classes: HashMap::new(),     // ✅ NOVO
-            contexto_metodo_atual: None, // ✅ NOVO
+            classes: HashMap::new(),    
+            contexto_metodo_atual: None, 
         }
     }
 
-    // ✅ NOVO: Registrar classes para análise de herança
+    //   Registrar classes para análise de herança
     pub fn registrar_classe(&mut self, classe: DeclaracaoClasse) {
         self.classes.insert(classe.nome.clone(), classe);
     }
 
     pub fn analisar_programa(&mut self, programa: &Programa) -> Result<Vec<String>, Vec<String>> {
-        // ✅ NOVO: Primeiro registrar todas as classes
+        //   Primeiro registrar todas as classes
         for declaracao in &programa.declaracoes {
             if let Declaracao::DeclaracaoClasse(classe) = declaracao {
                 self.registrar_classe(classe.clone());
@@ -237,11 +237,11 @@ impl AnalisadorOwnership {
 
             Comando::ChamarMetodo(objeto_expr, metodo, argumentos) => {
                 if let Some(objeto_nome) = get_expr_name(objeto_expr) {
-                    // ✅ NOVO: Análise especial para métodos redefiníveis
+                    //Análise especial para métodos redefiníveis
                     if let Some(info) = self.variaveis.get_mut(&objeto_nome) {
                         info.ultimo_uso = Some(self.instrucao_atual);
 
-                        // ✅ NOVO: Verificar se método existe na hierarquia
+                        //Verificar se método existe na hierarquia
                         if let Some(classe_obj) = self.obter_classe_objeto(objeto_expr) {
                             if !self.metodo_existe_na_hierarquia(&classe_obj, metodo) {
                                 self.warnings.push(format!(
@@ -250,7 +250,7 @@ impl AnalisadorOwnership {
                                 ));
                             }
 
-                            // ✅ NOVO: Verificar se é método polimórfico
+                            //Verificar se é método polimórfico
                             if self.eh_metodo_polimorfismo(&classe_obj, metodo) {
                                 self.warnings.push(format!(
                                     "Chamada polimórfica detectada: '{}.{}'",
@@ -287,7 +287,7 @@ impl AnalisadorOwnership {
         match expr {
             Expressao::Identificador(nome) => {
                 if nome == "este" {
-                    // ✅ NOVO: Tratamento especial para 'este'
+                    //Tratamento especial para 'este'
                     if self.contexto_metodo_atual.is_none() {
                         self.warnings
                             .push("Uso de 'este' fora de contexto de método".to_string());
@@ -313,7 +313,7 @@ impl AnalisadorOwnership {
             Expressao::AcessoMembro(obj, membro) => {
                 self.analisar_expressao(obj);
 
-                // ✅ NOVO: Verificar acesso a membro herdado
+                //Verificar acesso a membro herdado
                 if let Some(_obj_nome) = get_expr_name(obj) {
                     if let Some(classe_obj) = self.obter_classe_objeto(obj) {
                         if !self.membro_existe_na_hierarquia(&classe_obj, membro) {
@@ -329,7 +329,7 @@ impl AnalisadorOwnership {
             Expressao::ChamadaMetodo(obj, metodo, args) => {
                 self.analisar_expressao(obj);
 
-                // ✅ NOVO: Análise de método polimórfico
+                //Análise de método polimórfico
                 if let Some(obj_nome) = get_expr_name(obj) {
                     if let Some(classe_obj) = self.obter_classe_objeto(obj) {
                         if self.eh_metodo_redefinivel(&classe_obj, metodo) {
@@ -386,7 +386,7 @@ impl AnalisadorOwnership {
             }
 
             Expressao::Este => {
-                // ✅ NOVO: Verificar contexto de 'este'
+                //Verificar contexto de 'este'
                 if self.contexto_metodo_atual.is_none() {
                     self.warnings
                         .push("Uso de 'este' fora de contexto de método".to_string());
@@ -401,7 +401,7 @@ impl AnalisadorOwnership {
         match expr {
             Expressao::Identificador(nome) => {
                 if nome == "este" {
-                    // ✅ NOVO: 'este' nunca é movido
+                    //'este' nunca é movido
                     if self.contexto_metodo_atual.is_none() {
                         self.warnings
                             .push("Uso de 'este' fora de contexto de método".to_string());
@@ -470,10 +470,10 @@ impl AnalisadorOwnership {
     fn analisar_metodo(&mut self, metodo: &MetodoClasse) {
         self.entrar_escopo();
 
-        // ✅ NOVO: Definir contexto do método atual
+        //Definir contexto do método atual
         self.contexto_metodo_atual = Some(metodo.nome.clone());
 
-        // ✅ NOVO: Verificar método redefinível/sobrescreve
+        //Verificar método redefinível/sobrescreve
         if metodo.eh_virtual && metodo.eh_override {
             self.erros.push(format!(
                 "Método '{}' não pode ser redefinível e sobrescreve ao mesmo tempo",
@@ -530,7 +530,7 @@ impl AnalisadorOwnership {
             self.analisar_comando(comando);
         }
 
-        // ✅ NOVO: Limpar contexto do método
+        //Limpar contexto do método
         self.contexto_metodo_atual = None;
 
         self.sair_escopo();
@@ -539,7 +539,7 @@ impl AnalisadorOwnership {
     fn analisar_construtor(&mut self, construtor: &ConstrutorClasse) {
         self.entrar_escopo();
 
-        // ✅ NOVO: Construtor tem contexto implícito de 'este'
+        //Construtor tem contexto implícito de 'este'
         self.contexto_metodo_atual = Some("construtor".to_string());
 
         // Adicionar 'este' implícito no construtor
@@ -550,7 +550,7 @@ impl AnalisadorOwnership {
                 escopo_criacao: self.escopo_atual,
                 ultimo_uso: None,
                 pode_ser_movido: false,
-                eh_parametro_este: true, // ✅ NOVO
+                eh_parametro_este: true,
             },
         );
 
@@ -568,7 +568,7 @@ impl AnalisadorOwnership {
                     escopo_criacao: self.escopo_atual,
                     ultimo_uso: None,
                     pode_ser_movido,
-                    eh_parametro_este: false, // ✅ NOVO
+                    eh_parametro_este: false,
                 },
             );
         }
@@ -577,13 +577,13 @@ impl AnalisadorOwnership {
             self.analisar_comando(comando);
         }
 
-        // ✅ NOVO: Limpar contexto
+        //Limpar contexto
         self.contexto_metodo_atual = None;
 
         self.sair_escopo();
     }
 
-    // ✅ NOVO: Obter classe de um objeto
+    //Obter classe de um objeto
     fn obter_classe_objeto(&self, objeto_expr: &Expressao) -> Option<String> {
         if let Some(objeto_nome) = get_expr_name(objeto_expr) {
             if let Some(_info) = self.variaveis.get(&objeto_nome) {
@@ -599,11 +599,11 @@ impl AnalisadorOwnership {
         }
     }
 
-    // ✅ NOVO: Verificar se método existe na hierarquia
+    //Verificar se método existe na hierarquia
     fn metodo_existe_na_hierarquia(&self, classe: &str, metodo: &str) -> bool {
         let mut classe_atual = Some(classe.to_string());
 
-    while let Some(nome_classe) = classe_atual {
+        while let Some(nome_classe) = classe_atual {
             if let Some(def_classe) = self.classes.get(&nome_classe) {
                 // Verificar se método existe nesta classe
                 for metodo_classe in &def_classe.metodos {
@@ -613,14 +613,11 @@ impl AnalisadorOwnership {
                 }
 
                 // Ir para classe pai
-                classe_atual = def_classe
-                    .classe_pai
-                    .as_ref()
-                    .and_then(|t| match t {
-                        crate::ast::Tipo::Classe(n) => Some(n.clone()),
-                        crate::ast::Tipo::Aplicado { nome, .. } => Some(nome.clone()),
-                        _ => None,
-                    });
+                classe_atual = def_classe.classe_pai.as_ref().and_then(|t| match t {
+                    crate::ast::Tipo::Classe(n) => Some(n.clone()),
+                    crate::ast::Tipo::Aplicado { nome, .. } => Some(nome.clone()),
+                    _ => None,
+                });
             } else {
                 break;
             }
@@ -629,11 +626,11 @@ impl AnalisadorOwnership {
         false
     }
 
-    // ✅ NOVO: Verificar se membro existe na hierarquia
+    //Verificar se membro existe na hierarquia
     fn membro_existe_na_hierarquia(&self, classe: &str, membro: &str) -> bool {
         let mut classe_atual = Some(classe.to_string());
 
-    while let Some(nome_classe) = classe_atual {
+        while let Some(nome_classe) = classe_atual {
             if let Some(def_classe) = self.classes.get(&nome_classe) {
                 // Verificar propriedades
                 for prop in &def_classe.propriedades {
@@ -650,14 +647,11 @@ impl AnalisadorOwnership {
                 }
 
                 // Ir para classe pai
-                classe_atual = def_classe
-                    .classe_pai
-                    .as_ref()
-                    .and_then(|t| match t {
-                        crate::ast::Tipo::Classe(n) => Some(n.clone()),
-                        crate::ast::Tipo::Aplicado { nome, .. } => Some(nome.clone()),
-                        _ => None,
-                    });
+                classe_atual = def_classe.classe_pai.as_ref().and_then(|t| match t {
+                    crate::ast::Tipo::Classe(n) => Some(n.clone()),
+                    crate::ast::Tipo::Aplicado { nome, .. } => Some(nome.clone()),
+                    _ => None,
+                });
             } else {
                 break;
             }
@@ -666,7 +660,7 @@ impl AnalisadorOwnership {
         false
     }
 
-    // ✅ NOVO: Verificar se método é redefinível
+    //Verificar se método é redefinível
     fn eh_metodo_redefinivel(&self, classe: &str, metodo: &str) -> bool {
         if let Some(def_classe) = self.classes.get(classe) {
             for metodo_classe in &def_classe.metodos {
@@ -678,7 +672,7 @@ impl AnalisadorOwnership {
         false
     }
 
-    // ✅ NOVO: Verificar se há polimorfismo
+    //Verificar se há polimorfismo
     fn eh_metodo_polimorfismo(&self, classe: &str, metodo: &str) -> bool {
         // Verificar se método é redefinível e a classe tem subclasses
         self.eh_metodo_redefinivel(classe, metodo)

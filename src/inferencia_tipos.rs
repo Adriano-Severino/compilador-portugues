@@ -3,18 +3,18 @@ use std::collections::HashMap;
 
 pub struct InferenciaTipos {
     tipos_inferidos: HashMap<String, Tipo>,
-    classes: HashMap<String, DeclaracaoClasse>, // ✅ NOVO: Armazenar classes para herança
+    classes: HashMap<String, DeclaracaoClasse>, //   Armazenar classes para herança
 }
 
 impl InferenciaTipos {
     pub fn new() -> Self {
         Self {
             tipos_inferidos: HashMap::new(),
-            classes: HashMap::new(), // ✅ NOVO
+            classes: HashMap::new(),
         }
     }
 
-    // ✅ NOVO: Registrar classes para herança
+    //Registrar classes para herança
     pub fn registrar_classe(&mut self, classe: DeclaracaoClasse) {
         self.classes.insert(classe.nome.clone(), classe);
     }
@@ -96,7 +96,7 @@ impl InferenciaTipos {
                 }
             }
 
-            // ✅ NOVO: Inferir tipo para acesso a membros com herança e arrays
+            //Inferir tipo para acesso a membros com herança e arrays
             Expressao::AcessoMembro(obj_expr, membro) => {
                 let tipo_obj = self.inferir_tipo(obj_expr)?;
                 match tipo_obj {
@@ -128,7 +128,7 @@ impl InferenciaTipos {
                 )),
             },
 
-            // ✅ NOVO: Inferir tipo para chamadas de método com herança
+            //Inferir tipo para chamadas de método com herança
             Expressao::ChamadaMetodo(obj_expr, metodo, _argumentos) => {
                 let tipo_obj = self.inferir_tipo(obj_expr)?;
                 match tipo_obj {
@@ -171,7 +171,7 @@ impl InferenciaTipos {
         }
     }
 
-    // ✅ NOVO: Buscar tipo de membro na hierarquia de herança
+    //Buscar tipo de membro na hierarquia de herança
     fn inferir_tipo_membro_hierarquia(&self, classe: &str, membro: &str) -> Result<Tipo, String> {
         let mut classe_atual = Some(classe.to_string());
 
@@ -206,7 +206,7 @@ impl InferenciaTipos {
         Ok(Tipo::Texto)
     }
 
-    // ✅ NOVO: Buscar tipo de retorno de método na hierarquia
+    //Buscar tipo de retorno de método na hierarquia
     fn inferir_tipo_metodo_hierarquia(&self, classe: &str, metodo: &str) -> Result<Tipo, String> {
         let mut classe_atual = Some(classe.to_string());
 
@@ -251,7 +251,7 @@ impl InferenciaTipos {
         self.tipos_inferidos.get(nome)
     }
 
-    // ✅ NOVO: Inferir tipo de comando (para análise completa)
+    //Inferir tipo de comando (para análise completa)
     pub fn inferir_tipo_comando(&mut self, comando: &Comando) -> Result<(), String> {
         match comando {
             Comando::DeclaracaoVariavel(tipo, nome, valor) => {
@@ -342,7 +342,7 @@ impl InferenciaTipos {
         Ok(())
     }
 
-    // ✅ NOVO: Verificar compatibilidade de tipos
+    //   Verificar compatibilidade de tipos
     // ✅ VERIFICAR: Se necessário, adicionar case para Decimal
     fn tipos_compativeis(&self, tipo1: &Tipo, tipo2: &Tipo) -> bool {
         match (tipo1, tipo2) {
@@ -367,7 +367,7 @@ impl InferenciaTipos {
         }
     }
 
-    // ✅ NOVO: Verificar se uma classe é subclasse de outra
+    //Verificar se uma classe é subclasse de outra
     fn eh_subclasse(&self, classe_filha: &str, classe_pai: &str) -> bool {
         let mut atual = Some(classe_filha.to_string());
 
@@ -394,8 +394,8 @@ impl InferenciaTipos {
         false
     }
 
-    // ✅ NOVO: Converter tipo para string (para mensagens de erro)
-    // ✅ CORREÇÃO: Adicionar case para Tipo::Decimal
+    //   Converter tipo para string (para mensagens de erro)
+    // Adicionar case para Tipo::Decimal
     fn tipo_para_string(&self, tipo: &Tipo) -> String {
         match tipo {
             Tipo::Inteiro => "inteiro".to_string(),

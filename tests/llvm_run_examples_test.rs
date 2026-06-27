@@ -6,6 +6,10 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+fn have_clang() -> bool {
+    Command::new("clang").arg("--version").output().is_ok()
+}
+
 fn list_exemplos() -> Vec<String> {
     let root = repo_root();
     let dir = root.join("exemplos");
@@ -15,7 +19,11 @@ fn list_exemplos() -> Vec<String> {
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("pr") {
                 if let Ok(rel) = path.strip_prefix(&root) {
-                    v.push(rel.to_string_lossy().replace('\\', "/"));
+                    let rel_str = rel.to_string_lossy().replace('\\', "/");
+                    if rel_str.ends_with("_neg.pr") {
+                        continue;
+                    }
+                    v.push(rel_str);
                 }
             }
         }
@@ -48,6 +56,11 @@ fn needs_stdin(pr: &Path) -> bool {
 
 #[test]
 fn run_exemplos_llvm_end_to_end() {
+    if !have_clang() {
+        eprintln!("clang não encontrado; ignorando teste LLVM.");
+        return;
+    }
+
     let root = repo_root();
     for pr_rel in list_exemplos() {
         let pr_path = root.join(&pr_rel);
@@ -87,7 +100,7 @@ fn run_exemplos_llvm_end_to_end() {
 
         if needs_stdin(&pr_path) {
             use std::io::Write;
-            let stdin = child.stdin.as_mut().unwrap();
+            let mut stdin = child.stdin.take().unwrap();
             // entrada-padrão usada no teste de IO
             stdin.write_all(b"adriano\n30\n").unwrap();
             // fecha stdin para sinalizar EOF

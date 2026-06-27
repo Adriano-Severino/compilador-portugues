@@ -33,7 +33,7 @@ enum Valor {
     },
 }
 
-// ✅ NOVO: Informações da classe
+//Informações da classe
 #[derive(Clone, Debug)]
 struct ClasseInfo {
     nome: String,
@@ -75,7 +75,7 @@ impl fmt::Display for Valor {
                 write!(f, "[{}]", s)
             }
 
-            // ✅ NOVO: Display para objetos
+            //Display para objetos
             Valor::Objeto {
                 nome_classe,
                 campos,
@@ -92,7 +92,7 @@ impl fmt::Display for Valor {
     }
 }
 
-// ✅ NOVO: Implementação manual de PartialEq para lidar com Rc<RefCell<...>>
+//Implementação manual de PartialEq para lidar com Rc<RefCell<...>>
 impl PartialEq for Valor {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -1886,7 +1886,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("Arquivo de bytecode vazio".into());
     }
 
-    // ✅ NOVO: Obter o diretório base do arquivo de bytecode.
+    //Obter o diretório base do arquivo de bytecode.
     let mut path = std::path::PathBuf::from(caminho_arquivo);
     path.pop(); // Remove o nome do arquivo, deixando o diretório.
     let base_dir = if path.as_os_str().is_empty() {
@@ -1963,7 +1963,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// ✅ NOVO: Função auxiliar para ler o bytecode do arquivo.
+//Função auxiliar para ler o bytecode do arquivo.
 fn ler_bytecode(caminho_arquivo: &str) -> Result<Vec<String>, std::io::Error> {
     let mut arquivo = fs::File::open(caminho_arquivo)?;
     let mut conteudo = String::new();

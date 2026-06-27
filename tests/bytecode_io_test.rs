@@ -36,7 +36,7 @@ fn teste_io_bytecode_execucao() {
         .expect("falha ao iniciar interpretador");
 
     use std::io::Write;
-    let stdin = child.stdin.as_mut().expect("sem stdin");
+    let mut stdin = child.stdin.take().expect("sem stdin");
     stdin
         .write_all(b"adriano\n30\n")
         .expect("falha ao escrever input");

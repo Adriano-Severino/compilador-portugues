@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -14,7 +14,11 @@ fn list_exemplos() -> Vec<String> {
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("pr") {
                 if let Ok(rel) = path.strip_prefix(&root) {
-                    v.push(rel.to_string_lossy().replace('\\', "/"));
+                    let rel_str = rel.to_string_lossy().replace('\\', "/");
+                    if rel_str.ends_with("_neg.pr") {
+                        continue;
+                    }
+                    v.push(rel_str);
                 }
             }
         }

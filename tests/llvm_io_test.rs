@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -6,8 +5,17 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+fn have_clang() -> bool {
+    Command::new("clang").arg("--version").output().is_ok()
+}
+
 #[test]
 fn teste_io_llvm_execucao() {
+    if !have_clang() {
+        eprintln!("clang não encontrado; ignorando teste LLVM.");
+        return;
+    }
+
     // Compila o exemplo para LLVM IR e executável, então executa com stdin simulado.
     let root = repo_root();
     let exemplo = root.join("exemplos").join("teste_io.pr");
@@ -40,7 +48,7 @@ fn teste_io_llvm_execucao() {
         .expect("falha ao iniciar execução do exemplo");
 
     use std::io::Write;
-    let stdin = child.stdin.as_mut().expect("sem stdin");
+    let mut stdin = child.stdin.take().expect("sem stdin");
     stdin
         .write_all(b"adriano\n30\n")
         .expect("falha ao escrever input");
