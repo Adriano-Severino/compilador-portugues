@@ -1,0 +1,8 @@
+usando Sistema;
+usando Sistema.Rede;
+ 
+publico função Principal()
+{
+    var cliente = novo ClienteHttp();
+    Console.EscreverLinha("criando o cliente");
+}
