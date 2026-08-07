@@ -56,8 +56,8 @@ impl AnalisadorOwnership {
             instrucao_atual: 0,
             erros: Vec::new(),
             warnings: Vec::new(),
-            classes: HashMap::new(),    
-            contexto_metodo_atual: None, 
+            classes: HashMap::new(),
+            contexto_metodo_atual: None,
         }
     }
 
@@ -371,10 +371,14 @@ impl AnalisadorOwnership {
                 self.analisar_expressao(expr);
             }
 
-            Expressao::NovoObjeto(_classe, argumentos) => {
+            Expressao::NovoObjeto(_tipo, argumentos) => {
                 for arg in argumentos {
                     self.analisar_expressao(arg);
                 }
+            }
+
+            Expressao::NovoArray(_tipo, tamanho) => {
+                self.analisar_expressao(tamanho);
             }
 
             Expressao::StringInterpolada(partes) => {

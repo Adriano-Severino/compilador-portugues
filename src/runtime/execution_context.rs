@@ -251,6 +251,7 @@ impl ContextoExecucao {
             Expressao::Inteiro(n) => Ok(ValorRuntime::Inteiro(*n)),
             Expressao::Texto(s) => Ok(ValorRuntime::Texto(s.clone())),
             Expressao::Booleano(b) => Ok(ValorRuntime::Booleano(*b)),
+            Expressao::Nulo => Ok(ValorRuntime::Nulo),
 
             Expressao::Identificador(nome) => {
                 self.obter_variavel(nome)
@@ -274,12 +275,20 @@ impl ContextoExecucao {
                 }
             }
 
-            Expressao::NovoObjeto(classe, args) => {
+            Expressao::NovoObjeto(tipo, args) => {
+                let classe = match tipo {
+                    Tipo::Classe(n) => n.clone(),
+                    Tipo::Aplicado { nome, .. } => nome.clone(),
+                    _ => return Err(format!("Instanciação de tipo não suportado na VM: {:?}", tipo)),
+                };
                 let mut argumentos_avaliados = Vec::new();
                 for arg in args {
                     argumentos_avaliados.push(self.avaliar_expressao(arg)?);
                 }
-                self.criar_instancia(classe, argumentos_avaliados)
+                self.criar_instancia(&classe, argumentos_avaliados)
+            }
+            Expressao::NovoArray(tipo, _tamanho) => {
+                Err(format!("Criação de array não suportada na VM para o tipo: {:?}", tipo))
             }
 
             Expressao::Aritmetica(op, esq, dir) => {

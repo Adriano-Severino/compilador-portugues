@@ -6,7 +6,6 @@ pub struct SistemaModulos {
     modulos: HashMap<String, Modulo>,
     dependencias: HashMap<String, Vec<String>>,
     namespaces: HashMap<String, String>,
-
 }
 
 #[derive(Debug, Clone)]
@@ -25,7 +24,6 @@ impl SistemaModulos {
             modulos: HashMap::new(),
             dependencias: HashMap::new(),
             namespaces: HashMap::new(),
-
         }
     }
 
@@ -43,12 +41,12 @@ impl SistemaModulos {
 
         let conteudo = std::fs::read_to_string(&caminho_path)
             .map_err(|e| format!("Erro ao ler módulo {}: {}", caminho, e))?;
-        
+
         let modulo = self.parsear_modulo(&nome_modulo, caminho_path, &conteudo)?;
-        
+
         // Verificar dependências circulares
         self.verificar_dependencias_circulares(&modulo)?;
-        
+
         // Carregar dependências
         for dep in &modulo.dependencias {
             self.carregar_modulo(dep)?;
@@ -58,7 +56,12 @@ impl SistemaModulos {
         Ok(nome_modulo)
     }
 
-    fn parsear_modulo(&self, nome: &str, caminho: PathBuf, _conteudo: &str) -> Result<Modulo, String> {
+    fn parsear_modulo(
+        &self,
+        nome: &str,
+        caminho: PathBuf,
+        _conteudo: &str,
+    ) -> Result<Modulo, String> {
         // Por enquanto, criar um módulo vazio
         // Em implementação real, usaria o parser aqui
         Ok(Modulo {
@@ -74,7 +77,7 @@ impl SistemaModulos {
     fn verificar_dependencias_circulares(&self, modulo: &Modulo) -> Result<(), String> {
         let mut visitados = HashSet::new();
         let mut pilha = HashSet::new();
-        
+
         self.dfs_dependencias(&modulo.nome, &mut visitados, &mut pilha)
     }
 
@@ -85,7 +88,10 @@ impl SistemaModulos {
         pilha: &mut HashSet<String>,
     ) -> Result<(), String> {
         if pilha.contains(modulo) {
-            return Err(format!("Dependência circular detectada envolvendo módulo '{}'", modulo));
+            return Err(format!(
+                "Dependência circular detectada envolvendo módulo '{}'",
+                modulo
+            ));
         }
 
         if visitados.contains(modulo) {
@@ -108,7 +114,7 @@ impl SistemaModulos {
     pub fn resolver_importacao(&self, importacao: &Importacao) -> Result<Vec<Declaracao>, String> {
         if let Some(modulo) = self.modulos.get(&importacao.caminho) {
             let mut declaracoes = Vec::new();
-            
+
             if importacao.itens.is_empty() {
                 // Importar tudo que é público
                 for decl in &modulo.declaracoes {
@@ -119,24 +125,26 @@ impl SistemaModulos {
             } else {
                 // Importar itens específicos
                 for item in &importacao.itens {
-                    if let Some(decl) = self.encontrar_declaracao_por_nome(&modulo.declaracoes, item) {
+                    if let Some(decl) =
+                        self.encontrar_declaracao_por_nome(&modulo.declaracoes, item)
+                    {
                         if self.is_declaracao_publica(decl) {
                             declaracoes.push(decl.clone());
                         } else {
                             return Err(format!(
-                                "Item '{}' não é público no módulo '{}'", 
+                                "Item '{}' não é público no módulo '{}'",
                                 item, importacao.caminho
                             ));
                         }
                     } else {
                         return Err(format!(
-                            "Item '{}' não encontrado no módulo '{}'", 
+                            "Item '{}' não encontrado no módulo '{}'",
                             item, importacao.caminho
                         ));
                     }
                 }
             }
-            
+
             Ok(declaracoes)
         } else {
             Err(format!("Módulo '{}' não encontrado", importacao.caminho))
@@ -147,22 +155,24 @@ impl SistemaModulos {
         match declaracao {
             Declaracao::DeclaracaoClasse(classe) => {
                 matches!(classe.modificador, ModificadorAcesso::Publico)
-            },
+            }
             Declaracao::DeclaracaoFuncao(funcao) => {
                 matches!(funcao.modificador, ModificadorAcesso::Publico)
-            },
+            }
             Declaracao::Exportacao(exp) => exp.publico,
             _ => false,
         }
     }
 
-   fn encontrar_declaracao_por_nome<'a>(&self, declaracoes: &'a [Declaracao], nome: &str) -> Option<&'a Declaracao> {
-        declaracoes.iter().find(|decl| {
-            match decl {
-                Declaracao::DeclaracaoClasse(classe) => classe.nome == nome,
-                Declaracao::DeclaracaoFuncao(funcao) => funcao.nome == nome,
-                _ => false,
-            }
+    fn encontrar_declaracao_por_nome<'a>(
+        &self,
+        declaracoes: &'a [Declaracao],
+        nome: &str,
+    ) -> Option<&'a Declaracao> {
+        declaracoes.iter().find(|decl| match decl {
+            Declaracao::DeclaracaoClasse(classe) => classe.nome == nome,
+            Declaracao::DeclaracaoFuncao(funcao) => funcao.nome == nome,
+            _ => false,
         })
     }
 
@@ -189,16 +199,19 @@ impl SistemaModulos {
     pub fn validar_exportacoes(&self, modulo: &str) -> Result<(), Vec<String>> {
         if let Some(mod_info) = self.modulos.get(modulo) {
             let mut erros = Vec::new();
-            
+
             for exportacao in &mod_info.exportacoes {
-                if !self.encontrar_declaracao_por_nome(&mod_info.declaracoes, &exportacao.nome).is_some() {
+                if !self
+                    .encontrar_declaracao_por_nome(&mod_info.declaracoes, &exportacao.nome)
+                    .is_some()
+                {
                     erros.push(format!(
                         "Exportação '{}' não corresponde a nenhuma declaração no módulo '{}'",
                         exportacao.nome, modulo
                     ));
                 }
             }
-            
+
             if erros.is_empty() {
                 Ok(())
             } else {

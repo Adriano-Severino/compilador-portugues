@@ -109,3 +109,5 @@ Alvos aceitos pelo compilador:
 A direcao do projeto e aproximar Por do Sol do conjunto de capacidades que C# oferece hoje, mantendo a identidade em portugues. Isso inclui amadurecer orientacao a objetos, genericos, biblioteca padrao, tratamento de erros, recursos funcionais, ferramentas de debug, mensagens de erro amigaveis, interoperabilidade com backends reais e uma experiencia consistente para programas pequenos e grandes.
 
 Toda decisao tecnica deve servir a essa visao: uma linguagem de programacao completa, moderna, em portugues, com a ergonomia de C# e a capacidade de gerar codigo executavel de verdade.
+
+Para novas features ou refatorações, siga as boas práticas e padrões de projeto para obter performance, confiabilidade, rastreabilidade, manutenibilidade e escalabilidade. Isso facilitará a manutenção e a implementação de novas features, tornando a linguagem profissional e pronta para o mercado.

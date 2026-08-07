@@ -18,6 +18,7 @@ pub mod codegen;
 pub mod inferencia_tipos;
 pub mod interpolacao;
 pub mod jit;
+pub mod library_loader;
 pub mod module_system;
 pub mod ownership;
 pub mod stdlib;
@@ -34,7 +35,7 @@ pub use lexer::Token;
 pub use ownership::AnalisadorOwnership;
 pub use type_checker::VerificadorTipos;
 
-// ✅ CORREÇÃO: Removida a importação do `BackendType`, que não é mais público.
+// Removida a importação do `BackendType`, que não é mais público.
 pub use codegen::GeradorCodigo;
 // pub use runtime::{
 //     executar_programa_otimizado,

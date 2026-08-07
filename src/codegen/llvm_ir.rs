@@ -1408,10 +1408,15 @@ impl<'a> LlvmGenerator<'a> {
                 ));
                 (result_reg, result_tipo)
             }
-            ast::Expressao::NovoObjeto(nome_classe, argumentos) => {
+            ast::Expressao::NovoObjeto(tipo, argumentos) => {
+                let nome_classe = match tipo {
+                    ast::Tipo::Classe(n) => n.clone(),
+                    ast::Tipo::Aplicado { nome, .. } => nome.clone(),
+                    _ => panic!("Instanciação de tipo não suportado em LLVM IR: {:?}", tipo),
+                };
                 let fqn = self
                     .type_checker
-                    .resolver_nome_classe(nome_classe, &self.namespace_path);
+                    .resolver_nome_classe(&nome_classe, &self.namespace_path);
                 // Bloquear instanciação de classe abstrata
                 if let Some(class_decl) = self.type_checker.classes.get(&fqn) {
                     if class_decl.eh_abstrata {
@@ -1530,6 +1535,12 @@ impl<'a> LlvmGenerator<'a> {
                 }
 
                 (obj_ptr_reg, ast::Tipo::Classe(fqn))
+            }
+            ast::Expressao::NovoArray(tipo, _tamanho) => {
+                panic!(
+                    "NovoArray não implementado em LLVM IR para o tipo {:?}",
+                    tipo
+                );
             }
             ast::Expressao::ListaLiteral(items) => {
                 // Infere tipo de elemento a partir do primeiro item (assumindo homogêneo)

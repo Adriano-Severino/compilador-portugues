@@ -1,6 +1,22 @@
 use crate::ast;
 use crate::ast::*;
+use crate::library_loader::{self, Biblioteca, LibSimbolo};
 use std::collections::HashMap;
+
+// Helper function to convert string to ast::Tipo
+pub fn string_para_tipo(s: &str) -> ast::Tipo {
+    match s {
+        "inteiro" => ast::Tipo::Inteiro,
+        "texto" => ast::Tipo::Texto,
+        "booleano" => ast::Tipo::Booleano,
+        "flutuante" => ast::Tipo::Flutuante,
+        "duplo" => ast::Tipo::Duplo,
+        "decimal" => ast::Tipo::Decimal,
+        "vazio" => ast::Tipo::Vazio,
+        "objeto" => ast::Tipo::Objeto,
+        _ => ast::Tipo::Classe(s.to_string()),
+    }
+}
 
 #[derive(Clone)]
 pub struct VerificadorTipos<'a> {
@@ -11,6 +27,12 @@ pub struct VerificadorTipos<'a> {
     pub enums: HashMap<String, &'a DeclaracaoEnum>,
     pub resolved_classes: HashMap<String, ResolvedClassInfo<'a>>,
     erros: Vec<String>,
+    // Biblioteca externa carregada (metadados .pbl sem conversão para AST)
+    pub biblioteca_externa: Option<library_loader::Biblioteca>,
+    // Storage for library-loaded AST nodes (mantido para compatibilidade com tipo 'objeto')
+    loaded_lib_declarations: Vec<Declaracao>,
+    pub generic_scope: Vec<std::collections::HashSet<String>>,
+    stdlib_namespaces: std::collections::HashSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -21,14 +43,13 @@ pub struct ResolvedClassInfo<'a> {
     pub fields: Vec<&'a ast::CampoClasse>,
     pub methods: HashMap<String, &'a ast::MetodoClasse>,
     pub eh_estatica: bool,
-    // nova flag não essencial para layout, mas útil para checks em codegen/semântica
     pub eh_abstrata: bool,
     pub interfaces: Vec<String>,
 }
 
 impl<'a> VerificadorTipos<'a> {
     pub fn new() -> Self {
-        Self {
+        let mut vt = Self {
             usings: Vec::new(),
             simbolos_namespaces: HashMap::new(),
             classes: HashMap::new(),
@@ -36,26 +57,215 @@ impl<'a> VerificadorTipos<'a> {
             enums: HashMap::new(),
             resolved_classes: HashMap::new(),
             erros: Vec::new(),
-        }
+            biblioteca_externa: None,
+            loaded_lib_declarations: Vec::new(),
+            generic_scope: Vec::new(),
+            stdlib_namespaces: std::collections::HashSet::new(),
+        };
+        vt.inicializar_tipos_integrados();
+        vt
     }
 
+    /// Define a biblioteca externa carregada (.pbl) para consulta de metadados.
+    /// Esta biblioteca contém LibClasse e LibMetodo que serão usados diretamente
+    /// para resolução de tipos, evitando conversão para AST completa (que causa stack overflow).
+    pub fn definir_biblioteca_externa(&mut self, biblioteca: library_loader::Biblioteca) {
+        self.biblioteca_externa = Some(biblioteca);
+    }
+
+    fn inicializar_tipos_integrados(&mut self) {
+        let objeto_classe = DeclaracaoClasse {
+            nome: "objeto".to_string(),
+            modificador: ModificadorAcesso::Publico,
+            eh_estatica: false,
+            eh_abstrata: false,
+            classe_pai: None,
+            interfaces: Vec::new(),
+            propriedades: Vec::new(),
+            campos: Vec::new(),
+            construtores: Vec::new(),
+            nested_classes: Vec::new(),
+            metodos: Vec::new(),
+            generic_params: Vec::new(),
+        };
+
+        let decl = Declaracao::DeclaracaoClasse(objeto_classe);
+        self.loaded_lib_declarations.push(decl);
+
+        // Use the same unsafe pattern as in carregar_biblioteca to avoid borrow checker issues
+        let decl_ptr: *const Declaracao =
+            &self.loaded_lib_declarations[self.loaded_lib_declarations.len() - 1];
+        let decl_ref = unsafe { &*decl_ptr };
+
+        if let Declaracao::DeclaracaoClasse(cl) = decl_ref {
+            let cl_ptr: *const DeclaracaoClasse = cl;
+            let cl_ref = unsafe { &*cl_ptr };
+            self.classes.insert("objeto".to_string(), cl_ref);
+        }
+        self.simbolos_namespaces
+            .insert("objeto".to_string(), decl_ref);
+    }
+
+    pub fn registrar_namespace_stdlib(&mut self, ns: &str) {
+        self.stdlib_namespaces.insert(ns.to_string());
+    }
+
+    pub fn eh_classe_stdlib(&self, fqn: &str) -> bool {
+        let ns = self.get_namespace_from_full_name(fqn);
+        self.stdlib_namespaces.contains(&ns)
+    }
+
+    // Método legado: Convertia LibClasse → DeclaracaoClasse (causava stack overflow)
+    // Substituído por definir_biblioteca_externa que usa metadados diretamente
+    /*
+    pub fn carregar_biblioteca(&mut self, biblioteca: library_loader::Biblioteca) {
+        let initial_len = self.loaded_lib_declarations.len();
+
+        for (_nome_simbolo, simbolo) in biblioteca.simbolos {
+            match simbolo {
+                library_loader::LibSimbolo::Classe(lib_classe) => {
+                    let metodos: Vec<MetodoClasse> = lib_classe
+                        .metodos
+                        .values()
+                        .map(|lib_metodo| {
+                            // Se o método tem chave nativa, adiciona o atributo [Nativo("chave")]
+                            // para que o verificador de tipos e o gerador de bytecode o tratem corretamente.
+                            let attributes = if let Some(chave) = &lib_metodo.chave_nativa {
+                                vec![ast::Attribute {
+                                    name: "Nativo".to_string(),
+                                    arguments: vec![ast::Expressao::Texto(chave.clone())],
+                                }]
+                            } else {
+                                vec![]
+                            };
+                            MetodoClasse {
+                                attributes,
+                                nome: lib_metodo.nome.clone(),
+                                modificador: ModificadorAcesso::Publico,
+                                eh_estatica: lib_metodo.eh_estatica,
+                                eh_abstrato: false,
+                                eh_virtual: false,
+                                eh_override: false,
+                                tipo_retorno: Some(string_para_tipo(&lib_metodo.tipo_retorno)),
+                                parametros: lib_metodo
+                                    .parametros
+                                    .iter()
+                                    .map(|(tipo, nome)| Parametro {
+                                        nome: nome.clone(),
+                                        tipo: string_para_tipo(tipo),
+                                        valor_padrao: None,
+                                    })
+                                    .collect(),
+                                corpo: Vec::new(),
+                                generic_params: Vec::new(),
+                            }
+                        })
+                        .collect();
+
+                    let decl_classe = DeclaracaoClasse {
+                        nome: lib_classe.fqn.clone(), // Use FQN
+                        modificador: ModificadorAcesso::Publico,
+                        eh_estatica: lib_classe.eh_estatica,
+                        eh_abstrata: false,
+                        classe_pai: lib_classe.nome_pai.map(|p| ast::Tipo::Classe(p)),
+                        interfaces: Vec::new(),
+                        propriedades: lib_classe
+                            .propriedades
+                            .iter()
+                            .map(|p| PropriedadeClasse {
+                                nome: p.nome.clone(),
+                                tipo: string_para_tipo(&p.tipo),
+                                modificador: ModificadorAcesso::Publico,
+                                obter: None,
+                                definir: None,
+                                eh_estatica: lib_classe.eh_estatica,
+                                valor_inicial: None,
+                            })
+                            .collect(),
+                        campos: lib_classe
+                            .campos
+                            .iter()
+                            .map(|c| CampoClasse {
+                                nome: c.nome.clone(),
+                                tipo: string_para_tipo(&c.tipo),
+                                modificador: ModificadorAcesso::Privado,
+                                eh_estatica: lib_classe.eh_estatica,
+                                valor_inicial: None,
+                            })
+                            .collect(),
+                        construtores: Vec::new(),
+                        nested_classes: Vec::new(),
+                        metodos,
+                        generic_params: Vec::new(),
+                    };
+
+                    let decl = Declaracao::DeclaracaoClasse(decl_classe);
+                    self.loaded_lib_declarations.push(decl);
+                }
+                library_loader::LibSimbolo::Funcao(_lib_funcao) => {
+                    // TODO: Handle functions
+                }
+            }
+        }
+
+        // The `unsafe` block here is a controlled way to work around the borrow checker's limitations
+        // with self-referential structs. We are adding references to `self.classes` and `self.simbolos_namespaces`
+        // that point to data owned by `self.loaded_lib_declarations`.
+        // This is safe because:
+        // 1. The data in `loaded_lib_declarations` is guaranteed to live as long as `self`.
+        // 2. We do not modify `loaded_lib_declarations` after these references are created,
+        //    so the pointers will not be invalidated by a vector reallocation.
+        for i in initial_len..self.loaded_lib_declarations.len() {
+            let decl_ptr: *const Declaracao = &self.loaded_lib_declarations[i];
+            let decl = unsafe { &*decl_ptr };
+            let nome = self.get_declaracao_nome(decl);
+
+            if let Declaracao::DeclaracaoClasse(cl) = decl {
+                let cl_ptr: *const DeclaracaoClasse = cl;
+                let cl_ref = unsafe { &*cl_ptr };
+                self.classes.insert(nome.clone(), cl_ref);
+            }
+            self.simbolos_namespaces.insert(nome, decl);
+        }
+    }
+    */
+
     // Substitui parâmetros genéricos por tipos concretos em um tipo arbitrário.
-    // Ex.: T -> Texto, Lista<T> -> Lista<Texto>, Funcao<[T], Vazio> -> Funcao<[Texto], Vazio>
     fn substitute_generics_in_tipo(
         &self,
         t: &Tipo,
         subst: &std::collections::HashMap<String, Tipo>,
     ) -> Tipo {
+        self.substitute_generics_in_tipo_recursive(t, subst, 0)
+    }
+
+    fn substitute_generics_in_tipo_recursive(
+        &self,
+        t: &Tipo,
+        subst: &std::collections::HashMap<String, Tipo>,
+        depth: usize,
+    ) -> Tipo {
+        if depth > 10 {
+            return t.clone();
+        }
         use Tipo::*;
         match t {
             Generico(nome) => subst.get(nome).cloned().unwrap_or_else(|| t.clone()),
             Classe(nome) => subst.get(nome).cloned().unwrap_or_else(|| t.clone()),
-            Lista(inner) => Lista(Box::new(self.substitute_generics_in_tipo(inner, subst))),
-            Opcional(inner) => Opcional(Box::new(self.substitute_generics_in_tipo(inner, subst))),
+            Lista(inner) => Lista(Box::new(self.substitute_generics_in_tipo_recursive(
+                inner,
+                subst,
+                depth + 1,
+            ))),
+            Opcional(inner) => Opcional(Box::new(self.substitute_generics_in_tipo_recursive(
+                inner,
+                subst,
+                depth + 1,
+            ))),
             Aplicado { nome, args } => {
                 let novos_args = args
                     .iter()
-                    .map(|a| self.substitute_generics_in_tipo(a, subst))
+                    .map(|a| self.substitute_generics_in_tipo_recursive(a, subst, depth + 1))
                     .collect();
                 Aplicado {
                     nome: nome.clone(),
@@ -65,17 +275,15 @@ impl<'a> VerificadorTipos<'a> {
             Funcao(params, ret) => {
                 let novos_params = params
                     .iter()
-                    .map(|p| self.substitute_generics_in_tipo(p, subst))
+                    .map(|p| self.substitute_generics_in_tipo_recursive(p, subst, depth + 1))
                     .collect();
-                let novo_ret = self.substitute_generics_in_tipo(ret, subst);
+                let novo_ret = self.substitute_generics_in_tipo_recursive(ret, subst, depth + 1);
                 Funcao(novos_params, Box::new(novo_ret))
             }
             _ => t.clone(),
         }
     }
 
-    // Normaliza tipos para comparação e armazena FQNs quando aplicável.
-    // Também valida a aridade de tipos genéricos aplicados (Nome<args...>) e retorna erros coletados.
     fn normalize_tipo_ro(&self, t: &Tipo, namespace_atual: &str) -> (Tipo, Vec<String>) {
         use Tipo::*;
         match t {
@@ -83,13 +291,26 @@ impl<'a> VerificadorTipos<'a> {
                 let (norm, errs) = self.normalize_tipo_ro(inner, namespace_atual);
                 (Lista(Box::new(norm)), { errs })
             }
-            Classe(n) => (
-                Classe(self.resolver_nome_classe(n, namespace_atual)),
-                vec![],
-            ),
+            Classe(n) => {
+                // Check if it's a generic parameter
+                for scope in self.generic_scope.iter().rev() {
+                    if scope.contains(n) {
+                        return (Generico(n.clone()), vec![]);
+                    }
+                }
+                (
+                    Classe(self.resolver_nome_classe(n, namespace_atual)),
+                    vec![],
+                )
+            }
             Enum(n) => (Enum(self.resolver_nome_enum(n, namespace_atual)), vec![]),
             Aplicado { nome, args } => {
-                // Resolve nome para FQN de classe ou interface
+                // Check if it's a generic parameter
+                for scope in self.generic_scope.iter().rev() {
+                    if scope.contains(nome) {
+                        return (Generico(nome.clone()), vec![]);
+                    }
+                }
                 let fqn_cls = self.resolver_nome_classe(nome, namespace_atual);
                 let fqn_iface = self.resolver_nome_interface(nome, namespace_atual);
                 let (is_class, is_iface, resolved_name) = (
@@ -100,13 +321,10 @@ impl<'a> VerificadorTipos<'a> {
                     } else if self.interfaces.contains_key(&fqn_iface) {
                         fqn_iface.clone()
                     } else {
-                        // Não encontrado; mantém nome simples para evitar cascata de erros
                         nome.clone()
                     },
                 );
-
                 let mut erros: Vec<String> = Vec::new();
-                // Verifica aridade se encontrou a declaração alvo
                 if is_class {
                     if let Some(decl) = self.classes.get(&fqn_cls) {
                         let expected = decl.generic_params.len();
@@ -176,35 +394,59 @@ impl<'a> VerificadorTipos<'a> {
         }
     }
 
-    // Compatibilidade de tipos para atribuição: permite promoções numéricas (widening)
     fn tipos_compativeis_atribuicao(&self, destino: &Tipo, origem: &Tipo) -> bool {
         use Tipo::*;
         if destino == origem {
             return true;
         }
+
+        let is_dest_base_obj =
+            matches!(destino, Objeto) || matches!(destino, Classe(n) if n == "objeto");
+        let is_orig_base_obj =
+            matches!(origem, Objeto) || matches!(origem, Classe(n) if n == "objeto");
+
+        if is_dest_base_obj {
+            return true;
+        }
+        if is_orig_base_obj {
+            return true;
+        }
+
+        if let Inferido = destino {
+            return true;
+        }
+        if let Inferido = origem {
+            return true;
+        }
         match (destino, origem) {
-            // Genéricos aplicados são invariantes: requerem mesmo nome e mesmos argumentos (igualdade estrutural)
-            (Aplicado { nome: dn, args: da }, Aplicado { nome: on, args: oa }) if dn == on => {
-                da == oa
+            (Generico(n1), Generico(n2)) => n1 == n2,
+            (Generico(_), _) => true,
+            (_, Generico(_)) => true,
+            (Aplicado { nome: dn, args: da }, Aplicado { nome: on, args: oa }) => {
+                if !dn.ends_with(on) && !on.ends_with(dn) {
+                    return false;
+                }
+                if da.len() != oa.len() {
+                    return false;
+                }
+                da.iter()
+                    .zip(oa.iter())
+                    .all(|(a1, a2)| self.tipos_compativeis_atribuicao(a1, a2))
             }
-            // Subtipagem de classes: permite atribuir derivada em variável do tipo base
+            (Lista(d), Lista(o)) => self.tipos_compativeis_atribuicao(d, o),
             (Classe(dest), Classe(orig)) => {
                 if dest == orig {
                     true
                 } else if self.is_subclass_of(orig, dest) {
                     true
                 } else if self.is_interface_type(dest) {
-                    // Permite classe que implementa a interface
                     self.class_implements_interface(orig, dest)
                 } else {
                     false
                 }
             }
-            // Enums: somente o mesmo enum é compatível implicitamente
             (Enum(a), Enum(b)) if a == b => true,
-            // Texto aceita conversão implícita de inteiro/booleano (compatibilidade existente)
             (Texto, Inteiro) | (Texto, Booleano) => true,
-            // Promoções numéricas
             (Flutuante, Inteiro) => true,
             (Duplo, Inteiro) => true,
             (Duplo, Flutuante) => true,
@@ -212,18 +454,15 @@ impl<'a> VerificadorTipos<'a> {
         }
     }
 
-    // Retorna true se o nome for uma interface conhecida
     fn is_interface_type(&self, nome: &str) -> bool {
         self.interfaces.contains_key(nome)
     }
 
-    // Verifica se uma classe (FQN) implementa uma interface (FQN), considerando herança
     fn class_implements_interface(&self, class_fqn: &str, iface_fqn: &str) -> bool {
         let ifaces = self.get_all_interfaces_of_class(class_fqn);
         ifaces.contains(iface_fqn)
     }
 
-    // Coleta todas as interfaces implementadas por uma classe, incluindo as herdadas do pai
     fn get_all_interfaces_of_class(&self, class_fqn: &str) -> std::collections::HashSet<String> {
         use std::collections::HashSet;
         let mut set: HashSet<String> = HashSet::new();
@@ -259,14 +498,21 @@ impl<'a> VerificadorTipos<'a> {
         set
     }
 
-    // Verifica se `sub` é subclasse (direta ou indireta) de `base`. Parâmetros são FQN.
     fn is_subclass_of(&self, sub: &str, base: &str) -> bool {
         if sub == base {
             return true;
         }
         let mut current = Some(sub.to_string());
         while let Some(cls_fqn) = current {
-            if let Some(decl) = self.classes.get(&cls_fqn) {
+            if let Some(ci) = self.resolved_classes.get(&cls_fqn) {
+                if let Some(parent) = &ci.parent_name {
+                    if parent == base {
+                        return true;
+                    }
+                    current = Some(parent.clone());
+                    continue;
+                }
+            } else if let Some(decl) = self.classes.get(&cls_fqn) {
                 if let Some(parent_simple) = &decl.classe_pai {
                     let parent_name = match parent_simple {
                         Tipo::Classe(n) => n.as_str(),
@@ -292,7 +538,6 @@ impl<'a> VerificadorTipos<'a> {
     pub fn verificar_programa(&mut self, programa: &'a Programa) -> Result<(), Vec<String>> {
         // 1. usings
         self.usings = programa.usings.iter().map(|u| u.caminho.clone()).collect();
-
         // 2. primeira passagem: registra classes, interfaces e enums
         for decl in &programa.declaracoes {
             let nome = self.get_declaracao_nome(decl);
@@ -323,13 +568,11 @@ impl<'a> VerificadorTipos<'a> {
                 self.simbolos_namespaces.insert(fqn, decl);
             }
         }
-
         // 3. resolve hierarquias agora que `self.classes` está cheia
         let classes_snapshot = self.classes.clone();
         for (nome, decl) in &classes_snapshot {
             self.resolve_class_hierarchy(nome, decl);
         }
-
         // 4. segunda passagem: verificação completa
         let mut vars_globais = HashMap::new();
         for decl in &programa.declaracoes {
@@ -338,7 +581,6 @@ impl<'a> VerificadorTipos<'a> {
         for ns in &programa.namespaces {
             self.verificar_namespace(ns);
         }
-
         // 5. validação de interfaces implementadas por classes
         for (fqn, classe) in &self.classes {
             let ns_atual = self.get_namespace_from_full_name(fqn);
@@ -543,7 +785,7 @@ impl<'a> VerificadorTipos<'a> {
 
     fn resolve_class_hierarchy(&mut self, class_name: &str, class_decl: &'a DeclaracaoClasse) {
         let mut stack: Vec<String> = Vec::new();
-        self.resolve_class_hierarchy_with_stack(class_name, class_decl, &mut stack);
+        self.resolve_class_hierarchy_with_stack(class_name, class_decl, &mut stack, 0);
     }
 
     fn resolve_class_hierarchy_with_stack(
@@ -551,6 +793,7 @@ impl<'a> VerificadorTipos<'a> {
         class_name: &str,
         class_decl: &'a DeclaracaoClasse,
         stack: &mut Vec<String>,
+        depth: usize,
     ) {
         if self.resolved_classes.contains_key(class_name) {
             return;
@@ -568,7 +811,6 @@ impl<'a> VerificadorTipos<'a> {
         }
 
         stack.push(class_name.to_string());
-
         // Para herança correta no backend LLVM, os membros do pai devem vir primeiro
         // no layout da classe, seguidos pelos membros específicos do filho (base-prefix layout).
         let mut properties: Vec<&'a ast::PropriedadeClasse> = Vec::new();
@@ -578,7 +820,6 @@ impl<'a> VerificadorTipos<'a> {
             .iter()
             .map(|m| (m.nome.clone(), m))
             .collect();
-
         // Vamos calcular dinamicamente o pai e as interfaces finais, pois o primeiro item após ':' pode ser uma interface
         let mut interfaces_final: Vec<String> = class_decl
             .interfaces
@@ -619,7 +860,12 @@ impl<'a> VerificadorTipos<'a> {
                 ));
             } else if let Some(parent_decl) = self.classes.get(&parent_name).copied() {
                 // Resolve pai primeiro (DFS)
-                self.resolve_class_hierarchy_with_stack(&parent_name, parent_decl, stack);
+                self.resolve_class_hierarchy_with_stack(
+                    &parent_name,
+                    parent_decl,
+                    stack,
+                    depth + 1,
+                );
                 if let Some(parent_info) = self.resolved_classes.get(&parent_name) {
                     // Herda membros do pai, preservando ordem
                     properties.extend(parent_info.properties.iter().cloned());
@@ -638,7 +884,7 @@ impl<'a> VerificadorTipos<'a> {
                 );
                 if self.interfaces.contains_key(&iface_fqn) {
                     interfaces_final.push(parent_name_simple.clone());
-                    // Sem classe pai efetiva
+                // Sem classe pai efetiva
                 } else {
                     // Nem classe, nem interface conhecida — erro
                     self.erros.push(format!(
@@ -647,8 +893,29 @@ impl<'a> VerificadorTipos<'a> {
                     ));
                 }
             }
+        } else if class_name != "objeto" {
+            // Por padrão, todas as classes herdam de 'objeto' (exceto o próprio 'objeto')
+            let parent_name = "objeto".to_string();
+            if let Some(parent_decl) = self.classes.get(&parent_name).copied() {
+                self.resolve_class_hierarchy_with_stack(
+                    &parent_name,
+                    parent_decl,
+                    stack,
+                    depth + 1,
+                );
+                if let Some(parent_info) = self.resolved_classes.get(&parent_name) {
+                    properties.extend(parent_info.properties.iter().cloned());
+                    fields.extend(parent_info.fields.iter().cloned());
+                    for (name, method) in &parent_info.methods {
+                        methods.entry(name.clone()).or_insert(method);
+                    }
+                }
+                parent_effective = Some(parent_name);
+            } else {
+                self.erros
+                    .push("Classe base 'objeto' não encontrada no sistema.".into());
+            }
         }
-
         // Agora adiciona os membros do próprio filho (sem duplicados), ao final
         for p in &class_decl.propriedades {
             if !properties.iter().any(|ep| ep.nome == p.nome) {
@@ -704,38 +971,37 @@ impl<'a> VerificadorTipos<'a> {
     }
 
     pub fn resolver_nome_classe(&self, nome_classe: &str, namespace_atual: &str) -> String {
-        println!(
-            "DEBUG: Resolvendo nome de classe: \"{}\", namespace atual: \"{}\"",
-            nome_classe, namespace_atual
-        );
         if nome_classe.contains('.') {
-            println!("DEBUG: Nome já qualificado: {}", nome_classe);
             return nome_classe.to_string();
         }
         if !namespace_atual.is_empty() {
             let fqn = format!("{}.{}", namespace_atual, nome_classe);
-            println!("DEBUG: Tentando FQN com namespace atual: {}", fqn);
             if self.classes.contains_key(&fqn) {
-                println!("DEBUG: Encontrado FQN com namespace atual: {}", fqn);
                 return fqn;
+            }
+        }
+        // NOVO: Consultar biblioteca externa primeiro
+        if let Some(bib) = &self.biblioteca_externa {
+            for using_path in &self.usings {
+                let fqn = format!("{}.{}", using_path, nome_classe);
+                if bib.simbolos.contains_key(&fqn) {
+                    return fqn; // Classe existe na biblioteca externa
+                }
             }
         }
         for using_path in &self.usings {
             let fqn = format!("{}.{}", using_path, nome_classe);
-            println!("DEBUG: Tentando FQN com using: {}", fqn);
             if self.classes.contains_key(&fqn) {
-                println!("DEBUG: Encontrado FQN com using: {}", fqn);
+                return fqn;
+            }
+            // Se o using é um namespace stdlib, confia que a classe existe
+            if self.eh_classe_stdlib(using_path) {
                 return fqn;
             }
         }
         if self.classes.contains_key(nome_classe) {
-            println!("DEBUG: Encontrado como classe global: {}", nome_classe);
             return nome_classe.to_string();
         }
-        println!(
-            "DEBUG: Classe \"{}\" não resolvida. Retornando nome original.",
-            nome_classe
-        );
         nome_classe.to_string()
     }
 
@@ -869,6 +1135,10 @@ impl<'a> VerificadorTipos<'a> {
         );
         match declaracao {
             Declaracao::DeclaracaoClasse(classe) => {
+                let params: std::collections::HashSet<String> =
+                    classe.generic_params.iter().cloned().collect();
+                self.generic_scope.push(params);
+
                 let fqn = if namespace_atual.is_empty() {
                     classe.nome.clone()
                 } else {
@@ -910,6 +1180,20 @@ impl<'a> VerificadorTipos<'a> {
                     ));
                 }
                 for metodo in &classe.metodos {
+                    let is_nativo = metodo.attributes.iter().any(|a| a.name == "Nativo");
+                    // Um método é "externo" quando tem corpo vazio, não é abstrato, e tem o atributo [Nativo]
+                    // (parseado via palavra-chave `externo` no parser).
+                    let is_externo = !metodo.eh_abstrato && !is_nativo && metodo.corpo.is_empty()
+                        && !metodo.eh_virtual && !metodo.eh_override;
+                    let _ = is_externo; // será usado em validações futuras
+
+                    if is_nativo && !metodo.corpo.is_empty() {
+                        self.erros.push(format!(
+                            "Método nativo '{}' não pode ter corpo em '{}'",
+                            metodo.nome, fqn
+                        ));
+                    }
+
                     let mut metodo_vars = escopo_vars.clone();
                     // Validação de override/virtual
                     if let Some(parent_simple) = &classe.classe_pai {
@@ -957,7 +1241,10 @@ impl<'a> VerificadorTipos<'a> {
                         "DEBUG: Verificando método \"{}\". Parâmetros no escopo: {:?}",
                         metodo.nome, metodo_vars
                     );
-                    if !metodo.eh_abstrato {
+
+                    let eh_stdlib = self.eh_classe_stdlib(&fqn);
+
+                    if !metodo.eh_abstrato && !is_nativo && !eh_stdlib {
                         for comando in &metodo.corpo {
                             self.verificar_comando(
                                 comando,
@@ -968,9 +1255,19 @@ impl<'a> VerificadorTipos<'a> {
                         }
                     }
                 }
+                self.generic_scope.pop();
             }
             Declaracao::DeclaracaoFuncao(funcao) => {
                 println!("DEBUG: Verificando função \"{}\"", funcao.nome);
+                let is_nativo = funcao.attributes.iter().any(|a| a.name == "Nativo");
+
+                if is_nativo && !funcao.corpo.is_empty() {
+                    self.erros.push(format!(
+                        "Função nativa '{}' não pode ter corpo.",
+                        funcao.nome
+                    ));
+                }
+
                 let mut func_vars = escopo_vars.clone();
                 for param in &funcao.parametros {
                     func_vars.insert(param.nome.clone(), param.tipo.clone());
@@ -979,8 +1276,13 @@ impl<'a> VerificadorTipos<'a> {
                     "DEBUG: Verificando função \"{}\". Parâmetros no escopo: {:?}",
                     funcao.nome, func_vars
                 );
-                for comando in &funcao.corpo {
-                    self.verificar_comando(comando, namespace_atual, None, &mut func_vars);
+
+                let eh_stdlib = self.stdlib_namespaces.contains(namespace_atual);
+
+                if !is_nativo && !eh_stdlib {
+                    for comando in &funcao.corpo {
+                        self.verificar_comando(comando, namespace_atual, None, &mut func_vars);
+                    }
                 }
             }
             Declaracao::Comando(cmd) => {
@@ -990,7 +1292,6 @@ impl<'a> VerificadorTipos<'a> {
             _ => {}
         }
     }
-
     fn verificar_comando(
         &mut self,
         comando: &Comando,
@@ -1137,6 +1438,19 @@ impl<'a> VerificadorTipos<'a> {
                             nome_classe
                         ));
                     }
+                } else if obj_tipo == Tipo::Inferido || obj_tipo == Tipo::Objeto {
+                    // Treat Inferido or Objeto as a dynamic object to avoid blocking compilation of library code
+                    // that might have complex late-bound types.
+                    let val_tipo = self.inferir_tipo_expressao(
+                        val_expr,
+                        namespace_atual,
+                        classe_atual,
+                        escopo_vars,
+                    );
+                    println!(
+                        "DEBUG: Atribuição dinâmica ({:?}): prop=\"{}\", valor={:?}",
+                        obj_tipo, prop_nome, val_tipo
+                    );
                 } else {
                     self.erros
                         .push("Atribuição de propriedade em algo que não é um objeto.".to_string());
@@ -1289,6 +1603,7 @@ impl<'a> VerificadorTipos<'a> {
             Expressao::FlutuanteLiteral(_) => Tipo::Flutuante,
             Expressao::DuploLiteral(_) => Tipo::Duplo,
             Expressao::Decimal(_) => Tipo::Decimal,
+            Expressao::Nulo => Tipo::Classe("objeto".to_string()),
             Expressao::Este => {
                 classe_atual.map_or(Tipo::Inferido, |nome| Tipo::Classe(nome.clone()))
             }
@@ -1310,9 +1625,28 @@ impl<'a> VerificadorTipos<'a> {
                         }
                     }
                 }
+                // Se o nome é um namespace stdlib (ex: "Sistema"), trata como classe para acesso a membros
+                if self.eh_classe_stdlib(nome) {
+                    return Tipo::Classe(nome.to_string());
+                }
                 // Classe?
                 let fqn_class = self.resolver_nome_classe(nome, namespace_atual);
                 if self.classes.contains_key(&fqn_class) {
+                    return Tipo::Classe(fqn_class);
+                }
+                // NOVO: Verificar se a classe está na biblioteca externa
+                if let Some(bib) = &self.biblioteca_externa {
+                    if bib.simbolos.contains_key(&fqn_class) {
+                        return Tipo::Classe(fqn_class);
+                    }
+                }
+                // Se a classe está em um namespace stdlib, confia que existe (evita erro)
+                let namespace_do_identificador = if fqn_class.contains('.') {
+                    fqn_class.rfind('.').map(|i| &fqn_class[..i]).unwrap_or("")
+                } else {
+                    ""
+                };
+                if self.eh_classe_stdlib(&namespace_do_identificador) {
                     return Tipo::Classe(fqn_class);
                 }
                 // Enum?
@@ -1331,8 +1665,26 @@ impl<'a> VerificadorTipos<'a> {
                     classe_atual,
                     escopo_vars,
                 );
-                if let Tipo::Classe(ref nome_classe) = obj_tipo {
-                    if let Some(class_info) = self.resolved_classes.get(nome_classe) {
+
+                let lookup_class_name = match &obj_tipo {
+                    Tipo::Classe(nome) => Some(nome.clone()),
+                    Tipo::Aplicado { nome, .. } => Some(nome.clone()),
+                    _ => None,
+                };
+
+                if let Some(nome_classe) = lookup_class_name {
+                    let fqn = self.resolver_nome_classe(&nome_classe, namespace_atual);
+                    
+                    // NOVO: Consultar biblioteca externa para métodos
+                    if let Some(bib) = &self.biblioteca_externa {
+                        if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&fqn) {
+                            if let Some(metodo) = lib_classe.metodos.get(membro_nome) {
+                                return string_para_tipo(&metodo.tipo_retorno);
+                            }
+                        }
+                    }
+                    
+                    if let Some(class_info) = self.resolved_classes.get(&fqn) {
                         if let Some(prop) = class_info
                             .properties
                             .iter()
@@ -1371,6 +1723,12 @@ impl<'a> VerificadorTipos<'a> {
                         ));
                     }
                 }
+
+                // Fallback: if the object is a class, we return Inferido but avoid immediate error
+                if let Tipo::Classe(_) = obj_tipo {
+                    return Tipo::Inferido;
+                }
+
                 Tipo::Inferido
             }
             Expressao::ListaLiteral(items) => {
@@ -1385,7 +1743,6 @@ impl<'a> VerificadorTipos<'a> {
                         self.inferir_tipo_expressao(e, namespace_atual, classe_atual, escopo_vars)
                     })
                     .collect();
-
                 // 1) Se todos compatíveis com o primeiro (e vice-versa), use o primeiro
                 let first = tipos[0].clone();
                 let mut todos_compat = true;
@@ -1400,8 +1757,8 @@ impl<'a> VerificadorTipos<'a> {
                 if todos_compat {
                     return Tipo::Lista(Box::new(first));
                 }
-
                 // 2) Se todos forem classes, tentar achar interface comum
+
                 let classes: Option<Vec<String>> = tipos
                     .iter()
                     .map(|t| {
@@ -1430,7 +1787,6 @@ impl<'a> VerificadorTipos<'a> {
                         }
                     }
                 }
-
                 // 3) Falha — tipos heterogêneos sem supertipo comum
                 self.erros
                     .push("Elementos do array devem ter tipos compatíveis".into());
@@ -1450,8 +1806,15 @@ impl<'a> VerificadorTipos<'a> {
                 self.erros.push("Acesso por índice requer lista".into());
                 Tipo::Inferido
             }
-            Expressao::NovoObjeto(nome_classe, _) => {
-                Tipo::Classe(self.resolver_nome_classe(nome_classe, namespace_atual))
+            Expressao::NovoObjeto(t, _) => {
+                let (t_norm, mut errs) = self.normalize_tipo_ro(t, namespace_atual);
+                self.erros.append(&mut errs);
+                t_norm
+            }
+            Expressao::NovoArray(t, _) => {
+                let (t_norm, mut errs) = self.normalize_tipo_ro(t, namespace_atual);
+                self.erros.append(&mut errs);
+                Tipo::Lista(Box::new(t_norm))
             }
             Expressao::Aritmetica(_, esq, dir) => {
                 let te =
@@ -1470,6 +1833,30 @@ impl<'a> VerificadorTipos<'a> {
             }
             Expressao::Comparacao(_, _, _) => Tipo::Booleano,
             Expressao::Logica(_, _, _) => Tipo::Booleano,
+            Expressao::ChamadaMetodo(obj_expr, metodo_nome, _args) => {
+                let obj_tipo = self.inferir_tipo_expressao(
+                    obj_expr,
+                    namespace_atual,
+                    classe_atual,
+                    escopo_vars,
+                );
+                if let Tipo::Classe(nome_classe) = obj_tipo {
+                    // NOVO: Consultar biblioteca externa primeiro
+                    if let Some(bib) = &self.biblioteca_externa {
+                        if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&nome_classe) {
+                            if let Some(metodo) = lib_classe.metodos.get(metodo_nome) {
+                                return string_para_tipo(&metodo.tipo_retorno);
+                            }
+                        }
+                    }
+                    if let Some(class_info) = self.resolved_classes.get(&nome_classe) {
+                        if let Some(metodo) = class_info.methods.get(metodo_nome) {
+                            return metodo.tipo_retorno.clone().unwrap_or(Tipo::Vazio);
+                        }
+                    }
+                }
+                Tipo::Inferido
+            }
             _ => Tipo::Inferido,
         }
     }
@@ -1486,6 +1873,7 @@ impl<'a> VerificadorTipos<'a> {
             Expressao::Texto(_) => Tipo::Texto,
             Expressao::Booleano(_) => Tipo::Booleano,
             Expressao::Decimal(_) => Tipo::Decimal,
+            Expressao::Nulo => Tipo::Classe("objeto".to_string()),
             Expressao::Este => {
                 classe_atual.map_or(Tipo::Inferido, |nome| Tipo::Classe(nome.clone()))
             }
@@ -1511,6 +1899,12 @@ impl<'a> VerificadorTipos<'a> {
                 if self.classes.contains_key(&fqn_class) {
                     return Tipo::Classe(fqn_class);
                 }
+                // NOVO: Verificar se a classe está na biblioteca externa
+                if let Some(bib) = &self.biblioteca_externa {
+                    if bib.simbolos.contains_key(&fqn_class) {
+                        return Tipo::Classe(fqn_class);
+                    }
+                }
                 let fqn_enum = self.resolver_nome_enum(nome, namespace_atual);
                 if self.enums.contains_key(&fqn_enum) {
                     return Tipo::Enum(fqn_enum);
@@ -1521,6 +1915,14 @@ impl<'a> VerificadorTipos<'a> {
                 let obj_tipo =
                     self.get_expr_type(obj_expr, namespace_atual, classe_atual, escopo_vars);
                 if let Tipo::Classe(ref nome_classe) = obj_tipo {
+                    // NOVO: Consultar biblioteca externa primeiro
+                    if let Some(bib) = &self.biblioteca_externa {
+                        if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(nome_classe) {
+                            if let Some(metodo) = lib_classe.metodos.get(membro_nome) {
+                                return string_para_tipo(&metodo.tipo_retorno);
+                            }
+                        }
+                    }
                     if let Some(class_info) = self.resolved_classes.get(nome_classe) {
                         if let Some(prop) = class_info
                             .properties
@@ -1565,8 +1967,13 @@ impl<'a> VerificadorTipos<'a> {
                 }
                 Tipo::Inferido
             }
-            Expressao::NovoObjeto(nome_classe, _) => {
-                Tipo::Classe(self.resolver_nome_classe(nome_classe, namespace_atual))
+            Expressao::NovoObjeto(t, _) => {
+                let (t_norm, _) = self.normalize_tipo_ro(t, namespace_atual);
+                t_norm
+            }
+            Expressao::NovoArray(t, _) => {
+                let (t_norm, _) = self.normalize_tipo_ro(t, namespace_atual);
+                Tipo::Lista(Box::new(t_norm))
             }
             Expressao::Aritmetica(_, esq, dir) => {
                 let te = self.get_expr_type(esq, namespace_atual, classe_atual, escopo_vars);

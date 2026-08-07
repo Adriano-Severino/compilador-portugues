@@ -8,6 +8,7 @@ pub fn criar_biblioteca_padrao() -> Vec<Declaracao> {
 
     // Funções de I/O básicas em português: EscreverLinha e LerLinha
     stdlib.push(Declaracao::DeclaracaoFuncao(DeclaracaoFuncao {
+        attributes: vec![],
         nome: "EscreverLinha".to_string(),
         generic_params: vec![],
         parametros: vec![Parametro {
@@ -21,6 +22,7 @@ pub fn criar_biblioteca_padrao() -> Vec<Declaracao> {
         eh_estatica: false,
     }));
     stdlib.push(Declaracao::DeclaracaoFuncao(DeclaracaoFuncao {
+        attributes: vec![],
         nome: "LerLinha".to_string(),
         generic_params: vec![],
         parametros: vec![],
@@ -35,6 +37,7 @@ pub fn criar_biblioteca_padrao() -> Vec<Declaracao> {
 
 fn criar_funcoes_matematicas() -> Vec<Declaracao> {
     vec![Declaracao::DeclaracaoFuncao(DeclaracaoFuncao {
+        attributes: vec![],
         nome: "abs".to_string(),
         generic_params: vec![],
         parametros: vec![Parametro {

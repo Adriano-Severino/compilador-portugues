@@ -79,6 +79,113 @@ impl GeradorCodigo {
         let bytecode = generator.generate();
         fs::write(format!("{}.pbc", nome_base), bytecode.join("\n")).map_err(|e| e.to_string())
     }
+
+    pub fn gerar_bytecode_para_biblioteca<'a>(
+        &mut self,
+        programa: &'a ast::Programa,
+        type_checker: &'a mut crate::type_checker::VerificadorTipos,
+    ) -> Result<String, String> {
+        let mut generator = bytecode::BytecodeGenerator::new(programa, type_checker);
+        let bytecode = generator.generate_for_library();
+        Ok(bytecode.join("\n"))
+    }
+
+    /// Gera um arquivo `.pbl` (Biblioteca Por do Sol) composto de:
+    ///   1. Seção `[MANIFESTO]` — metadados de tipos públicos (usado pelo compilador para análise semântica)
+    ///   2. Seção `[BYTECODE]`  — bytecode dos métodos com corpo (carregado pelo runtime quando necessário)
+    ///
+    /// O formato é inspirado no modelo de Reference Assemblies do .NET:
+    ///   • O compilador lê apenas o [MANIFESTO] para verificação de tipos.
+    ///   • O runtime carrega o [BYTECODE] sob demanda (tree-shaking futuro).
+    pub fn gerar_pbl<'a>(
+        &mut self,
+        programa: &'a ast::Programa,
+        type_checker: &'a mut crate::type_checker::VerificadorTipos,
+        nome_biblioteca: &str,
+        versao: &str,
+    ) -> Result<String, String> {
+        use std::fmt::Write as FmtWrite;
+        let mut manifesto = String::new();
+        let mut bytecode_secao = String::new();
+
+        // Cabeçalho do arquivo .pbl
+        writeln!(manifesto, "[PBL]").ok();
+        writeln!(manifesto, "nome={}", nome_biblioteca).ok();
+        writeln!(manifesto, "versao={}", versao).ok();
+        writeln!(manifesto).ok();
+        writeln!(manifesto, "[MANIFESTO]").ok();
+
+        // Itera namespaces e classes para gerar o manifesto
+        for ns in &programa.namespaces {
+            let ns_nome = &ns.nome;
+            for decl in &ns.declaracoes {
+                if let ast::Declaracao::DeclaracaoClasse(cl) = decl {
+                    let fqn = format!("{}.{}", ns_nome, cl.nome);
+                    if cl.eh_estatica {
+                        writeln!(manifesto, "DEFINE_STATIC_CLASS {}", fqn).ok();
+                    } else {
+                        writeln!(manifesto, "DEFINE_CLASS {} NULO", fqn).ok();
+                    }
+                    for prop in &cl.propriedades {
+                        writeln!(manifesto, "PROPERTY {} {} {}", fqn, prop.nome, prop.tipo).ok();
+                    }
+                    for campo in &cl.campos {
+                        if campo.modificador == ast::ModificadorAcesso::Publico {
+                            writeln!(manifesto, "FIELD {} {} {}", fqn, campo.nome, campo.tipo).ok();
+                        }
+                    }
+                    for metodo in &cl.metodos {
+                        let ret = metodo.tipo_retorno.as_ref()
+                            .map(|t| t.to_string())
+                            .unwrap_or_else(|| "vazio".to_string());
+                        let params: Vec<String> = metodo.parametros.iter()
+                            .map(|p| format!("{}:{}", p.tipo, p.nome))
+                            .collect();
+                        let is_nativo = metodo.attributes.iter().any(|a| a.name == "Nativo");
+                        // Extrai a chave nativa se presente
+                        let chave_nativa = metodo.attributes.iter()
+                            .find(|a| a.name == "Nativo")
+                            .and_then(|a| a.arguments.first())
+                            .and_then(|e| if let ast::Expressao::Texto(s) = e { Some(s.clone()) } else { None });
+                        if metodo.eh_estatica {
+                            if let Some(chave) = &chave_nativa {
+                                writeln!(manifesto, "DEFINE_STATIC_NATIVE_METHOD {} {} {} {} {}",
+                                    fqn, metodo.nome, ret, chave, params.join(" ")).ok();
+                            } else {
+                                writeln!(manifesto, "DEFINE_STATIC_METHOD {} {} {} {} {}",
+                                    fqn, metodo.nome, ret, params.len(), params.join(" ")).ok();
+                            }
+                        } else {
+                            if let Some(chave) = &chave_nativa {
+                                writeln!(manifesto, "DEFINE_NATIVE_METHOD {} {} {} {} {}",
+                                    fqn, metodo.nome, ret, chave, params.join(" ")).ok();
+                            } else {
+                                writeln!(manifesto, "DEFINE_METHOD {} {} {} {} {}",
+                                    fqn, metodo.nome, ret, params.len(), params.join(" ")).ok();
+                            }
+                        }
+                        // Métodos com corpo entram no bytecode
+                        if !is_nativo && !metodo.eh_abstrato && !metodo.corpo.is_empty() {
+                            // Placeholder - o bytecode completo será gerado abaixo
+                            // Não movemos o type_checker aqui
+                        }
+                    }
+                }
+            }
+        }
+
+        writeln!(manifesto).ok();
+        writeln!(manifesto, "[BYTECODE]").ok();
+
+        // Gera o bytecode completo para a seção [BYTECODE]
+        let mut gen = bytecode::BytecodeGenerator::new(programa, type_checker);
+        let bc = gen.generate_for_library();
+        for linha in &bc {
+            writeln!(bytecode_secao, "{}", linha).ok();
+        }
+
+        Ok(format!("{}\n{}", manifesto, bytecode_secao))
+    }
 }
 
 /// Gera apenas o LLVM IR (string), sem invocar o clang.

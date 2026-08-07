@@ -18,5 +18,7 @@ pub struct CraneliftJit;
 
 #[cfg(not(feature = "jit"))]
 impl CraneliftJit {
-    pub fn new() -> Result<Self, JitError> { Err(JitError::NaoSuportado("compilado sem feature 'jit'")) }
+    pub fn new() -> Result<Self, JitError> {
+        Err(JitError::NaoSuportado("compilado sem feature 'jit'"))
+    }
 }

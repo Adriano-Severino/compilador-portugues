@@ -202,7 +202,60 @@ impl VM {
         }
     }
 
+    /// Verifica se um nome de classe pertence ao namespace da biblioteca padrão (Sistema.*)
+    fn eh_classe_stdlib(nome_classe: &str) -> bool {
+        nome_classe.starts_with("Sistema.")
+            || nome_classe == "ClienteHttp"
+            || nome_classe == "Sistema"
+    }
+
     fn criar_objeto(&mut self, nome_classe: &str, argumentos: Vec<Valor>) -> Result<Valor, String> {
+        // --- Intercepta instâncias de classes da biblioteca padrão (igual ao CLR do C#) ---
+        if Self::eh_classe_stdlib(nome_classe) {
+            // Resolve o nome qualificado completo para classes sem namespace explícito
+            let fqn = if nome_classe.contains('.') {
+                nome_classe.to_string()
+            } else {
+                // Tenta encontrar por nome curto nos namespaces conhecidos
+                let candidatos = [
+                    format!("Sistema.Rede.{}", nome_classe),
+                    format!("Sistema.IO.{}", nome_classe),
+                    format!("Sistema.Colecoes.{}", nome_classe),
+                    format!("Sistema.Data.{}", nome_classe),
+                    nome_classe.to_string(),
+                ];
+                candidatos.into_iter().next().unwrap_or_default()
+            };
+            // Cria um objeto stub com o estado interno necessário
+            let mut campos_map = HashMap::new();
+            campos_map.insert("__fqn__".to_string(), Valor::Texto(fqn.clone()));
+            // Estado específico por tipo
+            match fqn.as_str() {
+                "Sistema.Rede.ClienteHttp" | "ClienteHttp" => {
+                    campos_map.insert(
+                        "__tipo__".to_string(),
+                        Valor::Texto("ClienteHttp".to_string()),
+                    );
+                }
+                "Sistema.Colecoes.Lista" => {
+                    campos_map.insert("__itens__".to_string(), Valor::Array(Vec::new()));
+                }
+                "Sistema.Colecoes.Dicionario" => {
+                    campos_map.insert("__itens__".to_string(), Valor::Array(Vec::new()));
+                }
+                "Sistema.Data.Data" => {
+                    let agora = chrono_or_default_date();
+                    campos_map.insert("__data__".to_string(), Valor::Texto(agora));
+                }
+                _ => {}
+            }
+            return Ok(Valor::Objeto {
+                nome_classe: fqn,
+                campos: Rc::new(RefCell::new(campos_map)),
+                metodos: HashMap::new(),
+            });
+        }
+
         let classe_info = self
             .classes
             .get(nome_classe)
@@ -265,8 +318,140 @@ impl VM {
         argumentos: Vec<Valor>,
     ) -> Result<Valor, String> {
         if let Valor::Texto(s) = objeto {
-            if nome_metodo == "comprimento" {
-                return Ok(Valor::Inteiro(s.len() as i64));
+            match nome_metodo {
+                "comprimento" => return Ok(Valor::Inteiro(s.len() as i64)),
+                "ParaMaiusculo" => return Ok(Valor::Texto(s.to_uppercase())),
+                "ParaMinusculo" => return Ok(Valor::Texto(s.to_lowercase())),
+                "Aparar" => return Ok(Valor::Texto(s.trim().to_string())),
+                "Contem" => {
+                    let busca = argumentos
+                        .first()
+                        .map(|v| v.to_string())
+                        .unwrap_or_default();
+                    return Ok(Valor::Booleano(s.contains(busca.as_str())));
+                }
+                "Substituir" => {
+                    let de = argumentos
+                        .first()
+                        .map(|v| v.to_string())
+                        .unwrap_or_default();
+                    let para = argumentos.get(1).map(|v| v.to_string()).unwrap_or_default();
+                    return Ok(Valor::Texto(s.replace(de.as_str(), para.as_str())));
+                }
+                _ => {}
+            }
+        }
+
+        // --- Intercepta métodos de instâncias da biblioteca padrão ---
+        if let Valor::Objeto {
+            ref nome_classe,
+            ref campos,
+            ..
+        } = objeto.clone()
+        {
+            if Self::eh_classe_stdlib(nome_classe) {
+                let fqn = nome_classe.clone();
+                match fqn.as_str() {
+                    // Lista nativa (Sistema.Colecoes.Lista)
+                    "Sistema.Colecoes.Lista" => {
+                        let mut campos_ref = campos.borrow_mut();
+                        match nome_metodo {
+                            "Adicionar" => {
+                                let item = argumentos.into_iter().next().unwrap_or(Valor::Nulo);
+                                if let Some(Valor::Array(ref mut v)) =
+                                    campos_ref.get_mut("__itens__")
+                                {
+                                    v.push(item);
+                                }
+                                return Ok(Valor::Nulo);
+                            }
+                            "Obter" => {
+                                let idx = argumentos
+                                    .first()
+                                    .and_then(|v| {
+                                        if let Valor::Inteiro(i) = v {
+                                            Some(*i as usize)
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .unwrap_or(0);
+                                if let Some(Valor::Array(ref v)) = campos_ref.get("__itens__") {
+                                    return Ok(v.get(idx).cloned().unwrap_or(Valor::Nulo));
+                                }
+                                return Ok(Valor::Nulo);
+                            }
+                            "Tamanho" | "Contagem" => {
+                                if let Some(Valor::Array(ref v)) = campos_ref.get("__itens__") {
+                                    return Ok(Valor::Inteiro(v.len() as i64));
+                                }
+                                return Ok(Valor::Inteiro(0));
+                            }
+                            "Remover" | "RemoverEm" => {
+                                let idx = argumentos
+                                    .first()
+                                    .and_then(|v| {
+                                        if let Valor::Inteiro(i) = v {
+                                            Some(*i as usize)
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .unwrap_or(0);
+                                if let Some(Valor::Array(ref mut v)) =
+                                    campos_ref.get_mut("__itens__")
+                                {
+                                    if idx < v.len() {
+                                        v.remove(idx);
+                                    }
+                                }
+                                return Ok(Valor::Nulo);
+                            }
+                            "Limpar" => {
+                                if let Some(Valor::Array(ref mut v)) =
+                                    campos_ref.get_mut("__itens__")
+                                {
+                                    v.clear();
+                                }
+                                return Ok(Valor::Nulo);
+                            }
+                            "Contem" => {
+                                let item = argumentos.first().cloned().unwrap_or(Valor::Nulo);
+                                if let Some(Valor::Array(ref v)) = campos_ref.get("__itens__") {
+                                    return Ok(Valor::Booleano(v.contains(&item)));
+                                }
+                                return Ok(Valor::Booleano(false));
+                            }
+                            _ => return Ok(Valor::Nulo),
+                        }
+                    }
+                    // ClienteHttp nativa (stub assíncrono)
+                    "Sistema.Rede.ClienteHttp" | "ClienteHttp" => match nome_metodo {
+                        "ObterAsync" | "Obter" => {
+                            eprintln!(
+                                "[aviso] ClienteHttp.{} não implementado neste ambiente",
+                                nome_metodo
+                            );
+                            return Ok(Valor::Texto(String::new()));
+                        }
+                        "EnviarAsync" | "Enviar" => {
+                            eprintln!(
+                                "[aviso] ClienteHttp.{} não implementado neste ambiente",
+                                nome_metodo
+                            );
+                            return Ok(Valor::Nulo);
+                        }
+                        _ => return Ok(Valor::Nulo),
+                    },
+                    // Fallback para classes stdlib sem handler específico
+                    _ => {
+                        eprintln!(
+                            "[aviso stdlib] Método '{}' em '{}' não implementado; retornando nulo",
+                            nome_metodo, fqn
+                        );
+                        return Ok(Valor::Nulo);
+                    }
+                }
             }
         }
 
@@ -339,6 +524,48 @@ impl VM {
         nome_metodo: &str,
         argumentos: Vec<Valor>,
     ) -> Result<Valor, String> {
+        // --- Intercepta chamadas para a biblioteca padrão ---
+        if nome_classe == "Sistema.Console" {
+            match nome_metodo {
+                "EscreverLinha" => {
+                    let mut texto = String::new();
+                    for arg in argumentos {
+                        if let Valor::Texto(s) = arg {
+                            texto.push_str(&s);
+                        } else {
+                            texto.push_str(&arg.to_string());
+                        }
+                    }
+                    println!("{}", texto);
+                    return Ok(Valor::Nulo);
+                }
+                "Escrever" => {
+                    let mut texto = String::new();
+                    for arg in argumentos {
+                        if let Valor::Texto(s) = arg {
+                            texto.push_str(&s);
+                        } else {
+                            texto.push_str(&arg.to_string());
+                        }
+                    }
+                    use std::io::Write;
+                    print!("{}", texto);
+                    let _ = std::io::stdout().flush();
+                    return Ok(Valor::Nulo);
+                }
+                "LerLinha" => {
+                    let mut entrada = String::new();
+                    std::io::stdin()
+                        .read_line(&mut entrada)
+                        .map_err(|e| format!("Erro ao ler entrada: {}", e))?;
+                    return Ok(Valor::Texto(
+                        entrada.trim_end_matches(['\r', '\n']).to_string(),
+                    ));
+                }
+                _ => {}
+            }
+        }
+        // --- Fallback para bytecode do método estático (classes do usuário) ---
         if let Some(classe_info) = self.classes.get(nome_classe) {
             if let Some(metodo_info) = classe_info.metodos_estaticos.get(nome_metodo) {
                 let mut vars = HashMap::new();
@@ -362,14 +589,25 @@ impl VM {
 
                 vm_metodo.run()?;
                 return Ok(vm_metodo.pilha.pop().unwrap_or(Valor::Nulo));
+            } else if Self::eh_classe_stdlib(nome_classe) {
+                // Método estático stdlib sem handler específico: retorna nulo com aviso
+                eprintln!(
+                    "[aviso stdlib] Método estático '{}.{}' não implementado; retornando nulo",
+                    nome_classe, nome_metodo
+                );
+                return Ok(Valor::Nulo);
             } else {
-                Err(format!(
+                return Err(format!(
                     "Método estático \"'{}.{}'\" não encontrado",
                     nome_classe, nome_metodo
-                ))
+                ));
             }
+        } else if Self::eh_classe_stdlib(nome_classe) {
+            // Classe stdlib não registrada no bytecode — handler nativo direto
+            eprintln!("[aviso stdlib] Método estático '{}.{}' chamado sem definição de classe; retornando nulo", nome_classe, nome_metodo);
+            return Ok(Valor::Nulo);
         } else {
-            Err(format!("Classe \"{}\" não encontrada", nome_classe))
+            return Err(format!("Classe \"{}\" não encontrada", nome_classe));
         }
     }
 
@@ -406,6 +644,12 @@ impl VM {
     }
 
     fn carregar_definicoes(&mut self) -> Result<(), String> {
+        fn limpa_parametro(raw: &str) -> String {
+            let mut clean = raw.split(':').last().unwrap_or(raw);
+            clean = clean.split('=').next().unwrap_or(clean);
+            clean.to_string()
+        }
+
         let mut i = 0;
         while i < self.bytecode.len() {
             let instrucao = self.bytecode[i].clone();
@@ -413,6 +657,28 @@ impl VM {
             let op = partes.get(0).unwrap_or(&"");
 
             match *op {
+                "DEFINE_STATIC_CLASS" => {
+                    let nome_classe = partes
+                        .get(1)
+                        .ok_or("DEFINE_STATIC_CLASS requer nome")?
+                        .to_string();
+                    self.classes.insert(
+                        nome_classe.clone(),
+                        ClasseInfo {
+                            nome: nome_classe.clone(),
+                            campos: Vec::new(),
+                            metodos: HashMap::new(),
+                            campos_estaticos: Rc::new(RefCell::new(HashMap::new())),
+                            metodos_estaticos: HashMap::new(),
+                            construtor: None,
+                            nome_classe_pai: None,
+                            construtor_params: Vec::new(),
+                            base_construtor_args: Vec::new(),
+                            constructor_body: Vec::new(),
+                        },
+                    );
+                    i += 1;
+                }
                 "DEFINE_CLASS" => {
                     let nome_classe = partes.get(1).ok_or("DEFINE_CLASS requer nome")?.to_string();
                     let parent_class = partes.get(2).map(|s| s.to_string());
@@ -491,7 +757,7 @@ impl VM {
                         .parse()
                         .map_err(|_| "Tamanho inválido")?;
                     let parametros: Vec<String> =
-                        partes.iter().skip(3).map(|s| s.to_string()).collect();
+                        partes.iter().skip(3).map(|s| limpa_parametro(s)).collect();
                     let corpo_inicio = i + 1;
                     let corpo_fim = corpo_inicio + tamanho;
                     if corpo_fim > self.bytecode.len() {
@@ -517,13 +783,14 @@ impl VM {
                         .get(2)
                         .ok_or("DEFINE_METHOD requer nome")?
                         .to_string();
+                    let _tipo_retorno = partes.get(3).unwrap_or(&"vazio");
                     let tamanho: usize = partes
-                        .get(3)
+                        .get(4)
                         .ok_or("DEFINE_METHOD requer tamanho")?
                         .parse()
                         .map_err(|_| "Tamanho inválido")?;
                     let parametros: Vec<String> =
-                        partes.iter().skip(4).map(|s| s.to_string()).collect();
+                        partes.iter().skip(5).map(|s| limpa_parametro(s)).collect();
                     let corpo_inicio = i + 1;
                     let corpo_fim = corpo_inicio + tamanho;
                     if corpo_fim > self.bytecode.len() {
@@ -574,13 +841,14 @@ impl VM {
                         .get(2)
                         .ok_or("DEFINE_STATIC_METHOD requer nome")?
                         .to_string();
+                    let _tipo_retorno = partes.get(3).unwrap_or(&"vazio");
                     let tamanho: usize = partes
-                        .get(3)
+                        .get(4)
                         .ok_or("DEFINE_STATIC_METHOD requer tamanho")?
                         .parse()
                         .map_err(|_| "Tamanho inválido")?;
                     let parametros: Vec<String> =
-                        partes.iter().skip(4).map(|s| s.to_string()).collect();
+                        partes.iter().skip(5).map(|s| limpa_parametro(s)).collect();
                     let corpo_inicio = i + 1;
                     let corpo_fim = corpo_inicio + tamanho;
                     if corpo_fim > self.bytecode.len() {
@@ -1263,7 +1531,10 @@ impl VM {
                                 .unwrap_or(Valor::Nulo);
                             self.pilha.push(valor);
                         }
-                        _ => return Err("GET_PROPERTY requer um objeto".to_string()),
+                        _ => {
+                            eprintln!("DEBUG: GET_PROPERTY {} falhou no ip = {}, codigo = {}, objeto era: {:?}", nome_propriedade, self.ip, self.code_id, objeto);
+                            return Err("GET_PROPERTY requer um objeto".to_string());
+                        }
                     }
                 }
 
@@ -1395,7 +1666,11 @@ impl VM {
                     let nome_var = partes
                         .get(1)
                         .ok_or("SET_DEFAULT requer um nome de variável")?;
-                    if !self.variaveis.contains_key(*nome_var) {
+                    let has_value = match self.variaveis.get(*nome_var) {
+                        Some(Valor::Nulo) | None => false,
+                        _ => true,
+                    };
+                    if !has_value {
                         let default_expr_bytecode_str = partes[2..].join(" ");
                         let mut temp_vm =
                             VM::new(vec![default_expr_bytecode_str], self.base_dir.clone());
@@ -1549,6 +1824,34 @@ impl VM {
                     self.pilha.push(vm.pilha.pop().unwrap_or(Valor::Nulo));
                 }
 
+                // === CHAMADAS NATIVAS (via atributo [Nativo("chave")]) ===
+                // CALL_STATIC_NATIVE <chave> <nargs>
+                "CALL_STATIC_NATIVE" => {
+                    let chave = partes.get(1).ok_or("CALL_STATIC_NATIVE requer chave")?.to_string();
+                    let nargs = partes.get(2).unwrap_or(&"0").parse::<usize>().unwrap_or(0);
+                    let args = if nargs > 0 && self.pilha.len() >= nargs {
+                        self.pilha.split_off(self.pilha.len() - nargs)
+                    } else {
+                        Vec::new()
+                    };
+                    let resultado = despachar_nativo_estatico(&chave, args)?;
+                    self.pilha.push(resultado);
+                }
+
+                // CALL_NATIVE <chave> <nargs>   (método de instância — 'este' já foi empilhado)
+                "CALL_NATIVE" => {
+                    let chave = partes.get(1).ok_or("CALL_NATIVE requer chave")?.to_string();
+                    let nargs = partes.get(2).unwrap_or(&"0").parse::<usize>().unwrap_or(0);
+                    let args = if nargs > 0 && self.pilha.len() >= nargs {
+                        self.pilha.split_off(self.pilha.len() - nargs)
+                    } else {
+                        Vec::new()
+                    };
+                    let este_val = self.pilha.pop().ok_or("Pilha vazia para 'este' em CALL_NATIVE")?;
+                    let resultado = despachar_nativo_instancia(&chave, este_val, args)?;
+                    self.pilha.push(resultado);
+                }
+
                 // Ignora comentários ou linhas vazias
                 op if op.starts_with(';') || op.is_empty() => {}
                 _ => {
@@ -1573,13 +1876,24 @@ impl VM {
                     i += 1;
                 }
                 i += 1; // Pula o END_CLASS
-            } else if instrucao.starts_with("DEFINE_FUNCTION") {
+            } else if instrucao.starts_with("DEFINE_STATIC_CLASS") {
+                // A classe estática não possui END_CLASS
+                i += 1;
+            } else if instrucao.starts_with("DEFINE_FUNCTION")
+                || instrucao.starts_with("DEFINE_METHOD")
+                || instrucao.starts_with("DEFINE_STATIC_METHOD")
+            {
                 // Pula a definição e seu corpo
                 let partes: Vec<&str> = instrucao.split(' ').collect();
                 let tamanho_str = if partes[0] == "DEFINE_CLASS" {
                     "0"
                 } else {
-                    partes.get(2).unwrap_or(&"0")
+                    if partes[0] == "DEFINE_FUNCTION" {
+                        partes.get(2).unwrap_or(&"0")
+                    } else {
+                        // DEFINE_METHOD e DEFINE_STATIC_METHOD
+                        partes.get(4).unwrap_or(&"0")
+                    }
                 };
                 let tamanho: usize = tamanho_str.parse().unwrap_or(0);
                 i += tamanho + 1;
@@ -1619,6 +1933,26 @@ impl VM {
             self.ip += 1;
 
             match *op {
+                "DEFINE_CLASS" => {
+                    while self.ip < self.bytecode.len()
+                        && !self.bytecode[self.ip].starts_with("END_CLASS")
+                    {
+                        self.ip += 1;
+                    }
+                    self.ip += 1; // Pula o END_CLASS
+                }
+                "DEFINE_STATIC_CLASS" => {
+                    // Sem END_CLASS, apenas pule a instrução atual
+                }
+                "DEFINE_FUNCTION" | "DEFINE_METHOD" | "DEFINE_STATIC_METHOD" => {
+                    let tamanho_str = if *op == "DEFINE_FUNCTION" {
+                        partes.get(2).unwrap_or(&"0")
+                    } else {
+                        partes.get(4).unwrap_or(&"0")
+                    };
+                    let tamanho: usize = tamanho_str.parse().unwrap_or(0);
+                    self.ip += tamanho;
+                }
                 "LOAD_CONST_STR" | "LOAD_CONST_INT" | "LOAD_CONST_BOOL" | "LOAD_CONST_NULL"
                 | "LOAD_CONST_FLOAT" | "LOAD_CONST_DOUBLE" => {
                     // Executa apenas as instruções de carregamento de constantes
@@ -1837,6 +2171,233 @@ impl VM {
     }
 }
 
+/// Retorna a data/hora atual como texto ISO 8601.
+/// Como não dependemos de chrono aqui, usa uma representação simples.
+fn chrono_or_default_date() -> String {
+    // Usa SystemTime para obter a data atual sem deps externas
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Cálculo simplificado de data a partir de segundos unix
+    let days = secs / 86400;
+    let years = 1970 + days / 365;
+    let rem_days = days % 365;
+    let months = rem_days / 30 + 1;
+    let day = rem_days % 30 + 1;
+    format!("{:04}-{:02}-{:02}", years, months, day)
+}
+
+/// Registro centralizado de funções nativas estáticas.
+/// Chave: string do atributo [Nativo("chave")], ex. "Console::EscreverLinha".
+/// Equivalente ao InternalCall do .NET CLR — sem acoplamento de nome entre .pr e Rust.
+fn despachar_nativo_estatico(chave: &str, args: Vec<Valor>) -> Result<Valor, String> {
+    match chave {
+        // ============ Sistema.Console ============
+        "Console::EscreverLinha" => {
+            let msg = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            println!("{}", msg);
+            Ok(Valor::Nulo)
+        }
+        "Console::Escrever" => {
+            let msg = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            use std::io::Write;
+            print!("{}", msg);
+            let _ = std::io::stdout().flush();
+            Ok(Valor::Nulo)
+        }
+        "Console::LerLinha" => {
+            let mut entrada = String::new();
+            std::io::stdin()
+                .read_line(&mut entrada)
+                .map_err(|e| format!("Erro ao ler entrada: {}", e))?;
+            Ok(Valor::Texto(entrada.trim_end_matches(['\r', '\n']).to_string()))
+        }
+
+        // ============ Sistema.IO.Arquivo ============
+        "Arquivo::LerTexto" => {
+            let caminho = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            let conteudo = fs::read_to_string(&caminho)
+                .map_err(|e| format!("Arquivo::LerTexto: {}", e))?;
+            Ok(Valor::Texto(conteudo))
+        }
+        "Arquivo::EscreverTexto" => {
+            let mut it = args.into_iter();
+            let caminho = it.next().map(|v| v.to_string()).unwrap_or_default();
+            let conteudo = it.next().map(|v| v.to_string()).unwrap_or_default();
+            fs::write(&caminho, &conteudo).map_err(|e| format!("Arquivo::EscreverTexto: {}", e))?;
+            Ok(Valor::Nulo)
+        }
+        "Arquivo::AdicionarTexto" => {
+            use std::io::Write;
+            let mut it = args.into_iter();
+            let caminho = it.next().map(|v| v.to_string()).unwrap_or_default();
+            let conteudo = it.next().map(|v| v.to_string()).unwrap_or_default();
+            let mut f = std::fs::OpenOptions::new()
+                .append(true).create(true).open(&caminho)
+                .map_err(|e| format!("Arquivo::AdicionarTexto: {}", e))?;
+            f.write_all(conteudo.as_bytes()).map_err(|e| format!("Arquivo::AdicionarTexto: {}", e))?;
+            Ok(Valor::Nulo)
+        }
+        "Arquivo::Existe" => {
+            let caminho = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            Ok(Valor::Booleano(std::path::Path::new(&caminho).is_file()))
+        }
+        "Arquivo::Excluir" => {
+            let caminho = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            fs::remove_file(&caminho).map_err(|e| format!("Arquivo::Excluir: {}", e))?;
+            Ok(Valor::Nulo)
+        }
+        "Arquivo::Copiar" => {
+            let mut it = args.into_iter();
+            let origem = it.next().map(|v| v.to_string()).unwrap_or_default();
+            let destino = it.next().map(|v| v.to_string()).unwrap_or_default();
+            fs::copy(&origem, &destino).map_err(|e| format!("Arquivo::Copiar: {}", e))?;
+            Ok(Valor::Nulo)
+        }
+        "Arquivo::Mover" => {
+            let mut it = args.into_iter();
+            let origem = it.next().map(|v| v.to_string()).unwrap_or_default();
+            let destino = it.next().map(|v| v.to_string()).unwrap_or_default();
+            fs::rename(&origem, &destino).map_err(|e| format!("Arquivo::Mover: {}", e))?;
+            Ok(Valor::Nulo)
+        }
+
+        // ============ Sistema.IO.Diretorio ============
+        "Diretorio::Existe" => {
+            let caminho = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            Ok(Valor::Booleano(std::path::Path::new(&caminho).is_dir()))
+        }
+        "Diretorio::Criar" => {
+            let caminho = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            fs::create_dir_all(&caminho).map_err(|e| format!("Diretorio::Criar: {}", e))?;
+            Ok(Valor::Nulo)
+        }
+        "Diretorio::Excluir" => {
+            let mut it = args.into_iter();
+            let caminho = it.next().map(|v| v.to_string()).unwrap_or_default();
+            let recursivo = matches!(it.next(), Some(Valor::Booleano(true)));
+            if recursivo {
+                fs::remove_dir_all(&caminho).map_err(|e| format!("Diretorio::Excluir: {}", e))?;
+            } else {
+                fs::remove_dir(&caminho).map_err(|e| format!("Diretorio::Excluir: {}", e))?;
+            }
+            Ok(Valor::Nulo)
+        }
+        "Diretorio::ObterAtual" => {
+            let cur = std::env::current_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Ok(Valor::Texto(cur))
+        }
+        "Diretorio::DefinirAtual" => {
+            let caminho = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            std::env::set_current_dir(&caminho).map_err(|e| format!("Diretorio::DefinirAtual: {}", e))?;
+            Ok(Valor::Nulo)
+        }
+
+        // ============ Sistema.Data.Data ============
+        "Data::Agora" | "Data::Hoje" => {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+            let days = secs / 86400;
+            let year = 1970 + days / 365;
+            let rem = days % 365;
+            let month = rem / 30 + 1;
+            let day = rem % 30 + 1;
+            let mut campos = HashMap::new();
+            campos.insert("Ano".to_string(), Valor::Inteiro(year as i64));
+            campos.insert("Mes".to_string(), Valor::Inteiro(month as i64));
+            campos.insert("Dia".to_string(), Valor::Inteiro(day as i64));
+            campos.insert("Hora".to_string(), Valor::Inteiro(0));
+            campos.insert("Minuto".to_string(), Valor::Inteiro(0));
+            campos.insert("Segundo".to_string(), Valor::Inteiro(0));
+            Ok(Valor::Objeto {
+                nome_classe: "Sistema.Data.Data".to_string(),
+                campos: Rc::new(RefCell::new(campos)),
+                metodos: HashMap::new(),
+            })
+        }
+
+        // ============ Sistema.Texto.Json ============
+        "Json::Serializar" => {
+            // Serialização básica para fins de demonstração
+            let obj = args.into_iter().next().unwrap_or(Valor::Nulo);
+            Ok(Valor::Texto(format!("{}", obj)))
+        }
+        "Json::ValidarJson" => {
+            let json = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            let valido = json.trim().starts_with('{') || json.trim().starts_with('[');
+            Ok(Valor::Booleano(valido))
+        }
+        "Json::Formatar" => {
+            let json = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            Ok(Valor::Texto(json)) // Retorna como está por ora
+        }
+
+        // ============ Sistema.Rede.ClienteHttp (estáticos não existem — só instância) ============
+
+        _ => {
+            eprintln!("[aviso nativo] Função nativa estática '{}' não implementada; retornando nulo", chave);
+            Ok(Valor::Nulo)
+        }
+    }
+}
+
+/// Registro de métodos nativos de instância.
+fn despachar_nativo_instancia(chave: &str, este: Valor, args: Vec<Valor>) -> Result<Valor, String> {
+    match chave {
+        // ============ Sistema.Data.Data — instância ============
+        "Data::Formatar" => {
+            let formato = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            if let Valor::Objeto { campos, .. } = &este {
+                let c = campos.borrow();
+                let dia = c.get("Dia").and_then(|v| if let Valor::Inteiro(n) = v { Some(*n) } else { None }).unwrap_or(1);
+                let mes = c.get("Mes").and_then(|v| if let Valor::Inteiro(n) = v { Some(*n) } else { None }).unwrap_or(1);
+                let ano = c.get("Ano").and_then(|v| if let Valor::Inteiro(n) = v { Some(*n) } else { None }).unwrap_or(2000);
+                let hora = c.get("Hora").and_then(|v| if let Valor::Inteiro(n) = v { Some(*n) } else { None }).unwrap_or(0);
+                let min = c.get("Minuto").and_then(|v| if let Valor::Inteiro(n) = v { Some(*n) } else { None }).unwrap_or(0);
+                let seg = c.get("Segundo").and_then(|v| if let Valor::Inteiro(n) = v { Some(*n) } else { None }).unwrap_or(0);
+                let resultado = formato
+                    .replace("dd", &format!("{:02}", dia))
+                    .replace("MM", &format!("{:02}", mes))
+                    .replace("aaaa", &format!("{:04}", ano))
+                    .replace("aa", &format!("{:02}", ano % 100))
+                    .replace("HH", &format!("{:02}", hora))
+                    .replace("mm", &format!("{:02}", min))
+                    .replace("ss", &format!("{:02}", seg));
+                Ok(Valor::Texto(resultado))
+            } else {
+                Ok(Valor::Texto(String::new()))
+            }
+        }
+
+        // ============ Sistema.Rede.ClienteHttp — instância ============
+        "ClienteHttp::Get" => {
+            let url = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            eprintln!("[aviso] ClienteHttp::Get('{}') — requer runtime HTTP; retornando vazio", url);
+            Ok(Valor::Texto(String::new()))
+        }
+        "ClienteHttp::Post" | "ClienteHttp::Put" => {
+            let mut it = args.into_iter();
+            let url = it.next().map(|v| v.to_string()).unwrap_or_default();
+            eprintln!("[aviso] ClienteHttp::Post/Put('{}') — requer runtime HTTP; retornando vazio", url);
+            Ok(Valor::Texto(String::new()))
+        }
+        "ClienteHttp::Delete" => {
+            let url = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            eprintln!("[aviso] ClienteHttp::Delete('{}') — requer runtime HTTP; retornando vazio", url);
+            Ok(Valor::Texto(String::new()))
+        }
+
+        _ => {
+            eprintln!("[aviso nativo] Método nativo de instância '{}' não implementado; retornando nulo", chave);
+            Ok(Valor::Nulo)
+        }
+    }
+}
+
 // Ponto de entrada do programa interpretador.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -1930,7 +2491,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         vm.functions
             .keys()
-            .find(|nome| nome.ends_with("Principal") || nome == &&"Principal".to_string())
+            .find(|nome| nome.ends_with("Principal") || nome == &&"Principal".to_string() || nome == &&"principal".to_string())
             .cloned()
     };
 

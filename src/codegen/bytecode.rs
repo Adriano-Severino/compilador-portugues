@@ -1,4 +1,5 @@
 use crate::ast;
+use crate::library_loader::{LibSimbolo};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -143,9 +144,10 @@ impl<'a> BytecodeGenerator<'a> {
             .collect();
 
         self.bytecode_instructions.push(format!(
-            "DEFINE_METHOD {} {} {} {}",
+            "DEFINE_METHOD {} {} {} {} {}",
             nome_classe,
             "construtor",
+            "vazio",
             corpo.len(),
             params.join(" ")
         ));
@@ -182,18 +184,19 @@ impl<'a> BytecodeGenerator<'a> {
             // Reconhece e processa a declaração de classe
             ast::Declaracao::DeclaracaoClasse(classe_def) => {
                 let full_class_name = self.qual(&classe_def.nome);
-                let parent_class_name = classe_def
-                    .classe_pai
-                    .as_ref()
-                    .map_or("NULO".to_string(), |p| {
-                        let base = match p {
-                            ast::Tipo::Classe(n) => n.as_str(),
-                            ast::Tipo::Aplicado { nome, .. } => nome.as_str(),
-                            _ => "",
-                        };
-                        self.type_checker
-                            .resolver_nome_classe(base, &self.namespace_path)
-                    });
+                let parent_class_name =
+                    classe_def
+                        .classe_pai
+                        .as_ref()
+                        .map_or("NULO".to_string(), |p| {
+                            let base = match p {
+                                ast::Tipo::Classe(n) => n.as_str(),
+                                ast::Tipo::Aplicado { nome, .. } => nome.as_str(),
+                                _ => "",
+                            };
+                            self.type_checker
+                                .resolver_nome_classe(base, &self.namespace_path)
+                        });
 
                 let mut all_props = self
                     .props_por_classe
@@ -226,10 +229,16 @@ impl<'a> BytecodeGenerator<'a> {
                 // Monta o campo combinado separado por '|': propriedades|params|baseArgs|corpo (vazio)
                 let meta_str = format!("{}|{}|{}|", props_str, params_str, base_args_str);
 
-                self.bytecode_instructions.push(format!(
-                    "DEFINE_CLASS {} {} {}",
-                    full_class_name, parent_class_name, meta_str
-                ));
+                // For static classes, we still need to register them but with a special marker
+                if classe_def.eh_estatica {
+                    self.bytecode_instructions
+                        .push(format!("DEFINE_STATIC_CLASS {}", full_class_name));
+                } else {
+                    self.bytecode_instructions.push(format!(
+                        "DEFINE_CLASS {} {} {}",
+                        full_class_name, parent_class_name, meta_str
+                    ));
+                }
 
                 for ctor in &classe_def.construtores {
                     self.gerar_construtor(ctor, &full_class_name);
@@ -239,11 +248,17 @@ impl<'a> BytecodeGenerator<'a> {
                     if metodo.eh_abstrato {
                         continue; // não gera corpo nem entrada para métodos abstratos
                     }
-                    self.gerar_metodo(metodo, &full_class_name);
+                    if metodo.eh_estatica {
+                        self.gerar_metodo_estatico(metodo, &full_class_name);
+                    } else {
+                        self.gerar_metodo(metodo, &full_class_name);
+                    }
                 }
 
                 // Marca o fim da declaração da classe
-                self.bytecode_instructions.push("END_CLASS".to_string());
+                if !classe_def.eh_estatica {
+                    self.bytecode_instructions.push("END_CLASS".to_string());
+                }
 
                 // ===== Inicializadores de propriedades/campos estáticos =====
                 for campo in &classe_def.campos {
@@ -380,21 +395,21 @@ impl<'a> BytecodeGenerator<'a> {
         corpo_com_defaults.extend(corpo);
         let corpo = corpo_com_defaults;
 
+        let tipo_retorno_str = metodo
+            .tipo_retorno
+            .as_ref()
+            .map_or("vazio".to_string(), |t| t.to_string());
+
         let params: Vec<String> = metodo
             .parametros
             .iter()
-            .map(|p| {
-                let mut param_str = p.nome.clone();
-                if let Some(default_expr) = &p.valor_padrao {
-                    param_str.push_str(&format!("={}", default_expr));
-                }
-                param_str
-            })
+            .map(|p| format!("{}:{}", p.tipo.to_string(), p.nome))
             .collect();
         self.bytecode_instructions.push(format!(
-            "DEFINE_METHOD {} {} {} {}",
+            "DEFINE_METHOD {} {} {} {} {}",
             nome_classe,
             metodo.nome,
+            tipo_retorno_str,
             corpo.len(),
             params.join(" ")
         ));
@@ -448,21 +463,22 @@ impl<'a> BytecodeGenerator<'a> {
         corpo_com_defaults.extend(corpo);
         let corpo = corpo_com_defaults;
 
+        let tipo_retorno_str = metodo
+            .tipo_retorno
+            .as_ref()
+            .map_or("vazio".to_string(), |t| t.to_string());
+
         let params: Vec<String> = metodo
             .parametros
             .iter()
-            .map(|p| {
-                let mut param_str = p.nome.clone();
-                if let Some(default_expr) = &p.valor_padrao {
-                    param_str.push_str(&format!("={}", default_expr));
-                }
-                param_str
-            })
+            .map(|p| format!("{}:{}", p.tipo.to_string(), p.nome))
             .collect();
+
         self.bytecode_instructions.push(format!(
-            "DEFINE_STATIC_METHOD {} {} {} {}",
+            "DEFINE_STATIC_METHOD {} {} {} {} {}",
             nome_classe,
             metodo.nome,
+            tipo_retorno_str,
             corpo.len(),
             params.join(" ")
         ));
@@ -498,6 +514,33 @@ impl<'a> BytecodeGenerator<'a> {
         std::mem::take(&mut self.bytecode_instructions)
     }
 
+    pub fn generate_for_library(&mut self) -> Vec<String> {
+        for declaracao in &self.programa.declaracoes {
+            self.generate_declaracao(declaracao);
+        }
+
+        for namespace in &self.programa.namespaces {
+            let mut sub = BytecodeGenerator {
+                programa: &ast::Programa {
+                    usings: vec![],
+                    namespaces: vec![],
+                    declaracoes: namespace.declaracoes.clone(),
+                },
+                type_checker: self.type_checker,
+                namespace_path: namespace.nome.clone(),
+                bytecode_instructions: Vec::new(),
+                props_por_classe: self.props_por_classe.clone(),
+                construtor_params_por_classe: self.construtor_params_por_classe.clone(),
+                current_class_name: None,
+                current_params: None,
+            };
+            self.bytecode_instructions
+                .extend(sub.generate_for_library());
+        }
+
+        std::mem::take(&mut self.bytecode_instructions)
+    }
+
     // Altera a assinatura para `&mut self` e remove o retorno Vec<String>
     fn generate_comando(&mut self, comando: &ast::Comando) {
         match comando {
@@ -524,10 +567,8 @@ impl<'a> BytecodeGenerator<'a> {
                                 is_prop = true;
                                 break;
                             }
-                            current_class = class_decl
-                                .classe_pai
-                                .as_ref()
-                                .and_then(|parent_tipo| {
+                            current_class =
+                                class_decl.classe_pai.as_ref().and_then(|parent_tipo| {
                                     let base = match parent_tipo {
                                         ast::Tipo::Classe(n) => n.as_str(),
                                         ast::Tipo::Aplicado { nome, .. } => nome.as_str(),
@@ -659,12 +700,118 @@ impl<'a> BytecodeGenerator<'a> {
             }
 
             ast::Comando::ChamarMetodo(objeto_expr, metodo, argumentos) => {
-                if let ast::Expressao::Identificador(ident) = &**objeto_expr {
-                    let full_class_name = self
-                        .type_checker
-                        .resolver_nome_classe(ident, &self.namespace_path);
-                    if self.type_checker.is_static_class(&full_class_name) {
-                        // Static method call
+                 let mut is_static_call = false;
+                let mut class_fqn_opt = None;
+
+                if let ast::Expressao::Identificador(nome_classe) = &**objeto_expr {
+                    let full_class_name = self.type_checker.resolver_nome_classe(nome_classe, &self.namespace_path);
+                    eprintln!("DEBUG: Identificador classe - nome: {}, full_class_name: {}", nome_classe, full_class_name);
+                    if let Some(classe_info) = self.type_checker.resolved_classes.get(&full_class_name) {
+                        if classe_info.eh_estatica {
+                            is_static_call = true;
+                            class_fqn_opt = Some(full_class_name);
+                        }
+                    } else {
+                        // NOVO: Verificar se a classe está na biblioteca externa
+                        if let Some(bib) = &self.type_checker.biblioteca_externa {
+                            if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&full_class_name) {
+                                eprintln!("DEBUG: Classe {} encontrada na biblioteca externa, eh_estatica: {}", full_class_name, lib_classe.eh_estatica);
+                                if lib_classe.eh_estatica {
+                                    is_static_call = true;
+                                    class_fqn_opt = Some(full_class_name);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !is_static_call {
+                    // Inferir tipo sem modificar o type_checker usando apenas as informações resolvidas
+                    if let ast::Expressao::Identificador(nome_var) = &**objeto_expr {
+                        // Tentar resolver como nome de classe
+                        let full_class_name = self.type_checker.resolver_nome_classe(nome_var, &self.namespace_path);
+                        if self.type_checker.resolved_classes.contains_key(&full_class_name) {
+                            class_fqn_opt = Some(full_class_name);
+                        } else {
+                            // NOVO: Verificar se a classe está na biblioteca externa
+                            if let Some(bib) = &self.type_checker.biblioteca_externa {
+                                if bib.simbolos.contains_key(&full_class_name) {
+                                    class_fqn_opt = Some(full_class_name);
+                                }
+                            }
+                        }
+                    }
+                }
+
+
+                // NOVO: Consultar biblioteca externa para métodos nativos
+                // Resolver o nome completo da classe independentemente de is_static_call
+                let class_fqn = if let Some(fqn) = &class_fqn_opt {
+                    fqn.clone()
+                } else if let ast::Expressao::Identificador(nome_classe) = &**objeto_expr {
+                    self.type_checker.resolver_nome_classe(nome_classe, &self.namespace_path)
+                } else {
+                    String::new()
+                };
+                
+                if !class_fqn.is_empty() {
+                    if let Some(bib) = &self.type_checker.biblioteca_externa {
+                        if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&class_fqn) {
+                            if let Some(lib_metodo) = lib_classe.metodos.get(metodo) {
+                                if let Some(chave_nativa) = &lib_metodo.chave_nativa {
+                                    // É uma chamada nativa da biblioteca externa
+                                    // Determinar se é estática baseando-se na classe
+                                    let eh_estatica = lib_classe.eh_estatica;
+                                    if eh_estatica {
+                                        for arg in argumentos {
+                                            self.generate_expressao(arg);
+                                        }
+                                        self.bytecode_instructions.push(format!("CALL_STATIC_NATIVE {} {}", chave_nativa, argumentos.len()));
+                                    } else {
+                                        self.generate_expressao(objeto_expr);
+                                        for arg in argumentos {
+                                            self.generate_expressao(arg);
+                                        }
+                                        self.bytecode_instructions.push(format!("CALL_NATIVE {} {}", chave_nativa, argumentos.len()));
+                                    }
+                                    self.bytecode_instructions.push("POP".to_string());
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let Some(class_fqn) = class_fqn_opt {
+                    if let Some(class_info) = self.type_checker.resolved_classes.get(&class_fqn) {
+                        if let Some(metodo_info) = class_info.methods.get(metodo) {
+                            if let Some(nativo_attr) = metodo_info.attributes.iter().find(|a| a.name == "Nativo") {
+                                if let Some(ast::Expressao::Texto(chave_nativa)) = nativo_attr.arguments.get(0) {
+                                    // É uma chamada nativa
+                                    if is_static_call {
+                                        for arg in argumentos {
+                                            self.generate_expressao(arg);
+                                        }
+                                        self.bytecode_instructions.push(format!("CALL_STATIC_NATIVE {} {}", chave_nativa, argumentos.len()));
+                                    } else {
+                                        self.generate_expressao(objeto_expr);
+                                        for arg in argumentos {
+                                            self.generate_expressao(arg);
+                                        }
+                                        self.bytecode_instructions.push(format!("CALL_NATIVE {} {}", chave_nativa, argumentos.len()));
+                                    }
+                                    self.bytecode_instructions.push("POP".to_string());
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Lógica original para chamadas não-nativas
+                if is_static_call {
+                     if let ast::Expressao::Identificador(nome_classe) = &**objeto_expr {
+                        let full_class_name = self.type_checker.resolver_nome_classe(nome_classe, &self.namespace_path);
                         for arg in argumentos {
                             self.generate_expressao(arg);
                         }
@@ -679,7 +826,7 @@ impl<'a> BytecodeGenerator<'a> {
                     }
                 }
 
-                // Instance method call
+                // Chamada de método de instância
                 self.generate_expressao(objeto_expr);
                 for arg in argumentos {
                     self.generate_expressao(arg);
@@ -762,10 +909,8 @@ impl<'a> BytecodeGenerator<'a> {
                                     break; // há variável local; cair para LOAD_VAR nome
                                 }
                             }
-                            current_class = class_decl
-                                .classe_pai
-                                .as_ref()
-                                .and_then(|parent_tipo| {
+                            current_class =
+                                class_decl.classe_pai.as_ref().and_then(|parent_tipo| {
                                     let base = match parent_tipo {
                                         ast::Tipo::Classe(n) => n.as_str(),
                                         ast::Tipo::Aplicado { nome, .. } => nome.as_str(),
@@ -827,10 +972,15 @@ impl<'a> BytecodeGenerator<'a> {
             }
 
             // Expressão para criar um novo objeto
-            ast::Expressao::NovoObjeto(classe_nome, argumentos) => {
+            ast::Expressao::NovoObjeto(tipo, argumentos) => {
+                let classe_nome = match tipo {
+                    ast::Tipo::Classe(n) => n.clone(),
+                    ast::Tipo::Aplicado { nome, .. } => nome.clone(),
+                    _ => panic!("Instanciação de tipo não suportado em bytecode: {:?}", tipo),
+                };
                 let nome_completo = self
                     .type_checker
-                    .resolver_nome_classe(classe_nome, &self.namespace_path);
+                    .resolver_nome_classe(&classe_nome, &self.namespace_path);
 
                 if let Some(class_decl) = self.get_class_declaration(&nome_completo) {
                     if class_decl.eh_abstrata {
@@ -872,6 +1022,11 @@ impl<'a> BytecodeGenerator<'a> {
 
                 self.bytecode_instructions
                     .push(format!("NEW_OBJECT {} {}", nome_completo, final_args_count));
+            }
+            ast::Expressao::NovoArray(tipo, tamanho) => {
+                self.generate_expressao(tamanho);
+                self.bytecode_instructions
+                    .push(format!("NEW_ARRAY_OF_TYPE {:?}", tipo));
             }
 
             // Modificado: Operadores Aritméticos - Distinguir concatenação de soma numérica
@@ -984,7 +1139,144 @@ impl<'a> BytecodeGenerator<'a> {
             }
 
             ast::Expressao::ChamadaMetodo(objeto_expr, nome_metodo, argumentos) => {
-                // Instance method call
+                let mut is_static_call = false;
+                let mut class_fqn_opt = None;
+
+                if let ast::Expressao::Identificador(nome_classe) = &**objeto_expr {
+                    let full_class_name = self
+                        .type_checker
+                        .resolver_nome_classe(nome_classe, &self.namespace_path);
+                    if let Some(classe_info) = self.type_checker.resolved_classes.get(&full_class_name)
+                    {
+                        if classe_info.eh_estatica {
+                            is_static_call = true;
+                            class_fqn_opt = Some(full_class_name);
+                        }
+                    } else {
+                        // NOVO: Verificar se a classe está na biblioteca externa
+                        if let Some(bib) = &self.type_checker.biblioteca_externa {
+                            if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&full_class_name) {
+                                if lib_classe.eh_estatica {
+                                    is_static_call = true;
+                                    class_fqn_opt = Some(full_class_name);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !is_static_call {
+                    // Inferir tipo sem modificar o type_checker usando apenas as informações resolvidas
+                    if let ast::Expressao::Identificador(nome_var) = &**objeto_expr {
+                        // Tentar resolver como nome de classe
+                        let full_class_name = self.type_checker.resolver_nome_classe(nome_var, &self.namespace_path);
+                        if self.type_checker.resolved_classes.contains_key(&full_class_name) {
+                            class_fqn_opt = Some(full_class_name);
+                        } else {
+                            // NOVO: Verificar se a classe está na biblioteca externa
+                            if let Some(bib) = &self.type_checker.biblioteca_externa {
+                                if bib.simbolos.contains_key(&full_class_name) {
+                                    class_fqn_opt = Some(full_class_name);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // NOVO: Consultar biblioteca externa para métodos nativos
+                let class_fqn = if let Some(fqn) = &class_fqn_opt {
+                    fqn.clone()
+                } else if let ast::Expressao::Identificador(nome_classe) = &**objeto_expr {
+                    self.type_checker.resolver_nome_classe(nome_classe, &self.namespace_path)
+                } else {
+                    String::new()
+                };
+                
+                if !class_fqn.is_empty() {
+                    if let Some(bib) = &self.type_checker.biblioteca_externa {
+                        if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&class_fqn) {
+                            if let Some(lib_metodo) = lib_classe.metodos.get(nome_metodo) {
+                                if let Some(chave_nativa) = &lib_metodo.chave_nativa {
+                                    // É uma chamada nativa da biblioteca externa
+                                    let eh_estatica = lib_classe.eh_estatica;
+                                    if eh_estatica {
+                                        for arg in argumentos {
+                                            self.generate_expressao(arg);
+                                        }
+                                        self.bytecode_instructions.push(format!(
+                                            "CALL_STATIC_NATIVE {} {}",
+                                            chave_nativa,
+                                            argumentos.len()
+                                        ));
+                                    } else {
+                                        self.generate_expressao(objeto_expr);
+                                        for arg in argumentos {
+                                            self.generate_expressao(arg);
+                                        }
+                                        self.bytecode_instructions.push(format!(
+                                            "CALL_NATIVE {} {}",
+                                            chave_nativa,
+                                            argumentos.len()
+                                        ));
+                                    }
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let Some(class_fqn) = class_fqn_opt {
+                    if let Some(class_info) = self.type_checker.resolved_classes.get(&class_fqn) {
+                        if let Some(metodo_info) = class_info.methods.get(nome_metodo) {
+                            if let Some(nativo_attr) = metodo_info.attributes.iter().find(|a| a.name == "Nativo") {
+                                if let Some(ast::Expressao::Texto(chave_nativa)) = nativo_attr.arguments.get(0) {
+                                    // É uma chamada nativa
+                                    if is_static_call {
+                                        for arg in argumentos {
+                                            self.generate_expressao(arg);
+                                        }
+                                        self.bytecode_instructions.push(format!(
+                                            "CALL_STATIC_NATIVE {} {}",
+                                            chave_nativa,
+                                            argumentos.len()
+                                        ));
+                                    } else {
+                                        self.generate_expressao(objeto_expr); // Empilha 'este'
+                                        for arg in argumentos {
+                                            self.generate_expressao(arg);
+                                        }
+                                        self.bytecode_instructions.push(format!(
+                                            "CALL_NATIVE {} {}",
+                                            chave_nativa,
+                                            argumentos.len()
+                                        ));
+                                    }
+                                    return; // Fim do tratamento para chamada nativa
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Lógica original para chamadas não-nativas
+                if is_static_call {
+                     if let ast::Expressao::Identificador(nome_classe) = &**objeto_expr {
+                        let full_class_name = self.type_checker.resolver_nome_classe(nome_classe, &self.namespace_path);
+                        for arg in argumentos {
+                            self.generate_expressao(arg);
+                        }
+                        self.bytecode_instructions.push(format!(
+                            "CALL_STATIC_METHOD {} {} {}",
+                            full_class_name,
+                            nome_metodo,
+                            argumentos.len()
+                        ));
+                        return;
+                    }
+                }
+
+                // Chamada de método de instância
                 self.generate_expressao(objeto_expr);
                 for arg in argumentos {
                     self.generate_expressao(arg);

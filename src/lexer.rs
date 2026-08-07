@@ -1,4 +1,5 @@
 use logos::Logos;
+use std::fmt;
 
 #[derive(Logos, Debug, PartialEq, Clone)]
 pub enum Token {
@@ -13,6 +14,8 @@ pub enum Token {
     TColcheteEsq,
     #[token("]")]
     TColcheteDir,
+    #[token("@")]
+    TArroba,
     #[token("enquanto")]
     TEnquanto,
     #[token("para")]
@@ -49,6 +52,10 @@ pub enum Token {
     TVerdadeiro,
     #[token("falso")]
     TFalso,
+    #[token("nulo")]
+    TNulo,
+    #[token("objeto")]
+    TTipoObjeto,
 
     /* OOP */
     #[token("classe")]
@@ -83,6 +90,8 @@ pub enum Token {
     TDefinir,
     #[token("estática")]
     TEstatica,
+    #[token("externo")]
+    TExterno,
 
     /* operadores */
     #[token("==")]
@@ -156,6 +165,10 @@ pub enum Token {
         s.parse::<i64>().expect(&format!("Literal inteiro inválido: '{s}'"))
     })]
     TInteiro(i64),
+    #[regex(r#"'\\.'"#, |lex| lex.slice()[1..lex.slice().len()-1].to_string())]
+    TChar(String),
+    #[regex(r#"'[^'\\]'"#, |lex| lex.slice()[1..lex.slice().len()-1].to_string())]
+    TCharLit(String),
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
     TIdentificador(String),
 
@@ -164,6 +177,12 @@ pub enum Token {
     ComentarioLinha,
     #[regex(r"[ \t\r\n]+", logos::skip)]
     Whitespace,
+}
+
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 #[cfg(test)]

@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /* ========================================================================== */
 /* TIPOS BÁSICOS                                                              */
 /* ========================================================================== */
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Tipo {
     Booleano,
     Texto,
@@ -12,15 +13,61 @@ pub enum Tipo {
     Duplo,     // f64
     Decimal,
     Vazio,
+    Objeto,
     Lista(Box<Tipo>),
     Classe(String), // Stores FQN
-    Enum(String),   // Enumeração (FQN)
-    Funcao(Vec<Tipo>, Box<Tipo>),
-    Generico(String),
-    // Tipo genérico aplicado: Nome<Arg1, Arg2, ...>
+    Enum(String),
     Aplicado { nome: String, args: Vec<Tipo> },
+    Generico(String),
     Opcional(Box<Tipo>),
+    Funcao(Vec<Tipo>, Box<Tipo>),
     Inferido,
+}
+
+impl fmt::Display for Tipo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Tipo::Booleano => write!(f, "booleano"),
+            Tipo::Texto => write!(f, "texto"),
+            Tipo::Inteiro => write!(f, "inteiro"),
+            Tipo::Flutuante => write!(f, "flutuante"),
+            Tipo::Duplo => write!(f, "duplo"),
+            Tipo::Decimal => write!(f, "decimal"),
+            Tipo::Vazio => write!(f, "vazio"),
+            Tipo::Objeto => write!(f, "objeto"),
+            Tipo::Lista(t) => write!(f, "lista<{}>", t),
+            Tipo::Classe(s) => write!(f, "{}", s),
+            Tipo::Enum(s) => write!(f, "{}", s),
+            Tipo::Aplicado { nome, args } => {
+                let args_str = args
+                    .iter()
+                    .map(|a| a.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "{}<{}>", nome, args_str)
+            }
+            Tipo::Generico(s) => write!(f, "{}", s),
+            Tipo::Opcional(t) => write!(f, "{}?", t),
+            Tipo::Funcao(params, ret) => {
+                let params_str = params
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "funcao({}) -> {}", params_str, ret)
+            }
+            Tipo::Inferido => write!(f, "var"),
+        }
+    }
+}
+
+/* ========================================================================== */
+/* ATRIBUTOS                                                                  */
+/* ========================================================================== */
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Attribute {
+    pub name: String,
+    pub arguments: Vec<Expressao>,
 }
 
 /* ========================================================================== */
@@ -148,6 +195,7 @@ pub struct DeclaracaoClasse {
     pub propriedades: Vec<PropriedadeClasse>,
     pub metodos: Vec<MetodoClasse>,
     pub construtores: Vec<ConstrutorClasse>,
+    pub nested_classes: Vec<DeclaracaoClasse>,
     pub eh_abstrata: bool,
     pub eh_estatica: bool,
 }
@@ -188,6 +236,7 @@ pub struct AcessorPropriedade {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MetodoClasse {
+    pub attributes: Vec<Attribute>,
     pub nome: String,
     // Parâmetros de tipo do método: apresentar<T>(...)
     pub generic_params: Vec<String>,
@@ -215,6 +264,7 @@ pub struct ConstrutorClasse {
 /* ========================================================================== */
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeclaracaoFuncao {
+    pub attributes: Vec<Attribute>,
     pub nome: String,
     // Parâmetros de tipo da função: função Nome<T>(...)
     pub generic_params: Vec<String>,
@@ -302,12 +352,14 @@ pub enum Expressao {
     Decimal(String),
     FlutuanteLiteral(String),
     DuploLiteral(String),
+    Nulo,
     Identificador(String),
     ListaLiteral(Vec<Expressao>),
     Aritmetica(OperadorAritmetico, Box<Expressao>, Box<Expressao>),
     Comparacao(OperadorComparacao, Box<Expressao>, Box<Expressao>),
     Logica(OperadorLogico, Box<Expressao>, Box<Expressao>),
-    NovoObjeto(String, Vec<Expressao>),
+    NovoObjeto(Tipo, Vec<Expressao>),
+    NovoArray(Box<Tipo>, Box<Expressao>),
     AcessoMembro(Box<Expressao>, String),
     AcessoIndice(Box<Expressao>, Box<Expressao>),
     ChamadaMetodo(Box<Expressao>, String, Vec<Expressao>),
@@ -336,6 +388,13 @@ pub enum OperadorAritmetico {
     Multiplicacao,
     Divisao,
     Modulo,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum RestoCriacao {
+    Objeto(Vec<Expressao>),
+    Array(Expressao),
+    Lista(Box<RestoCriacao>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

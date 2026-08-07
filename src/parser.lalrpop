@@ -3,6 +3,26 @@ use crate::lexer::Token;
 
 grammar<'input>();
 
+/* ========================================================================== */
+/* ATRIBUTOS                                                                  */
+/* ========================================================================== */
+// Atributos usam @ para evitar conflito com indexação de arrays [ ]
+// Temporariamente limitado a 1 atributo para resolver conflito LALRPOP
+#[inline]
+Attribute: ast::Attribute = {
+    // Atributo com argumentos
+    "@" <name:IdentificadorSimples> "(" <args:ListaArgumentos> ")" => ast::Attribute {
+        name,
+        arguments: args,
+    },
+    // Atributo sem argumentos
+    "@" <name:IdentificadorSimples> => ast::Attribute {
+        name,
+        arguments: vec![],
+    }
+};
+
+
 Caminho: ast::Caminho = {
     <partes:DotSeparated<TIdentificador>> => ast::Caminho { partes },
 };
@@ -160,69 +180,71 @@ DeclaracaoClasse: ast::DeclaracaoClasse = {
         }
 
     ast::DeclaracaoClasse {
-            nome: nome_classe,
-            classe_pai,
-            interfaces,
+        nome: nome_classe,
+        classe_pai,
+        interfaces,
         generic_params,
-            modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
-            campos,
-            propriedades,
-            metodos,
-            construtores,
-            eh_abstrata: classe_abstrata.is_some(),
-            eh_estatica: estatica.is_some(),
-        }
+        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
+        campos,
+        propriedades,
+        metodos,
+        construtores,
+        nested_classes: vec![],
+        eh_abstrata: classe_abstrata.is_some(),
+        eh_estatica: estatica.is_some(),
+    }
     },
     // Sem parâmetros genéricos
     <modificador:ModificadorAcesso?> <classe_abstrata:("abstrata")?> <estatica:("estática")?> "classe" <nome_classe:IdentificadorSimples>
     <lista_cabecalho:(":" <ListaTiposNomeados>)?>
     "{" <membros:MembroClasse*> "}" => {
-        let mut campos = Vec::new();
-        let mut propriedades = Vec::new();
-        let mut metodos = Vec::new();
-        let mut construtores = Vec::new();
+    let mut campos = Vec::new();
+    let mut propriedades = Vec::new();
+    let mut metodos = Vec::new();
+    let mut construtores = Vec::new();
 
-        for membro in membros {
-            match membro {
-                ast::MembroClasse::Campo(campo) => campos.push(campo),
-                ast::MembroClasse::Propriedade(prop) => propriedades.push(prop),
-                ast::MembroClasse::Metodo(metodo) => metodos.push(metodo),
-                ast::MembroClasse::Construtor(construtor) => construtores.push(construtor),
-            }
-        }
-
-        // Determina base e interfaces: agora aceitando tipos aplicados (ex.: Base<T>, I1<Texto>)
-        let mut classe_pai: Option<ast::Tipo> = None;
-        let mut interfaces: Vec<ast::Tipo> = Vec::new();
-        if let Some(mut lista) = lista_cabecalho {
-            if !lista.is_empty() {
-                let base = lista.remove(0);
-                classe_pai = Some(base);
-                for t in lista.into_iter() { interfaces.push(t); }
-            }
-        }
-
-        ast::DeclaracaoClasse {
-            nome: nome_classe,
-            classe_pai,
-            interfaces,
-            generic_params: vec![],
-            modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
-            campos,
-            propriedades,
-            metodos,
-            construtores,
-            eh_abstrata: classe_abstrata.is_some(),
-            eh_estatica: estatica.is_some(),
+    for membro in membros {
+        match membro {
+            ast::MembroClasse::Campo(campo) => campos.push(campo),
+            ast::MembroClasse::Propriedade(prop) => propriedades.push(prop),
+            ast::MembroClasse::Metodo(metodo) => metodos.push(metodo),
+            ast::MembroClasse::Construtor(construtor) => construtores.push(construtor),
         }
     }
-};
+
+    // Determina base e interfaces: agora aceitando tipos aplicados (ex.: Base<T>, I1<Texto>)
+    let mut classe_pai: Option<ast::Tipo> = None;
+    let mut interfaces: Vec<ast::Tipo> = Vec::new();
+    if let Some(mut lista) = lista_cabecalho {
+        if !lista.is_empty() {
+            let base = lista.remove(0);
+            classe_pai = Some(base);
+            for t in lista.into_iter() { interfaces.push(t); }
+        }
+    }
+
+    ast::DeclaracaoClasse {
+        nome: nome_classe,
+        classe_pai,
+        interfaces,
+        generic_params: vec![],
+        modificador: modificador.unwrap_or(ast::ModificadorAcesso::Publico),
+        campos,
+        propriedades,
+        metodos,
+        construtores,
+        nested_classes: vec![],
+        eh_abstrata: classe_abstrata.is_some(),
+        eh_estatica: estatica.is_some(),
+    }
+    }
+    };
 
 MembroClasse: ast::MembroClasse = {
+    <m:MetodoClasse>        => ast::MembroClasse::Metodo(m),
     <c:ConstrutorDecl>      => ast::MembroClasse::Construtor(c),
     <p:PropriedadeClasse>   => ast::MembroClasse::Propriedade(p),
     <f:CampoClasse>         => ast::MembroClasse::Campo(f),
-    <m:MetodoClasse>        => ast::MembroClasse::Metodo(m),
 };
 
 // === CAMPOS ===
@@ -285,13 +307,13 @@ PropriedadeClasse: ast::PropriedadeClasse = {
 
         for acessor in acessores {
             match acessor {
-                (true, modificador_acessor) => obter = Some(ast::AcessorPropriedade {
+                (true, modificador_acessor, corpo) => obter = Some(ast::AcessorPropriedade {
                     modificador: modificador_acessor,
-                    corpo: None
+                    corpo,
                 }),
-                (false, modificador_acessor) => definir = Some(ast::AcessorPropriedade {
+                (false, modificador_acessor, corpo) => definir = Some(ast::AcessorPropriedade {
                     modificador: modificador_acessor,
-                    corpo: None
+                    corpo,
                 }),
             }
         }
@@ -308,16 +330,21 @@ PropriedadeClasse: ast::PropriedadeClasse = {
     }
 };
 
-AcessorPropriedade: (bool, Option<ast::ModificadorAcesso>) = {
-    <modificador:ModificadorAcesso?> "obter" ";" => (true, modificador),
-    <modificador:ModificadorAcesso?> "definir" ";" => (false, modificador),
+AcessorPropriedade: (bool, Option<ast::ModificadorAcesso>, Option<Vec<ast::Comando>>) = {
+    <modificador:ModificadorAcesso?> "obter" ";" => (true, modificador, None),
+    <modificador:ModificadorAcesso?> "definir" ";" => (false, modificador, None),
+    <modificador:ModificadorAcesso?> "obter" <corpo:BlocoComando> => (true, modificador, Some(corpo)),
+    <modificador:ModificadorAcesso?> "definir" <corpo:BlocoComando> => (false, modificador, Some(corpo)),
 };
 // === FUNÇÕES E MÉTODOS ===
+// Atributos são prefixados inline em cada alternativa (AttributeList) para evitar conflito LALRPOP
+// com regra nullable separada.
 DeclaracaoFuncao: ast::DeclaracaoFuncao = {
     // A. [mod] [estática] função nome (params) { corpo } → retorno = Vazio
-    <m:ModificadorAcesso?> <estatica:("estática")?> "função"
+    <attr:Attribute?> <m:ModificadorAcesso?> <estatica:("estática")?> "função"
     <nome:IdentificadorSimples> "(" <params:InnerParamList> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
+            attributes: attr.map(|a| vec![a]).unwrap_or_default(),
             nome,
             generic_params: vec![],
             parametros: params,
@@ -328,10 +355,11 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
         }
     },
     // B. [mod] [estática] função nome (params) => Tipo { corpo }
-    <m:ModificadorAcesso?> <estatica:("estática")?> "função"
+    <attr:Attribute?> <m:ModificadorAcesso?> <estatica:("estática")?> "função"
     <nome:IdentificadorSimples>
     "(" <params:InnerParamList> "=>" <ret:Tipo> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
+            attributes: attr.map(|a| vec![a]).unwrap_or_default(),
             nome,
             generic_params: vec![],
             parametros: params,
@@ -343,10 +371,11 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
     },
 
     // E. [mod] [estática] função TipoSimples nome<Ts>? (params) { corpo }
-    <m:ModificadorAcesso?> <estatica:("estática")?> "função"
+    <attr:Attribute?> <m:ModificadorAcesso?> <estatica:("estática")?> "função"
     <ret:TipoRetornoSimples> <nome:IdentificadorSimples> <generic_params:GenericParamsDecl?>
     "(" <params:InnerParamList> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
+            attributes: attr.map(|a| vec![a]).unwrap_or_default(),
             nome,
             generic_params: generic_params.unwrap_or_default(),
             parametros: params,
@@ -376,23 +405,53 @@ TipoRetornoBase: ast::Tipo = {
     "duplo" => ast::Tipo::Duplo,
     "decimal" => ast::Tipo::Decimal,
     "vazio" => ast::Tipo::Vazio,
+    "objeto" => ast::Tipo::Classe("objeto".to_string()),
     <nome:TIdentificador> => ast::Tipo::Classe(nome),
 };
 
 // — MÉTODO DE INSTÂNCIA ----------------------------------------------------
+// Atributos são prefixados inline (AttributeList) para evitar conflito LALRPOP com regra nullable.
+// Reordenado para evitar conflitos LALRPOP: regras mais específicas primeiro
 MetodoClasse: ast::MetodoClasse = {
-    // Método com corpo (genéricos opcionais)
-    <m:ModificadorAcesso?>            // publico | privado | protegido
-    <estatica:("estática")?>
-    <abstrato:("abstrata")?>
-    <redefinivel:("redefinível")?>
-    <sobrescreve:("sobrescreve")?>
-    <ret:Tipo>                       // inteiro | texto | Classe ...
-    <nome_metodo:IdentificadorSimples>
-    <generic_params:GenericParamsDecl?>
-    "(" <p:InnerParamList>
-    <b:BlocoComando>
+    // Método externo — sem corpo, marcado com [Nativo("chave")] para despacho nativo (genéricos opcionais)
+    // MAIS ESPECÍFICO: tem "externo" obrigatório
+    <attr:Attribute?> <m:ModificadorAcesso?> <estatica:("estática")?> "externo" <ret:Tipo> <nome_metodo:IdentificadorSimples> <generic_params:GenericParamsDecl?> "(" <p:InnerParamList> ";"
         => ast::MetodoClasse {
+            attributes: attr.map(|a| vec![a]).unwrap_or_default(),
+            nome: nome_metodo,
+            generic_params: generic_params.unwrap_or_default(),
+            parametros: p,
+            tipo_retorno: if ret == ast::Tipo::Vazio { None } else { Some(ret) },
+            modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
+            corpo: vec![],
+            eh_virtual: false,
+            eh_override: false,
+            eh_abstrato: false,
+            eh_estatica: estatica.is_some(),
+        },
+
+    // Método abstrato (sem corpo, termina com ';'; genéricos opcionais)
+    // MAIS ESPECÍFICO: tem "abstrata" obrigatório
+    <attr:Attribute?> <m:ModificadorAcesso?> <estatica:("estática")?> "abstrata" <redefinivel:("redefinível")?> <sobrescreve:("sobrescreve")?> <ret:Tipo> <nome_metodo:IdentificadorSimples> <generic_params:GenericParamsDecl?> "(" <p:InnerParamList> ";"
+        => ast::MetodoClasse {
+            attributes: attr.map(|a| vec![a]).unwrap_or_default(),
+            nome: nome_metodo,
+            generic_params: generic_params.unwrap_or_default(),
+            parametros: p,
+            tipo_retorno: if ret == ast::Tipo::Vazio { None } else { Some(ret) },
+            modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
+            corpo: vec![],
+            eh_virtual: redefinivel.is_some(),
+            eh_override: sobrescreve.is_some(),
+            eh_abstrato: true,
+            eh_estatica: estatica.is_some(),
+        },
+
+    // Método com corpo (genéricos opcionais via GenericParamsDecl?)
+    // MAIS GERAL: não tem palavras-chave especiais, aceita abstrato opcional
+    <attr:Attribute?> <m:ModificadorAcesso?> <estatica:("estática")?> <abstrato:("abstrata")?> <redefinivel:("redefinível")?> <sobrescreve:("sobrescreve")?> <ret:Tipo> <nome_metodo:IdentificadorSimples> <generic_params:GenericParamsDecl?> "(" <p:InnerParamList> <b:BlocoComando>
+        => ast::MetodoClasse {
+            attributes: attr.map(|a| vec![a]).unwrap_or_default(),
             nome: nome_metodo.clone(),
             generic_params: generic_params.unwrap_or_default(),
             parametros: p,
@@ -404,28 +463,6 @@ MetodoClasse: ast::MetodoClasse = {
             eh_abstrato: abstrato.is_some(),
             eh_estatica: estatica.is_some(),
         },
-
-    // Método abstrato (termina com ';' e exige 'abstrata'; genéricos opcionais)
-    <m:ModificadorAcesso?>
-    <estatica:("estática")?>
-    "abstrata"
-    <redefinivel:("redefinível")?>
-    <sobrescreve:("sobrescreve")?>
-    <ret:Tipo>
-    <nome_metodo:IdentificadorSimples>
-    <generic_params:GenericParamsDecl?>
-    "(" <p:InnerParamList> ";" => ast::MetodoClasse {
-        nome: nome_metodo,
-        generic_params: generic_params.unwrap_or_default(),
-        parametros: p,
-        tipo_retorno: if ret == ast::Tipo::Vazio { None } else { Some(ret) },
-        modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
-        corpo: vec![],
-        eh_virtual: redefinivel.is_some(),
-        eh_override: sobrescreve.is_some(),
-        eh_abstrato: true,
-        eh_estatica: estatica.is_some(),
-    },
 };
 
 /* ------------------------------------------------------------------
@@ -595,9 +632,6 @@ ComandosBasicos: ast::Comando = {
         ast::Comando::DeclaracaoVariavel(ast::Tipo::Decimal, nome, None)
     },
 
-    // qualquer expressão standalone como comando
-    <expr:Expressao> ";" => ast::Comando::Expressao(expr),
-
     // Declaração de classe: NomeClasse nome = expr; ou NomeClasse nome;
     // Isso precisa vir DEPOIS das chamadas de função para não causar conflito
     <tipo_nome:IdentificadorSimples> <var_nome:IdentificadorSimples> "=" <expr:Expressao> ";" => {
@@ -612,6 +646,11 @@ ComandosBasicos: ast::Comando = {
         ast::Comando::AtribuirPropriedade(Box::new(obj), prop, expr)
     },
 
+    // obj[indice] = expr;
+    <obj:ExpressaoPostfixa> "[" <idx:Expressao> "]" "=" <expr:Expressao> ";" => {
+        ast::Comando::AtribuirIndice(Box::new(obj), idx, expr)
+    },
+
     // nome = expr;
     <nome:IdentificadorSimples> "=" <expr:Expressao> ";" =>
         ast::Comando::Atribuicao(nome, expr),
@@ -624,6 +663,10 @@ ComandosBasicos: ast::Comando = {
 
     "retorne" <expr:Expressao?> ";" =>
         ast::Comando::Retorne(expr),
+
+    // qualquer expressão standalone como comando
+    <expr:Expressao> ";" => ast::Comando::Expressao(expr),
+
 };
 
 // === TIPOS E IDENTIFICADORES ===
@@ -646,6 +689,7 @@ TipoBase: ast::Tipo = {
     "duplo" => ast::Tipo::Duplo,
     "decimal" => ast::Tipo::Decimal,
     "vazio" => ast::Tipo::Vazio,
+    "objeto" => ast::Tipo::Classe("objeto".to_string()),
 
     // Tipos aplicados Nome<...>
     <t:TipoAplicadoSimples> => t,
@@ -812,6 +856,7 @@ ExpressaoAtomo: ast::Expressao = {
     //<s:TStringInterpolada> => crate::interpolacao::parse_string_interpolada(&s).unwrap(),
     "verdadeiro" => ast::Expressao::Booleano(true),
     "falso" => ast::Expressao::Booleano(false),
+    "nulo" => ast::Expressao::Nulo,
     <nome:TIdentificador> "(" <args:InnerArgList> => { // Function call
         ast::Expressao::Chamada(nome, args)
     },
@@ -823,11 +868,27 @@ ExpressaoAtomo: ast::Expressao = {
     "este" => ast::Expressao::Este,    // Moved este after specific TIdentificador rules
     <nome:TIdentificador> => ast::Expressao::Identificador(nome), // Variable access (last among identifier-like atoms)
 };
-// Criação de objeto específica
+// Criação de objeto e array (evita shift/reduce combinando a sintaxe)
 CriacaoObjeto: ast::Expressao = {
-    "novo" <classe:TIdentificador> "(" <args:InnerArgList> => {
-        ast::Expressao::NovoObjeto(classe, args)
+    "novo" <tipo:TipoBase> <resto:RestoCriacao> => {
+        let mut t = tipo;
+        let mut r = resto;
+        while let ast::RestoCriacao::Lista(inner) = r {
+            t = ast::Tipo::Lista(Box::new(t));
+            r = *inner;
+        }
+        match r {
+            ast::RestoCriacao::Objeto(args) => ast::Expressao::NovoObjeto(t, args),
+            ast::RestoCriacao::Array(tamanho) => ast::Expressao::NovoArray(Box::new(t), Box::new(tamanho)),
+            _ => unreachable!()
+        }
     },
+};
+
+RestoCriacao: ast::RestoCriacao = {
+    "(" <args:InnerArgList> => ast::RestoCriacao::Objeto(args),
+    "[" <tamanho:Expressao> "]" => ast::RestoCriacao::Array(tamanho),
+    "[" "]" <resto:RestoCriacao> => ast::RestoCriacao::Lista(Box::new(resto)),
 };
 
 // === VALORES LITERAIS ===
@@ -837,6 +898,8 @@ ValorLiteral: ast::Expressao = {
 ExpressaoLiteral: ast::Expressao = {
     <s:TStringInterpolada> => crate::interpolacao::parse_string_interpolada(&s).unwrap(),
     <t:TString>            => ast::Expressao::Texto(t),
+    <c:TChar>              => ast::Expressao::Texto(c),
+    <cl:TCharLit>          => ast::Expressao::Texto(cl),
     <n:TInteiro>           => ast::Expressao::Inteiro(n),
     <f:TFlutuanteLiteral>  => ast::Expressao::FlutuanteLiteral(f),
     <df:TDuploLiteral>     => ast::Expressao::DuploLiteral(df),
@@ -932,6 +995,7 @@ extern {
         "}" => Token::TChaveDir,
         "[" => Token::TColcheteEsq,
         "]" => Token::TColcheteDir,
+        "@" => Token::TArroba,
         ";" => Token::TPontoVirgula,
         "," => Token::TVirgula,
         "=>" => Token::TSeta,
@@ -948,6 +1012,14 @@ extern {
         // === CAMINHOS ===
 
         TStringInterpolada => Token::TStringInterpolada(<String>),
+        
+        TChar => Token::TChar(<String>),
+        TCharLit => Token::TCharLit(<String>),
+
+        // Tipos e literais adicionais
+        "objeto" => Token::TTipoObjeto,
+        "nulo" => Token::TNulo,
+        "externo" => Token::TExterno,
 
     }
 }

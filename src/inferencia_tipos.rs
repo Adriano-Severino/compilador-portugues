@@ -27,7 +27,9 @@ impl InferenciaTipos {
             Expressao::FlutuanteLiteral(_) => Ok(Tipo::Flutuante),
             Expressao::DuploLiteral(_) => Ok(Tipo::Duplo),
             Expressao::Decimal(_) => Ok(Tipo::Decimal),
-            Expressao::NovoObjeto(c, _) => Ok(Tipo::Classe(c.clone())),
+            Expressao::Nulo => Ok(Tipo::Objeto),
+            Expressao::NovoObjeto(t, _) => Ok(t.clone()),
+            Expressao::NovoArray(t, _) => Ok(Tipo::Lista(t.clone())),
             // Arrays: inferir tipo dos elementos
             Expressao::ListaLiteral(itens) => {
                 if itens.is_empty() {
@@ -405,6 +407,7 @@ impl InferenciaTipos {
             Tipo::Decimal => "decimal".to_string(), // ✅ ADICIONADO: Case faltante
             Tipo::Booleano => "booleano".to_string(),
             Tipo::Vazio => "vazio".to_string(),
+            Tipo::Objeto => "objeto".to_string(),
             Tipo::Enum(nome) => format!("enum {}", nome),
             Tipo::Classe(nome) => nome.clone(),
             Tipo::Lista(t) => format!("lista<{}>", self.tipo_para_string(t)),

@@ -47,9 +47,7 @@ pub fn parse_string_interpolada(input: &str) -> Result<ast::Expressao, String> {
     }
 
     if last_end < input.len() {
-        parts.push(ast::PartStringInterpolada::Texto(
-            input[last_end..].into(),
-        ));
+        parts.push(ast::PartStringInterpolada::Texto(input[last_end..].into()));
     }
 
     Ok(ast::Expressao::StringInterpolada(parts))
@@ -73,22 +71,23 @@ pub fn planificar_interpolada(expr: ast::Expressao) -> ast::Expressao {
 }
 
 pub fn walk_programa<F: FnMut(&mut ast::Expressao)>(p: &mut ast::Programa, mut f: F) {
-    fn visita_cmd<F: FnMut(&mut ast::Expressao)>(c: &mut ast::Comando, f:&mut F){
+    fn visita_cmd<F: FnMut(&mut ast::Expressao)>(c: &mut ast::Comando, f: &mut F) {
         match c {
-            ast::Comando::Imprima(e)
-          | ast::Comando::Expressao(e) => f(e),
-            ast::Comando::Bloco(cmds) => cmds.iter_mut().for_each(|c|visita_cmd(c,f)),
+            ast::Comando::Imprima(e) | ast::Comando::Expressao(e) => f(e),
+            ast::Comando::Bloco(cmds) => cmds.iter_mut().for_each(|c| visita_cmd(c, f)),
             _ => {}
         }
     }
     for d in &mut p.declaracoes {
-        if let ast::Declaracao::Comando(c) = d { visita_cmd(c, &mut f); }
+        if let ast::Declaracao::Comando(c) = d {
+            visita_cmd(c, &mut f);
+        }
     }
 }
 
 fn parte_para_expr(p: ast::PartStringInterpolada) -> ast::Expressao {
     match p {
-        ast::PartStringInterpolada::Texto(t)      => ast::Expressao::Texto(t),
-        ast::PartStringInterpolada::Expressao(e)  => e,
+        ast::PartStringInterpolada::Texto(t) => ast::Expressao::Texto(t),
+        ast::PartStringInterpolada::Expressao(e) => e,
     }
 }
