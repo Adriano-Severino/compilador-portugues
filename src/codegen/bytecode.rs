@@ -1,5 +1,5 @@
 use crate::ast;
-use crate::library_loader::{LibSimbolo};
+use crate::library_loader::LibSimbolo;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -700,13 +700,20 @@ impl<'a> BytecodeGenerator<'a> {
             }
 
             ast::Comando::ChamarMetodo(objeto_expr, metodo, argumentos) => {
-                 let mut is_static_call = false;
+                let mut is_static_call = false;
                 let mut class_fqn_opt = None;
 
                 if let ast::Expressao::Identificador(nome_classe) = &**objeto_expr {
-                    let full_class_name = self.type_checker.resolver_nome_classe(nome_classe, &self.namespace_path);
-                    eprintln!("DEBUG: Identificador classe - nome: {}, full_class_name: {}", nome_classe, full_class_name);
-                    if let Some(classe_info) = self.type_checker.resolved_classes.get(&full_class_name) {
+                    let full_class_name = self
+                        .type_checker
+                        .resolver_nome_classe(nome_classe, &self.namespace_path);
+                    eprintln!(
+                        "DEBUG: Identificador classe - nome: {}, full_class_name: {}",
+                        nome_classe, full_class_name
+                    );
+                    if let Some(classe_info) =
+                        self.type_checker.resolved_classes.get(&full_class_name)
+                    {
                         if classe_info.eh_estatica {
                             is_static_call = true;
                             class_fqn_opt = Some(full_class_name);
@@ -714,7 +721,9 @@ impl<'a> BytecodeGenerator<'a> {
                     } else {
                         // NOVO: Verificar se a classe está na biblioteca externa
                         if let Some(bib) = &self.type_checker.biblioteca_externa {
-                            if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&full_class_name) {
+                            if let Some(LibSimbolo::Classe(lib_classe)) =
+                                bib.simbolos.get(&full_class_name)
+                            {
                                 eprintln!("DEBUG: Classe {} encontrada na biblioteca externa, eh_estatica: {}", full_class_name, lib_classe.eh_estatica);
                                 if lib_classe.eh_estatica {
                                     is_static_call = true;
@@ -729,8 +738,14 @@ impl<'a> BytecodeGenerator<'a> {
                     // Inferir tipo sem modificar o type_checker usando apenas as informações resolvidas
                     if let ast::Expressao::Identificador(nome_var) = &**objeto_expr {
                         // Tentar resolver como nome de classe
-                        let full_class_name = self.type_checker.resolver_nome_classe(nome_var, &self.namespace_path);
-                        if self.type_checker.resolved_classes.contains_key(&full_class_name) {
+                        let full_class_name = self
+                            .type_checker
+                            .resolver_nome_classe(nome_var, &self.namespace_path);
+                        if self
+                            .type_checker
+                            .resolved_classes
+                            .contains_key(&full_class_name)
+                        {
                             class_fqn_opt = Some(full_class_name);
                         } else {
                             // NOVO: Verificar se a classe está na biblioteca externa
@@ -743,17 +758,17 @@ impl<'a> BytecodeGenerator<'a> {
                     }
                 }
 
-
                 // NOVO: Consultar biblioteca externa para métodos nativos
                 // Resolver o nome completo da classe independentemente de is_static_call
                 let class_fqn = if let Some(fqn) = &class_fqn_opt {
                     fqn.clone()
                 } else if let ast::Expressao::Identificador(nome_classe) = &**objeto_expr {
-                    self.type_checker.resolver_nome_classe(nome_classe, &self.namespace_path)
+                    self.type_checker
+                        .resolver_nome_classe(nome_classe, &self.namespace_path)
                 } else {
                     String::new()
                 };
-                
+
                 if !class_fqn.is_empty() {
                     if let Some(bib) = &self.type_checker.biblioteca_externa {
                         if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&class_fqn) {
@@ -766,13 +781,21 @@ impl<'a> BytecodeGenerator<'a> {
                                         for arg in argumentos {
                                             self.generate_expressao(arg);
                                         }
-                                        self.bytecode_instructions.push(format!("CALL_STATIC_NATIVE {} {}", chave_nativa, argumentos.len()));
+                                        self.bytecode_instructions.push(format!(
+                                            "CALL_STATIC_NATIVE {} {}",
+                                            chave_nativa,
+                                            argumentos.len()
+                                        ));
                                     } else {
                                         self.generate_expressao(objeto_expr);
                                         for arg in argumentos {
                                             self.generate_expressao(arg);
                                         }
-                                        self.bytecode_instructions.push(format!("CALL_NATIVE {} {}", chave_nativa, argumentos.len()));
+                                        self.bytecode_instructions.push(format!(
+                                            "CALL_NATIVE {} {}",
+                                            chave_nativa,
+                                            argumentos.len()
+                                        ));
                                     }
                                     self.bytecode_instructions.push("POP".to_string());
                                     return;
@@ -785,20 +808,32 @@ impl<'a> BytecodeGenerator<'a> {
                 if let Some(class_fqn) = class_fqn_opt {
                     if let Some(class_info) = self.type_checker.resolved_classes.get(&class_fqn) {
                         if let Some(metodo_info) = class_info.methods.get(metodo) {
-                            if let Some(nativo_attr) = metodo_info.attributes.iter().find(|a| a.name == "Nativo") {
-                                if let Some(ast::Expressao::Texto(chave_nativa)) = nativo_attr.arguments.get(0) {
+                            if let Some(nativo_attr) =
+                                metodo_info.attributes.iter().find(|a| a.name == "Nativo")
+                            {
+                                if let Some(ast::Expressao::Texto(chave_nativa)) =
+                                    nativo_attr.arguments.get(0)
+                                {
                                     // É uma chamada nativa
                                     if is_static_call {
                                         for arg in argumentos {
                                             self.generate_expressao(arg);
                                         }
-                                        self.bytecode_instructions.push(format!("CALL_STATIC_NATIVE {} {}", chave_nativa, argumentos.len()));
+                                        self.bytecode_instructions.push(format!(
+                                            "CALL_STATIC_NATIVE {} {}",
+                                            chave_nativa,
+                                            argumentos.len()
+                                        ));
                                     } else {
                                         self.generate_expressao(objeto_expr);
                                         for arg in argumentos {
                                             self.generate_expressao(arg);
                                         }
-                                        self.bytecode_instructions.push(format!("CALL_NATIVE {} {}", chave_nativa, argumentos.len()));
+                                        self.bytecode_instructions.push(format!(
+                                            "CALL_NATIVE {} {}",
+                                            chave_nativa,
+                                            argumentos.len()
+                                        ));
                                     }
                                     self.bytecode_instructions.push("POP".to_string());
                                     return;
@@ -810,8 +845,10 @@ impl<'a> BytecodeGenerator<'a> {
 
                 // Lógica original para chamadas não-nativas
                 if is_static_call {
-                     if let ast::Expressao::Identificador(nome_classe) = &**objeto_expr {
-                        let full_class_name = self.type_checker.resolver_nome_classe(nome_classe, &self.namespace_path);
+                    if let ast::Expressao::Identificador(nome_classe) = &**objeto_expr {
+                        let full_class_name = self
+                            .type_checker
+                            .resolver_nome_classe(nome_classe, &self.namespace_path);
                         for arg in argumentos {
                             self.generate_expressao(arg);
                         }
@@ -1146,7 +1183,8 @@ impl<'a> BytecodeGenerator<'a> {
                     let full_class_name = self
                         .type_checker
                         .resolver_nome_classe(nome_classe, &self.namespace_path);
-                    if let Some(classe_info) = self.type_checker.resolved_classes.get(&full_class_name)
+                    if let Some(classe_info) =
+                        self.type_checker.resolved_classes.get(&full_class_name)
                     {
                         if classe_info.eh_estatica {
                             is_static_call = true;
@@ -1155,7 +1193,9 @@ impl<'a> BytecodeGenerator<'a> {
                     } else {
                         // NOVO: Verificar se a classe está na biblioteca externa
                         if let Some(bib) = &self.type_checker.biblioteca_externa {
-                            if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&full_class_name) {
+                            if let Some(LibSimbolo::Classe(lib_classe)) =
+                                bib.simbolos.get(&full_class_name)
+                            {
                                 if lib_classe.eh_estatica {
                                     is_static_call = true;
                                     class_fqn_opt = Some(full_class_name);
@@ -1169,8 +1209,14 @@ impl<'a> BytecodeGenerator<'a> {
                     // Inferir tipo sem modificar o type_checker usando apenas as informações resolvidas
                     if let ast::Expressao::Identificador(nome_var) = &**objeto_expr {
                         // Tentar resolver como nome de classe
-                        let full_class_name = self.type_checker.resolver_nome_classe(nome_var, &self.namespace_path);
-                        if self.type_checker.resolved_classes.contains_key(&full_class_name) {
+                        let full_class_name = self
+                            .type_checker
+                            .resolver_nome_classe(nome_var, &self.namespace_path);
+                        if self
+                            .type_checker
+                            .resolved_classes
+                            .contains_key(&full_class_name)
+                        {
                             class_fqn_opt = Some(full_class_name);
                         } else {
                             // NOVO: Verificar se a classe está na biblioteca externa
@@ -1187,11 +1233,12 @@ impl<'a> BytecodeGenerator<'a> {
                 let class_fqn = if let Some(fqn) = &class_fqn_opt {
                     fqn.clone()
                 } else if let ast::Expressao::Identificador(nome_classe) = &**objeto_expr {
-                    self.type_checker.resolver_nome_classe(nome_classe, &self.namespace_path)
+                    self.type_checker
+                        .resolver_nome_classe(nome_classe, &self.namespace_path)
                 } else {
                     String::new()
                 };
-                
+
                 if !class_fqn.is_empty() {
                     if let Some(bib) = &self.type_checker.biblioteca_externa {
                         if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&class_fqn) {
@@ -1229,8 +1276,12 @@ impl<'a> BytecodeGenerator<'a> {
                 if let Some(class_fqn) = class_fqn_opt {
                     if let Some(class_info) = self.type_checker.resolved_classes.get(&class_fqn) {
                         if let Some(metodo_info) = class_info.methods.get(nome_metodo) {
-                            if let Some(nativo_attr) = metodo_info.attributes.iter().find(|a| a.name == "Nativo") {
-                                if let Some(ast::Expressao::Texto(chave_nativa)) = nativo_attr.arguments.get(0) {
+                            if let Some(nativo_attr) =
+                                metodo_info.attributes.iter().find(|a| a.name == "Nativo")
+                            {
+                                if let Some(ast::Expressao::Texto(chave_nativa)) =
+                                    nativo_attr.arguments.get(0)
+                                {
                                     // É uma chamada nativa
                                     if is_static_call {
                                         for arg in argumentos {
@@ -1261,8 +1312,10 @@ impl<'a> BytecodeGenerator<'a> {
 
                 // Lógica original para chamadas não-nativas
                 if is_static_call {
-                     if let ast::Expressao::Identificador(nome_classe) = &**objeto_expr {
-                        let full_class_name = self.type_checker.resolver_nome_classe(nome_classe, &self.namespace_path);
+                    if let ast::Expressao::Identificador(nome_classe) = &**objeto_expr {
+                        let full_class_name = self
+                            .type_checker
+                            .resolver_nome_classe(nome_classe, &self.namespace_path);
                         for arg in argumentos {
                             self.generate_expressao(arg);
                         }

@@ -5,7 +5,6 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use walkdir::WalkDir;
 
 // Declaração dos módulos do projeto
@@ -183,7 +182,8 @@ fn compilar_biblioteca(
     let formato_nome = if formato_pbl { ".pbl" } else { ".pbc" };
     println!(
         "=== Compilando Biblioteca: {} → {} ===",
-        caminho_lib.display(), formato_nome
+        caminho_lib.display(),
+        formato_nome
     );
 
     let caminho_src = caminho_lib.join("src");
@@ -212,19 +212,25 @@ fn compilar_biblioteca(
         let tokens: Vec<_> = lx
             .spanned()
             .map(|(tok, span)| {
-                tok.map(|t| (span.start, t, span.end))
-                    .map_err(|_| Box::new(CompilerError(format!(
+                tok.map(|t| (span.start, t, span.end)).map_err(|_| {
+                    Box::new(CompilerError(format!(
                         "Erro léxico na biblioteca (arquivo {}): posição {}:{}",
-                        _caminho.display(), span.start, span.end
-                    ))) as Box<dyn std::error::Error>)
+                        _caminho.display(),
+                        span.start,
+                        span.end
+                    ))) as Box<dyn std::error::Error>
+                })
             })
             .collect::<Result<Vec<_>, _>>()?;
         let mut ast = parser::ArquivoParser::new()
             .parse(tokens.iter().cloned())
-            .map_err(|e| Box::new(CompilerError(format!(
-                "Erro sintático na biblioteca (arquivo {}): {:?}",
-                _caminho.display(), e
-            ))))?;
+            .map_err(|e| {
+                Box::new(CompilerError(format!(
+                    "Erro sintático na biblioteca (arquivo {}): {:?}",
+                    _caminho.display(),
+                    e
+                )))
+            })?;
         crate::interpolacao::walk_programa(&mut ast, |e| {
             *e = crate::interpolacao::planificar_interpolada(e.clone());
         });
@@ -240,7 +246,11 @@ fn compilar_biblioteca(
         programa_final.declaracoes.extend(ast.declaracoes);
         programa_final.usings.extend(ast.usings);
         for ns in ast.namespaces.drain(..) {
-            if let Some(existing_ns) = programa_final.namespaces.iter_mut().find(|n| n.nome == ns.nome) {
+            if let Some(existing_ns) = programa_final
+                .namespaces
+                .iter_mut()
+                .find(|n| n.nome == ns.nome)
+            {
                 existing_ns.declaracoes.extend(ns.declaracoes);
             } else {
                 programa_final.namespaces.push(ns);
@@ -270,9 +280,7 @@ fn compilar_biblioteca(
     if formato_pbl {
         // Lê o nome e versão do Sistema.toml se disponível
         let (nome_lib, versao_lib) = ler_metadados_biblioteca(caminho_lib);
-        let conteudo_pbl = gerador.gerar_pbl(
-            &programa_final, &mut tc, &nome_lib, &versao_lib
-        )?;
+        let conteudo_pbl = gerador.gerar_pbl(&programa_final, &mut tc, &nome_lib, &versao_lib)?;
         let caminho_saida = caminho_dist.join(format!("{}.pbl", nome_lib.to_lowercase()));
         fs::write(&caminho_saida, conteudo_pbl)?;
         println!("✅ Biblioteca .pbl gerada em: {}", caminho_saida.display());
@@ -426,7 +434,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let path = lib_path.split('=').nth(1).unwrap_or(".");
         // Produz .pbl se --target=biblioteca (ou --target=pbl) for especificado; caso contrário .pbc legado
-        let formato_pbl = args.iter().any(|a| a == "--target=biblioteca" || a == "--target=pbl");
+        let formato_pbl = args
+            .iter()
+            .any(|a| a == "--target=biblioteca" || a == "--target=pbl");
         return compilar_biblioteca(Path::new(path), formato_pbl);
     }
 
@@ -454,13 +464,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //   2. Procura um .pbc legado em sistema-padrao/dist/ (compatibilidade)
     //   3. Cai de volta para parsear as fontes .pr (desenvolvimento)
     // Equivalente ao mecanismo de Reference Assemblies do .NET.
-    let stdlib_info: Option<(ast::Programa, HashSet<String>, Option<library_loader::Biblioteca>)> = if let Some(stdlib_path) = find_stdlib_source_path(&args) {
+    let stdlib_info: Option<(
+        ast::Programa,
+        HashSet<String>,
+        Option<library_loader::Biblioteca>,
+    )> = if let Some(stdlib_path) = find_stdlib_source_path(&args) {
         // Tenta carregar .pbl pré-compilado primeiro
         let pbl_path = stdlib_path.join("dist").join("sistema.pbl");
         let pbc_path = stdlib_path.join("dist").join("sistema.pbc");
 
         if pbl_path.exists() {
-            println!("📦 Carregando biblioteca padrão pré-compilada: {}", pbl_path.display());
+            println!(
+                "📦 Carregando biblioteca padrão pré-compilada: {}",
+                pbl_path.display()
+            );
             match library_loader::carregar_biblioteca(&pbl_path) {
                 Ok(bib) => {
                     // Extrai namespaces da biblioteca
@@ -470,15 +487,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let partes: Vec<&str> = fqn.split('.').collect();
                         let mut acum = String::new();
                         for (i, p) in partes.iter().enumerate() {
-                            if i == partes.len() - 1 { break; } // ignora o nome da classe
-                            if !acum.is_empty() { acum.push('.'); }
+                            if i == partes.len() - 1 {
+                                break;
+                            } // ignora o nome da classe
+                            if !acum.is_empty() {
+                                acum.push('.');
+                            }
                             acum.push_str(p);
                             ns_set.insert(acum.clone());
                         }
                     }
                     // Não carrega no tc_temp para evitar stack overflow
                     // Apenas retorna os namespaces para o type_checker principal
-                    let prog_vazio = ast::Programa { usings: vec![], namespaces: vec![], declaracoes: vec![] };
+                    let prog_vazio = ast::Programa {
+                        usings: vec![],
+                        namespaces: vec![],
+                        declaracoes: vec![],
+                    };
                     Some((prog_vazio, ns_set, Some(bib)))
                 }
                 Err(e) => {
@@ -487,7 +512,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         } else if pbc_path.exists() {
-            println!("📦 Carregando biblioteca padrão .pbc: {}", pbc_path.display());
+            println!(
+                "📦 Carregando biblioteca padrão .pbc: {}",
+                pbc_path.display()
+            );
             match library_loader::carregar_biblioteca(&pbc_path) {
                 Ok(bib) => {
                     let mut ns_set: HashSet<String> = HashSet::new();
@@ -495,13 +523,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let partes: Vec<&str> = fqn.split('.').collect();
                         let mut acum = String::new();
                         for (i, p) in partes.iter().enumerate() {
-                            if i == partes.len() - 1 { break; }
-                            if !acum.is_empty() { acum.push('.'); }
+                            if i == partes.len() - 1 {
+                                break;
+                            }
+                            if !acum.is_empty() {
+                                acum.push('.');
+                            }
                             acum.push_str(p);
                             ns_set.insert(acum.clone());
                         }
                     }
-                    let prog_vazio = ast::Programa { usings: vec![], namespaces: vec![], declaracoes: vec![] };
+                    let prog_vazio = ast::Programa {
+                        usings: vec![],
+                        namespaces: vec![],
+                        declaracoes: vec![],
+                    };
                     Some((prog_vazio, ns_set, Some(bib)))
                 }
                 Err(e) => {
@@ -666,7 +702,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     programa_final.namespaces.push(ns);
                 }
             }
-            programa_final.declaracoes.extend(programa_stdlib.declaracoes);
+            programa_final
+                .declaracoes
+                .extend(programa_stdlib.declaracoes);
         }
     } else {
         stdlib_namespaces = HashSet::new();
@@ -705,19 +743,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         TargetCompilacao::LlvmIr => {
             compilar_para_llvm_ir(&programa_final, &mut type_checker, nome_base)?;
             println!("Compilando com clang...");
-            let output = Command::new("clang")
-                .arg(format!("{}.ll", nome_base))
-                .arg("-o")
-                .arg(nome_base)
-                .output()
-                .map_err(|e| Box::new(CompilerError(format!("Falha ao executar clang: {}", e))))?;
-
-            if !output.status.success() {
-                return Err(Box::new(CompilerError(format!(
-                    "Erro ao compilar LLVM IR com clang:\nstdout: {}\nstderr: {}\n",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                ))));
+            let ll_path = format!("{}.ll", nome_base);
+            if let Err(error) =
+                codegen::compilar_llvm_ir_com_runtime(Path::new(&ll_path), nome_base)
+            {
+                return Err(Box::new(CompilerError(error)));
             }
             println!("Executável gerado: ./{}", nome_base);
             Ok(())
@@ -730,9 +760,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         TargetCompilacao::Biblioteca => {
             // Produz .pbl a partir dos arquivos de entrada (usa a própria lógica de biblioteca)
             let mut gerador = codegen::GeradorCodigo::new()?;
-            let conteudo = gerador.gerar_pbl(
-                &programa_final, &mut type_checker, nome_base, "1.0.0"
-            )?;
+            let conteudo =
+                gerador.gerar_pbl(&programa_final, &mut type_checker, nome_base, "1.0.0")?;
             let caminho_saida = format!("{}.pbl", nome_base);
             fs::write(&caminho_saida, conteudo)?;
             println!("✅ Biblioteca .pbl gerada em: {}", caminho_saida);
@@ -769,7 +798,16 @@ fn compilar_para_llvm_ir<'a>(
     let llvm_ir = gerador.generate();
     fs::write(format!("{}.ll", nome_base), llvm_ir)?;
     println!("  ✓ {}.ll gerado.", nome_base);
-    println!("  Para compilar: clang {0}.ll -o {0}", nome_base);
+    #[cfg(windows)]
+    println!(
+        "  Para compilar: clang {0}.ll <runtime>/async_runtime.c -o {0}",
+        nome_base
+    );
+    #[cfg(not(windows))]
+    println!(
+        "  Para compilar: clang {0}.ll <runtime>/async_runtime.c -o {0} -pthread",
+        nome_base
+    );
     println!("🎯 Pipeline LLVM: AST → LLVM IR → Código de Máquina");
     println!("Para executar: ./{}", nome_base);
     Ok(())

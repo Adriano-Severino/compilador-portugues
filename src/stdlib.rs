@@ -20,6 +20,7 @@ pub fn criar_biblioteca_padrao() -> Vec<Declaracao> {
         modificador: ModificadorAcesso::Publico,
         corpo: vec![],
         eh_estatica: false,
+        eh_assincrona: false,
     }));
     stdlib.push(Declaracao::DeclaracaoFuncao(DeclaracaoFuncao {
         attributes: vec![],
@@ -30,6 +31,7 @@ pub fn criar_biblioteca_padrao() -> Vec<Declaracao> {
         modificador: ModificadorAcesso::Publico,
         corpo: vec![],
         eh_estatica: false,
+        eh_assincrona: false,
     }));
 
     stdlib
@@ -49,5 +51,6 @@ fn criar_funcoes_matematicas() -> Vec<Declaracao> {
         modificador: ModificadorAcesso::Publico,
         corpo: vec![],
         eh_estatica: false,
+        eh_assincrona: false,
     })]
 }

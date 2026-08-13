@@ -1183,8 +1183,11 @@ impl<'a> VerificadorTipos<'a> {
                     let is_nativo = metodo.attributes.iter().any(|a| a.name == "Nativo");
                     // Um método é "externo" quando tem corpo vazio, não é abstrato, e tem o atributo [Nativo]
                     // (parseado via palavra-chave `externo` no parser).
-                    let is_externo = !metodo.eh_abstrato && !is_nativo && metodo.corpo.is_empty()
-                        && !metodo.eh_virtual && !metodo.eh_override;
+                    let is_externo = !metodo.eh_abstrato
+                        && !is_nativo
+                        && metodo.corpo.is_empty()
+                        && !metodo.eh_virtual
+                        && !metodo.eh_override;
                     let _ = is_externo; // será usado em validações futuras
 
                     if is_nativo && !metodo.corpo.is_empty() {
@@ -1604,6 +1607,62 @@ impl<'a> VerificadorTipos<'a> {
             Expressao::DuploLiteral(_) => Tipo::Duplo,
             Expressao::Decimal(_) => Tipo::Decimal,
             Expressao::Nulo => Tipo::Classe("objeto".to_string()),
+            Expressao::Aguarde(inner) => match inner.as_ref() {
+                Expressao::Chamada(nome, argumentos) => {
+                    for argumento in argumentos {
+                        self.inferir_tipo_expressao(
+                            argumento,
+                            namespace_atual,
+                            classe_atual,
+                            escopo_vars,
+                        );
+                    }
+                    match nome.as_str() {
+                        "LerArquivoAssíncrono" => Tipo::Texto,
+                        "EscreverArquivoAssíncrono" | "VerificarArquivoAssíncrono" => {
+                            Tipo::Booleano
+                        }
+                        _ => {
+                            let fqn = self.resolver_nome_funcao(nome, namespace_atual);
+                            match self.simbolos_namespaces.get(&fqn) {
+                                Some(Declaracao::DeclaracaoFuncao(function))
+                                    if function.eh_assincrona =>
+                                {
+                                    function.tipo_retorno.clone().unwrap_or(Tipo::Vazio)
+                                }
+                                _ => {
+                                    self.erros.push(format!(
+                                        "aguarde requer uma função assíncrona; '{}' não foi encontrada ou não foi marcada como assíncrona.",
+                                        nome
+                                    ));
+                                    Tipo::Inferido
+                                }
+                            }
+                        }
+                    }
+                }
+                Expressao::ChamadaMetodo(objeto, metodo, argumentos) if matches!(objeto.as_ref(), Expressao::Identificador(nome) if nome == "Arquivo") =>
+                {
+                    for argumento in argumentos {
+                        self.inferir_tipo_expressao(
+                            argumento,
+                            namespace_atual,
+                            classe_atual,
+                            escopo_vars,
+                        );
+                    }
+                    match metodo.as_str() {
+                        "LerTextoAssíncrono" => Tipo::Texto,
+                        "EscreverTextoAssíncrono" | "ExisteAssíncrono" => Tipo::Booleano,
+                        _ => Tipo::Inferido,
+                    }
+                }
+                _ => {
+                    self.erros
+                        .push("aguarde requer uma chamada assíncrona.".to_string());
+                    Tipo::Inferido
+                }
+            },
             Expressao::Este => {
                 classe_atual.map_or(Tipo::Inferido, |nome| Tipo::Classe(nome.clone()))
             }
@@ -1674,7 +1733,7 @@ impl<'a> VerificadorTipos<'a> {
 
                 if let Some(nome_classe) = lookup_class_name {
                     let fqn = self.resolver_nome_classe(&nome_classe, namespace_atual);
-                    
+
                     // NOVO: Consultar biblioteca externa para métodos
                     if let Some(bib) = &self.biblioteca_externa {
                         if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&fqn) {
@@ -1683,7 +1742,7 @@ impl<'a> VerificadorTipos<'a> {
                             }
                         }
                     }
-                    
+
                     if let Some(class_info) = self.resolved_classes.get(&fqn) {
                         if let Some(prop) = class_info
                             .properties
@@ -1843,7 +1902,8 @@ impl<'a> VerificadorTipos<'a> {
                 if let Tipo::Classe(nome_classe) = obj_tipo {
                     // NOVO: Consultar biblioteca externa primeiro
                     if let Some(bib) = &self.biblioteca_externa {
-                        if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&nome_classe) {
+                        if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&nome_classe)
+                        {
                             if let Some(metodo) = lib_classe.metodos.get(metodo_nome) {
                                 return string_para_tipo(&metodo.tipo_retorno);
                             }
@@ -1917,7 +1977,8 @@ impl<'a> VerificadorTipos<'a> {
                 if let Tipo::Classe(ref nome_classe) = obj_tipo {
                     // NOVO: Consultar biblioteca externa primeiro
                     if let Some(bib) = &self.biblioteca_externa {
-                        if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(nome_classe) {
+                        if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(nome_classe)
+                        {
                             if let Some(metodo) = lib_classe.metodos.get(membro_nome) {
                                 return string_para_tipo(&metodo.tipo_retorno);
                             }

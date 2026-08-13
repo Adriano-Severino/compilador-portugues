@@ -4,7 +4,72 @@ pub mod console;
 pub mod llvm_ir;
 
 use crate::ast;
+use std::env;
 use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+fn clang_executable() -> PathBuf {
+    if let Some(path) = env::var_os("CLANG") {
+        return PathBuf::from(path);
+    }
+
+    #[cfg(windows)]
+    {
+        if let Some(program_files) = env::var_os("ProgramFiles") {
+            let installed = PathBuf::from(program_files)
+                .join("LLVM")
+                .join("bin")
+                .join("clang.exe");
+            if installed.is_file() {
+                return installed;
+            }
+        }
+    }
+
+    PathBuf::from("clang")
+}
+
+/// Compila o LLVM IR gerado e vincula o runtime nativo de async/await.
+///
+/// O caminho do runtime é resolvido a partir do manifesto do compilador, para
+/// que a compilação funcione independentemente do diretório atual do processo.
+pub fn compilar_llvm_ir_com_runtime(ll_path: &Path, nome_base: &str) -> Result<(), String> {
+    let runtime_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("runtime")
+        .join("async_runtime.c");
+
+    if !runtime_path.is_file() {
+        return Err(format!(
+            "Runtime async nativo não encontrado: {}",
+            runtime_path.display()
+        ));
+    }
+
+    let mut command = Command::new(clang_executable());
+    command
+        .arg(ll_path)
+        .arg(&runtime_path)
+        .arg("-o")
+        .arg(nome_base);
+
+    #[cfg(not(windows))]
+    command.arg("-pthread");
+
+    let output = command
+        .output()
+        .map_err(|e| format!("Falha ao executar o clang: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Erro do Clang: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
 
 pub struct GeradorCodigo;
 
@@ -25,22 +90,7 @@ impl GeradorCodigo {
         let ll_path = format!("{}.ll", nome_base);
         fs::write(&ll_path, code).map_err(|e| e.to_string())?;
 
-        // Compila o LLVM IR para código de máquina usando clang
-        let output = std::process::Command::new("clang")
-            .arg(&ll_path)
-            .arg("-o")
-            .arg(nome_base)
-            .output()
-            .map_err(|e| format!("Falha ao executar o clang: {}", e))?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "Erro do Clang: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
-        Ok(())
+        compilar_llvm_ir_com_runtime(Path::new(&ll_path), nome_base)
     }
 
     pub fn gerar_cil(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
@@ -135,33 +185,77 @@ impl GeradorCodigo {
                         }
                     }
                     for metodo in &cl.metodos {
-                        let ret = metodo.tipo_retorno.as_ref()
+                        let ret = metodo
+                            .tipo_retorno
+                            .as_ref()
                             .map(|t| t.to_string())
                             .unwrap_or_else(|| "vazio".to_string());
-                        let params: Vec<String> = metodo.parametros.iter()
+                        let params: Vec<String> = metodo
+                            .parametros
+                            .iter()
                             .map(|p| format!("{}:{}", p.tipo, p.nome))
                             .collect();
                         let is_nativo = metodo.attributes.iter().any(|a| a.name == "Nativo");
                         // Extrai a chave nativa se presente
-                        let chave_nativa = metodo.attributes.iter()
+                        let chave_nativa = metodo
+                            .attributes
+                            .iter()
                             .find(|a| a.name == "Nativo")
                             .and_then(|a| a.arguments.first())
-                            .and_then(|e| if let ast::Expressao::Texto(s) = e { Some(s.clone()) } else { None });
+                            .and_then(|e| {
+                                if let ast::Expressao::Texto(s) = e {
+                                    Some(s.clone())
+                                } else {
+                                    None
+                                }
+                            });
                         if metodo.eh_estatica {
                             if let Some(chave) = &chave_nativa {
-                                writeln!(manifesto, "DEFINE_STATIC_NATIVE_METHOD {} {} {} {} {}",
-                                    fqn, metodo.nome, ret, chave, params.join(" ")).ok();
+                                writeln!(
+                                    manifesto,
+                                    "DEFINE_STATIC_NATIVE_METHOD {} {} {} {} {}",
+                                    fqn,
+                                    metodo.nome,
+                                    ret,
+                                    chave,
+                                    params.join(" ")
+                                )
+                                .ok();
                             } else {
-                                writeln!(manifesto, "DEFINE_STATIC_METHOD {} {} {} {} {}",
-                                    fqn, metodo.nome, ret, params.len(), params.join(" ")).ok();
+                                writeln!(
+                                    manifesto,
+                                    "DEFINE_STATIC_METHOD {} {} {} {} {}",
+                                    fqn,
+                                    metodo.nome,
+                                    ret,
+                                    params.len(),
+                                    params.join(" ")
+                                )
+                                .ok();
                             }
                         } else {
                             if let Some(chave) = &chave_nativa {
-                                writeln!(manifesto, "DEFINE_NATIVE_METHOD {} {} {} {} {}",
-                                    fqn, metodo.nome, ret, chave, params.join(" ")).ok();
+                                writeln!(
+                                    manifesto,
+                                    "DEFINE_NATIVE_METHOD {} {} {} {} {}",
+                                    fqn,
+                                    metodo.nome,
+                                    ret,
+                                    chave,
+                                    params.join(" ")
+                                )
+                                .ok();
                             } else {
-                                writeln!(manifesto, "DEFINE_METHOD {} {} {} {} {}",
-                                    fqn, metodo.nome, ret, params.len(), params.join(" ")).ok();
+                                writeln!(
+                                    manifesto,
+                                    "DEFINE_METHOD {} {} {} {} {}",
+                                    fqn,
+                                    metodo.nome,
+                                    ret,
+                                    params.len(),
+                                    params.join(" ")
+                                )
+                                .ok();
                             }
                         }
                         // Métodos com corpo entram no bytecode

@@ -248,6 +248,7 @@ pub struct MetodoClasse {
     pub eh_override: bool,
     pub eh_abstrato: bool,
     pub eh_estatica: bool,
+    pub eh_assincrona: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -273,6 +274,7 @@ pub struct DeclaracaoFuncao {
     pub modificador: ModificadorAcesso,
     pub corpo: Vec<Comando>,
     pub eh_estatica: bool,
+    pub eh_assincrona: bool,
 }
 
 /* — parâmetros com valor padrão (C#-style) — */
@@ -367,6 +369,7 @@ pub enum Expressao {
     StringInterpolada(Vec<PartStringInterpolada>),
     Unario(OperadorUnario, Box<Expressao>),
     Este,
+    Aguarde(Box<Expressao>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

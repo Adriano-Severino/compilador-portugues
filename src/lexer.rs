@@ -22,6 +22,12 @@ pub enum Token {
     TPara,
     #[token("função")]
     TFuncao,
+    // Async/await usa termos em português;
+    #[token("assíncrona")]
+    #[token("assincrona")]
+    TAssincrona,
+    #[token("aguarde")]
+    TAguarde,
     #[token("retorne")]
     TRetorne,
     #[token("imprima")]
@@ -169,7 +175,7 @@ pub enum Token {
     TChar(String),
     #[regex(r#"'[^'\\]'"#, |lex| lex.slice()[1..lex.slice().len()-1].to_string())]
     TCharLit(String),
-    #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
+    #[regex(r"[a-zA-Z_áÁâÂãÃàÀéÉêÊíÍîÎóÓôÔõÕòÒúÚûÛçÇ][a-zA-Z0-9_áÁâÂãÃàÀéÉêÊíÍîÎóÓôÔõÕòÒúÚûÛçÇ]*", |lex| lex.slice().to_string())]
     TIdentificador(String),
 
     /* comentários / espaço */
@@ -254,5 +260,49 @@ mod tests {
         assert_eq!(lex.next(), Some(Ok(Token::TTipoDecimal)));
         assert_eq!(lex.next(), Some(Ok(Token::TTipoFlutuante)));
         assert_eq!(lex.next(), Some(Ok(Token::TTipoDuplo)));
+    }
+
+    #[test]
+    fn test_identificadores_com_acentos() {
+        // Garante que identificadores acentuados latinos sejam tokenizados corretamente.
+        let codigo = "título número função_áção ção";
+        let mut lex = Token::lexer(codigo);
+
+        assert_eq!(
+            lex.next(),
+            Some(Ok(Token::TIdentificador("título".to_string())))
+        );
+        assert_eq!(
+            lex.next(),
+            Some(Ok(Token::TIdentificador("número".to_string())))
+        );
+        assert_eq!(
+            lex.next(),
+            Some(Ok(Token::TIdentificador("função_áção".to_string())))
+        );
+        assert_eq!(
+            lex.next(),
+            Some(Ok(Token::TIdentificador("ção".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_identificador_com_acentos_no_meio() {
+        // Identificadores com acentos no meio também devem funcionar.
+        let codigo = "preçoTotal valor_Inicial ãoOutro";
+        let mut lex = Token::lexer(codigo);
+
+        assert_eq!(
+            lex.next(),
+            Some(Ok(Token::TIdentificador("preçoTotal".to_string())))
+        );
+        assert_eq!(
+            lex.next(),
+            Some(Ok(Token::TIdentificador("valor_Inicial".to_string())))
+        );
+        assert_eq!(
+            lex.next(),
+            Some(Ok(Token::TIdentificador("ãoOutro".to_string())))
+        );
     }
 }

@@ -1,0 +1,9 @@
+// Função da linguagem executada no pool nativo do alvo LLVM.
+assíncrona função inteiro Dobrar(inteiro valor) {
+    retorne valor * 2;
+}
+
+função vazio Principal() {
+    inteiro resultado = aguarde Dobrar(21);
+    EscreverLinha(resultado);
+}

@@ -1,0 +1,8 @@
+// Exemplo de I/O assíncrono real usando funções nativas
+função principal() => vazio {
+    EscreverLinha("Testando I/O assíncrono nativo");
+    
+    // Chama função assíncrona nativa estática
+    var resultado = aguarde LerArquivoAssíncrono("teste.txt");
+    EscreverLinha(resultado);
+}

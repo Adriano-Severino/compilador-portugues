@@ -30,6 +30,7 @@ impl InferenciaTipos {
             Expressao::Nulo => Ok(Tipo::Objeto),
             Expressao::NovoObjeto(t, _) => Ok(t.clone()),
             Expressao::NovoArray(t, _) => Ok(Tipo::Lista(t.clone())),
+            Expressao::Aguarde(_) => Ok(Tipo::Objeto), // Aguarde retorna tipo do awaited value
             // Arrays: inferir tipo dos elementos
             Expressao::ListaLiteral(itens) => {
                 if itens.is_empty() {

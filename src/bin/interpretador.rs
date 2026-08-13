@@ -4,7 +4,11 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::io::{self, Read, Write};
+use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 use rust_decimal::Decimal;
 
@@ -31,6 +35,19 @@ enum Valor {
         campos: Rc<RefCell<HashMap<String, Valor>>>,
         metodos: HashMap<String, FuncInfo>,
     },
+    Task {
+        id: usize,
+        status: TaskStatus,
+        result: Option<Box<Valor>>,
+    },
+}
+
+#[derive(Clone, Debug)]
+enum TaskStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed(String),
 }
 
 //Informações da classe
@@ -88,6 +105,10 @@ impl fmt::Display for Valor {
                     write!(f, "Objeto<{}>", nome_classe)
                 }
             }
+            Valor::Task { id, status, result } => match result {
+                Some(val) => write!(f, "Task<{}>: {:?} = {}", id, status, val),
+                None => write!(f, "Task<{}>: {:?}", id, status),
+            },
         }
     }
 }
@@ -135,6 +156,27 @@ struct VM {
     // Debugging support
     debug: Option<Rc<RefCell<DebugState>>>,
     code_id: String,
+    // Gerenciador de tasks
+    task_counter: Arc<Mutex<usize>>,
+    tasks: Arc<Mutex<HashMap<usize, Task>>>,
+    // Call stack para debugging
+    call_stack: Vec<StackFrame>,
+}
+
+// Estrutura para representar uma task assíncrona.
+// Pode estar pendente (Pending), em execução (Running), concluída (Completed)
+// ou falhada (Failed) com mensagem de erro.
+struct Task {
+    status: TaskStatus,
+    result: Option<Box<Valor>>,
+}
+
+// Frame de chamada para stack trace
+#[derive(Debug, Clone)]
+struct StackFrame {
+    code_id: String,
+    ip: usize,
+    variaveis: HashMap<String, Valor>,
 }
 
 // Estado compartilhado do depurador entre VMs (para permitir step-into em chamadas)
@@ -147,20 +189,39 @@ struct DebugState {
     step_mode: Option<StepMode>,
     // última localização em que paramos (para comparar no step)
     last_break_location: Option<(String, usize)>,
+    // profundidade da call stack para step over/step out
+    call_depth: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StepMode {
     StepInto,
+    StepOver,
+    StepOut,
 }
 
 impl VM {
-    fn executar_funcao(
+    async fn executar_funcao(
         &mut self,
         func: &FuncInfo,
         args: Vec<Valor>,
         este: Option<Valor>,
     ) -> Result<Option<Valor>, String> {
+        // Salvar frame atual no call stack
+        let current_frame = StackFrame {
+            code_id: self.code_id.clone(),
+            ip: self.ip,
+            variaveis: self.variaveis.clone(),
+        };
+        if let Some(d) = &self.debug {
+            self.call_stack.push(current_frame);
+        }
+
+        // Incrementar profundidade para step over/step out
+        if let Some(d) = &self.debug {
+            d.borrow_mut().call_depth += 1;
+        }
+
         let mut child = VM {
             pilha: Vec::new(),
             variaveis: HashMap::new(),
@@ -172,7 +233,11 @@ impl VM {
             base_dir: self.base_dir.clone(),
             debug: self.debug.clone(),
             code_id: format!("func:{}", func.nome),
+            task_counter: self.task_counter.clone(),
+            tasks: self.tasks.clone(),
+            call_stack: self.call_stack.clone(),
         };
+
         // Mapear parâmetros
         for (idx, param_name) in func.parametros.iter().enumerate() {
             if let Some(val) = args.get(idx) {
@@ -182,7 +247,24 @@ impl VM {
         if let Some(obj) = este {
             child.variaveis.insert("este".to_string(), obj);
         }
-        child.run()?;
+
+        let result = Box::pin(child.run()).await;
+
+        // Decrementar profundidade ao sair da função
+        if let Some(d) = &self.debug {
+            d.borrow_mut().call_depth = d.borrow_mut().call_depth.saturating_sub(1);
+        }
+
+        // Restaurar frame do call stack
+        if let Some(d) = &self.debug {
+            if let Some(frame) = self.call_stack.pop() {
+                self.code_id = frame.code_id;
+                self.ip = frame.ip;
+                self.variaveis = frame.variaveis;
+            }
+        }
+
+        result?;
         Ok(child.pilha.pop())
     }
 
@@ -199,6 +281,10 @@ impl VM {
             base_dir,
             debug: None,
             code_id: "global".to_string(),
+            // Inicializa o gerenciador de tasks compartilhado
+            task_counter: Arc::new(Mutex::new(0)),
+            tasks: Arc::new(Mutex::new(HashMap::new())),
+            call_stack: Vec::new(),
         }
     }
 
@@ -209,7 +295,11 @@ impl VM {
             || nome_classe == "Sistema"
     }
 
-    fn criar_objeto(&mut self, nome_classe: &str, argumentos: Vec<Valor>) -> Result<Valor, String> {
+    async fn criar_objeto(
+        &mut self,
+        nome_classe: &str,
+        argumentos: Vec<Valor>,
+    ) -> Result<Valor, String> {
         // --- Intercepta instâncias de classes da biblioteca padrão (igual ao CLR do C#) ---
         if Self::eh_classe_stdlib(nome_classe) {
             // Resolve o nome qualificado completo para classes sem namespace explícito
@@ -291,6 +381,9 @@ impl VM {
                 base_dir: self.base_dir.clone(),
                 debug: self.debug.clone(),
                 code_id: format!("ctor:{}", nome_classe),
+                task_counter: self.task_counter.clone(),
+                tasks: self.tasks.clone(),
+                call_stack: Vec::new(),
             };
 
             // Adiciona 'este' e os argumentos ao escopo do construtor.
@@ -305,13 +398,13 @@ impl VM {
                 }
             }
 
-            constructor_vm.run()?;
+            Box::pin(constructor_vm.run()).await?;
         }
 
         Ok(objeto)
     }
 
-    fn chamar_metodo(
+    async fn chamar_metodo(
         &mut self,
         objeto: &mut Valor,
         nome_metodo: &str,
@@ -500,9 +593,12 @@ impl VM {
                     base_dir: self.base_dir.clone(),
                     debug: self.debug.clone(),
                     code_id: format!("method:{}::{}", nome_classe, nome_metodo),
+                    task_counter: self.task_counter.clone(),
+                    tasks: self.tasks.clone(),
+                    call_stack: Vec::new(),
                 };
 
-                vm_metodo.run()?;
+                Box::pin(vm_metodo.run()).await?;
 
                 // Pega o valor de retorno da pilha da VM do método
                 let valor_retorno = vm_metodo.pilha.pop().unwrap_or(Valor::Nulo);
@@ -518,7 +614,7 @@ impl VM {
         }
     }
 
-    fn chamar_metodo_estatico(
+    async fn chamar_metodo_estatico(
         &mut self,
         nome_classe: &str,
         nome_metodo: &str,
@@ -585,9 +681,12 @@ impl VM {
                     base_dir: self.base_dir.clone(),
                     debug: self.debug.clone(),
                     code_id: format!("static:{}::{}", nome_classe, nome_metodo),
+                    task_counter: self.task_counter.clone(),
+                    tasks: self.tasks.clone(),
+                    call_stack: Vec::new(),
                 };
 
-                vm_metodo.run()?;
+                Box::pin(vm_metodo.run()).await?;
                 return Ok(vm_metodo.pilha.pop().unwrap_or(Valor::Nulo));
             } else if Self::eh_classe_stdlib(nome_classe) {
                 // Método estático stdlib sem handler específico: retorna nulo com aviso
@@ -887,7 +986,7 @@ impl VM {
     }
 
     // O laço principal de execução da VM.
-    fn run(&mut self) -> Result<(), String> {
+    async fn run(&mut self) -> Result<(), String> {
         while self.ip < self.bytecode.len() {
             let instrucao_str = self.bytecode[self.ip].clone();
             // Divide a instrução em partes (ex: "LOAD_CONST_INT", "42")
@@ -1512,7 +1611,7 @@ impl VM {
                     let argumentos = self.pilha.split_off(self.pilha.len() - num_args);
 
                     // Criar objeto
-                    let objeto = self.criar_objeto(nome_classe, argumentos)?;
+                    let objeto = self.criar_objeto(nome_classe, argumentos).await?;
                     self.pilha.push(objeto);
                 }
 
@@ -1630,7 +1729,9 @@ impl VM {
                         .pilha
                         .pop()
                         .ok_or("Pilha vazia para objeto em CALL_METHOD")?;
-                    let valor_retorno = self.chamar_metodo(&mut objeto, nome_metodo, argumentos)?;
+                    let valor_retorno = self
+                        .chamar_metodo(&mut objeto, nome_metodo, argumentos)
+                        .await?;
                     self.pilha.push(valor_retorno);
                 }
 
@@ -1657,8 +1758,9 @@ impl VM {
                         Vec::new()
                     };
 
-                    let resultado =
-                        self.chamar_metodo_estatico(nome_classe, nome_metodo, argumentos)?;
+                    let resultado = self
+                        .chamar_metodo_estatico(nome_classe, nome_metodo, argumentos)
+                        .await?;
                     self.pilha.push(resultado);
                 }
 
@@ -1676,7 +1778,7 @@ impl VM {
                             VM::new(vec![default_expr_bytecode_str], self.base_dir.clone());
                         temp_vm.debug = self.debug.clone();
                         temp_vm.code_id = format!("expr-default:{}", nome_var);
-                        temp_vm.run()?;
+                        Box::pin(temp_vm.run()).await?;
                         let valor = temp_vm.pilha.pop().unwrap_or(Valor::Nulo);
                         self.variaveis.insert(nome_var.to_string(), valor);
                     }
@@ -1718,6 +1820,9 @@ impl VM {
                                             base_dir: self.base_dir.clone(),
                                             debug: self.debug.clone(),
                                             code_id: format!("base_ctor:{}", parent_name),
+                                            task_counter: self.task_counter.clone(),
+                                            tasks: self.tasks.clone(),
+                                            call_stack: Vec::new(),
                                         };
                                         constructor_vm
                                             .variaveis
@@ -1731,7 +1836,7 @@ impl VM {
                                                     .insert(param_name.clone(), arg_val.clone());
                                             }
                                         }
-                                        constructor_vm.run()?;
+                                        Box::pin(constructor_vm.run()).await?;
                                     }
                                 }
                             }
@@ -1819,15 +1924,21 @@ impl VM {
                         base_dir: self.base_dir.clone(),
                         debug: self.debug.clone(),
                         code_id: format!("func:{}", func.nome),
+                        task_counter: self.task_counter.clone(),
+                        tasks: self.tasks.clone(),
+                        call_stack: Vec::new(),
                     };
-                    vm.run()?;
+                    Box::pin(vm.run()).await?;
                     self.pilha.push(vm.pilha.pop().unwrap_or(Valor::Nulo));
                 }
 
                 // === CHAMADAS NATIVAS (via atributo [Nativo("chave")]) ===
                 // CALL_STATIC_NATIVE <chave> <nargs>
                 "CALL_STATIC_NATIVE" => {
-                    let chave = partes.get(1).ok_or("CALL_STATIC_NATIVE requer chave")?.to_string();
+                    let chave = partes
+                        .get(1)
+                        .ok_or("CALL_STATIC_NATIVE requer chave")?
+                        .to_string();
                     let nargs = partes.get(2).unwrap_or(&"0").parse::<usize>().unwrap_or(0);
                     let args = if nargs > 0 && self.pilha.len() >= nargs {
                         self.pilha.split_off(self.pilha.len() - nargs)
@@ -1847,9 +1958,173 @@ impl VM {
                     } else {
                         Vec::new()
                     };
-                    let este_val = self.pilha.pop().ok_or("Pilha vazia para 'este' em CALL_NATIVE")?;
+                    let este_val = self
+                        .pilha
+                        .pop()
+                        .ok_or("Pilha vazia para 'este' em CALL_NATIVE")?;
                     let resultado = despachar_nativo_instancia(&chave, este_val, args)?;
                     self.pilha.push(resultado);
+                }
+
+                // === CHAMADAS NATIVAS ASSÍNCRONAS (I/O via tokio) ===
+                // CALL_STATIC_NATIVE_ASYNC <chave> <nargs>
+                // Executa uma operação assíncrona e empilha um Valor::Task já resolvido.
+                // O runtime tokio já está disponível em self.tasks (Arc<Mutex<...>>).
+                "CALL_STATIC_NATIVE_ASYNC" => {
+                    let chave = partes
+                        .get(1)
+                        .ok_or("CALL_STATIC_NATIVE_ASYNC requer chave")?
+                        .to_string();
+                    let nargs = partes.get(2).unwrap_or(&"0").parse::<usize>().unwrap_or(0);
+                    let args = if nargs > 0 && self.pilha.len() >= nargs {
+                        self.pilha.split_off(self.pilha.len() - nargs)
+                    } else {
+                        Vec::new()
+                    };
+
+                    // Aloca um ID de task
+                    let task_id = {
+                        let mut counter = self.task_counter.lock().unwrap();
+                        let id = *counter;
+                        *counter += 1;
+                        id
+                    };
+
+                    // Executa a operação assíncrona usando tokio de forma inline.
+                    // Como já estamos dentro de um contexto async (fn run é async),
+                    // podemos simplesmente fazer .await directamente.
+                    let resultado_async = despachar_nativo_assincrono(&chave, args).await;
+
+                    // Registra a task como concluída
+                    let (status, result) = match resultado_async {
+                        Ok(val) => (TaskStatus::Completed, Some(Box::new(val.clone()))),
+                        Err(msg) => (TaskStatus::Failed(msg), None),
+                    };
+                    {
+                        let mut tasks_map = self.tasks.lock().unwrap();
+                        tasks_map.insert(
+                            task_id,
+                            Task {
+                                status: status.clone(),
+                                result: result.clone(),
+                            },
+                        );
+                    }
+
+                    // Empilha um Valor::Task para que AWAIT possa resolver
+                    self.pilha.push(Valor::Task {
+                        id: task_id,
+                        status,
+                        result,
+                    });
+                }
+
+                // === INSTRUÇÃO AWAIT ===
+                // Resolve uma Task que já foi agendada (ou ainda está pendente).
+                // Como CALL_STATIC_NATIVE_ASYNC já resolve inline, esta instrução
+                // extrai o resultado da Task e o empilha.
+                "AWAIT" => {
+                    let task_val = self.pilha.pop().ok_or("Pilha vazia para AWAIT")?;
+
+                    match task_val {
+                        Valor::Task { id, status, result } => match status {
+                            TaskStatus::Completed => {
+                                let val = result.map(|b| *b).unwrap_or(Valor::Nulo);
+                                self.pilha.push(val);
+                            }
+                            TaskStatus::Failed(msg) => {
+                                return Err(format!("Task<{}> falhou: {}", id, msg));
+                            }
+                            TaskStatus::Pending | TaskStatus::Running => {
+                                // Consulta o mapa de tasks para ver se já terminou
+                                let tasks_map = self.tasks.lock().unwrap();
+                                if let Some(task) = tasks_map.get(&id) {
+                                    match &task.status {
+                                        TaskStatus::Completed => {
+                                            let val = task
+                                                .result
+                                                .as_ref()
+                                                .map(|b| *b.clone())
+                                                .unwrap_or(Valor::Nulo);
+                                            drop(tasks_map);
+                                            self.pilha.push(val);
+                                        }
+                                        TaskStatus::Failed(msg) => {
+                                            let msg = msg.clone();
+                                            drop(tasks_map);
+                                            return Err(format!("Task<{}> falhou: {}", id, msg));
+                                        }
+                                        _ => {
+                                            drop(tasks_map);
+                                            // Task ainda em execução — empilha Nulo como
+                                            // resultado provisório (será melhorado com
+                                            // continuations no futuro)
+                                            self.pilha.push(Valor::Nulo);
+                                        }
+                                    }
+                                } else {
+                                    drop(tasks_map);
+                                    self.pilha.push(Valor::Nulo);
+                                }
+                            }
+                        },
+                        // Se não for uma Task, retorna o valor como está
+                        // (compatibilidade com chamadas síncronas usadas com aguarde)
+                        outro => {
+                            self.pilha.push(outro);
+                        }
+                    }
+                }
+
+                // === CREATE_TASK — cria uma task pendente explicitamente ===
+                "CREATE_TASK" => {
+                    let task_id = {
+                        let mut counter = self.task_counter.lock().unwrap();
+                        let id = *counter;
+                        *counter += 1;
+                        id
+                    };
+                    {
+                        let mut tasks_map = self.tasks.lock().unwrap();
+                        tasks_map.insert(
+                            task_id,
+                            Task {
+                                status: TaskStatus::Pending,
+                                result: None,
+                            },
+                        );
+                    }
+                    self.pilha.push(Valor::Task {
+                        id: task_id,
+                        status: TaskStatus::Pending,
+                        result: None,
+                    });
+                }
+
+                // === TASK_COMPLETE — marca uma task como concluída ===
+                "TASK_COMPLETE" => {
+                    let result_val = self
+                        .pilha
+                        .pop()
+                        .ok_or("Pilha vazia para resultado em TASK_COMPLETE")?;
+                    let task_val = self
+                        .pilha
+                        .pop()
+                        .ok_or("Pilha vazia para task em TASK_COMPLETE")?;
+                    if let Valor::Task { id, .. } = task_val {
+                        let mut tasks_map = self.tasks.lock().unwrap();
+                        if let Some(task) = tasks_map.get_mut(&id) {
+                            task.status = TaskStatus::Completed;
+                            task.result = Some(Box::new(result_val.clone()));
+                        }
+                        self.pilha.push(Valor::Task {
+                            id,
+                            status: TaskStatus::Completed,
+                            result: Some(Box::new(result_val)),
+                        });
+                    } else {
+                        return Err("TASK_COMPLETE requer um Valor::Task na pilha".into());
+                    }
                 }
 
                 // Ignora comentários ou linhas vazias
@@ -1863,7 +2138,7 @@ impl VM {
         Ok(())
     }
 
-    fn executar_codigo_global(&mut self) -> Result<(), String> {
+    async fn executar_codigo_global(&mut self) -> Result<(), String> {
         // Filtra o bytecode para obter apenas as instruções globais
         let mut codigo_global = Vec::new();
         let mut i = 0;
@@ -1919,9 +2194,12 @@ impl VM {
             base_dir: self.base_dir.clone(),
             debug: self.debug.clone(),
             code_id: "global:init".to_string(),
+            call_stack: self.call_stack.clone(),
+            task_counter: self.task_counter.clone(),
+            tasks: self.tasks.clone(),
         };
 
-        vm_global.run()
+        vm_global.run().await
     }
 
     fn run_apenas_inicializadores(&mut self) -> Result<(), String> {
@@ -2044,6 +2322,19 @@ impl VM {
         }
 
         let mut should_pause = matches!(st.step_mode, Some(StepMode::StepInto));
+
+        // Step Over: pausa quando voltar à mesma profundidade
+        if !should_pause && matches!(st.step_mode, Some(StepMode::StepOver)) {
+            if st.call_depth == 0 {
+                should_pause = true;
+            }
+        }
+
+        // Step Out: pausa quando profundidade diminui
+        if !should_pause && matches!(st.step_mode, Some(StepMode::StepOut)) {
+            // Será tratado ao sair de função
+        }
+
         if !should_pause {
             if let Some(bps) = st.breakpoints.get(&self.code_id) {
                 // Para instruções não-JUMP, ip já foi incrementado no loop run
@@ -2062,7 +2353,7 @@ impl VM {
 
         loop {
             println!(
-                "\n[depurador] {}@ip={} -> {}\ncomandos: c(continue), s(step), p(pilha), vars, v <nome>, dis [n], bp add|del <ip>|list, bp add|del <code_id> <ip>, bp list [code_id], where, help, q(quit)",
+                "\n[depurador] {}@ip={} -> {}\ncomandos: c(continue), s(step into), so(step over), sr(step out), p(pause), p(pilha), vars, v <nome>, dis [n], bp add|del <ip>|list, bp add|del <code_id> <ip>, bp list [code_id], where, help, q(quit)",
                 self.code_id, self.ip.saturating_sub(1), instr
             );
             print!("dbg> ");
@@ -2082,6 +2373,27 @@ impl VM {
                     d.borrow_mut().step_mode = Some(StepMode::StepInto);
                 }
                 break;
+            } else if cmd == "so" || cmd == "stepover" {
+                if let Some(d) = &self.debug {
+                    d.borrow_mut().step_mode = Some(StepMode::StepOver);
+                }
+                break;
+            } else if cmd == "sr" || cmd == "stepout" {
+                if let Some(d) = &self.debug {
+                    d.borrow_mut().step_mode = Some(StepMode::StepOut);
+                }
+                break;
+            } else if cmd == "p" || cmd == "pause" {
+                // Pausa a execução - para o loop e mantém step_mode para continuar pausado
+                if let Some(d) = &self.debug {
+                    d.borrow_mut().step_mode = Some(StepMode::StepInto);
+                }
+                // Não break - continua no loop de debug
+            } else if cmd == "q" || cmd == "quit" {
+                if let Some(d) = &self.debug {
+                    d.borrow_mut().enabled = false;
+                }
+                return Err("Debugging terminado pelo usuário".into());
             } else if cmd == "p" || cmd == "pilha" {
                 println!("pilha ({} itens):", self.pilha.len());
                 for (i, v) in self.pilha.iter().enumerate() {
@@ -2092,6 +2404,34 @@ impl VM {
                 for (k, v) in &self.variaveis {
                     println!("  {} = {}", k, v);
                 }
+            } else if cmd == "varsjson" {
+                // Mostrar variáveis em formato JSON para DAP adapter
+                let vars_json: serde_json::Value = self
+                    .variaveis
+                    .iter()
+                    .map(|(k, v)| {
+                        serde_json::json!({
+                            "name": k,
+                            "value": v.to_string(),
+                            "type": match v {
+                                Valor::Inteiro(_) => "inteiro",
+                                Valor::Texto(_) => "texto",
+                                Valor::Booleano(_) => "booleano",
+                                Valor::Flutuante(_) => "flutuante",
+                                Valor::Duplo(_) => "duplo",
+                                Valor::Decimal(_) => "decimal",
+                                Valor::Nulo => "nulo",
+                                Valor::Array(_) => "array",
+                                Valor::Objeto { .. } => "objeto",
+                                _ => "desconhecido"
+                            }
+                        })
+                    })
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string(&vars_json).unwrap_or_else(|_| "[]".to_string())
+                );
             } else if cmd.starts_with("v ") {
                 let nome = cmd.splitn(2, ' ').nth(1).unwrap_or("");
                 if let Some(v) = self.variaveis.get(nome) {
@@ -2099,6 +2439,35 @@ impl VM {
                 } else {
                     println!("(sem variável '{}')", nome);
                 }
+            } else if cmd == "stack" || cmd == "where" {
+                // Mostrar call stack em formato JSON para DAP adapter
+                let frames: Vec<serde_json::Value> = self
+                    .call_stack
+                    .iter()
+                    .map(|frame| {
+                        serde_json::json!({
+                            "code_id": frame.code_id,
+                            "ip": frame.ip,
+                            "vars": frame.variaveis.len()
+                        })
+                    })
+                    .collect();
+
+                // Adicionar frame atual
+                let current_frame = serde_json::json!({
+                    "code_id": self.code_id,
+                    "ip": self.ip.saturating_sub(1),
+                    "vars": self.variaveis.len()
+                });
+
+                let all_frames: Vec<serde_json::Value> = frames
+                    .into_iter()
+                    .chain(std::iter::once(current_frame))
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string(&all_frames).unwrap_or_else(|_| "[]".to_string())
+                );
             } else if cmd.starts_with("dis") {
                 let parts: Vec<&str> = cmd.split_whitespace().collect();
                 let n: usize = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(8);
@@ -2189,6 +2558,83 @@ fn chrono_or_default_date() -> String {
     format!("{:04}-{:02}-{:02}", years, months, day)
 }
 
+/// Despachador assíncrono de I/O nativo via tokio.
+/// Chamado por CALL_STATIC_NATIVE_ASYNC para operações de arquivo, rede, etc.
+/// Equivalente aos métodos Task-returning do .NET BCL, mas em Rust/tokio.
+async fn despachar_nativo_assincrono(chave: &str, args: Vec<Valor>) -> Result<Valor, String> {
+    match chave {
+        // ============ Arquivo assíncrono ============
+        "LerArquivoAssíncrono" | "Arquivo::LerTextoAssíncrono" => {
+            let caminho = args
+                .into_iter()
+                .next()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+            let conteudo = tokio::fs::read_to_string(&caminho)
+                .await
+                .map_err(|e| format!("LerArquivoAssíncrono: {}", e))?;
+            Ok(Valor::Texto(conteudo))
+        }
+        "EscreverArquivoAssíncrono" | "Arquivo::EscreverTextoAssíncrono" => {
+            let mut it = args.into_iter();
+            let caminho = it.next().map(|v| v.to_string()).unwrap_or_default();
+            let conteudo = it.next().map(|v| v.to_string()).unwrap_or_default();
+            tokio::fs::write(&caminho, conteudo.as_bytes())
+                .await
+                .map_err(|e| format!("EscreverArquivoAssíncrono: {}", e))?;
+            Ok(Valor::Nulo)
+        }
+        "VerificarArquivoAssíncrono" | "Arquivo::ExisteAssíncrono" => {
+            let caminho = args
+                .into_iter()
+                .next()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+            let existe = tokio::fs::try_exists(&caminho).await.unwrap_or(false);
+            Ok(Valor::Booleano(existe))
+        }
+        "AdicionarTextoAssíncrono" | "Arquivo::AdicionarTextoAssíncrono" => {
+            use tokio::io::AsyncWriteExt;
+            let mut it = args.into_iter();
+            let caminho = it.next().map(|v| v.to_string()).unwrap_or_default();
+            let conteudo = it.next().map(|v| v.to_string()).unwrap_or_default();
+            let mut file = tokio::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&caminho)
+                .await
+                .map_err(|e| format!("AdicionarTextoAssíncrono: {}", e))?;
+            file.write_all(conteudo.as_bytes())
+                .await
+                .map_err(|e| format!("AdicionarTextoAssíncrono: {}", e))?;
+            Ok(Valor::Nulo)
+        }
+        // ============ Placeholder para HTTP/rede (futuro reqwest) ============
+        "HttpGetAsync" | "Rede::HttpGetAsync" => {
+            eprintln!(
+                "[aviso] {} não implementado ainda (requer reqwest); retornando vazio",
+                chave
+            );
+            Ok(Valor::Texto(String::new()))
+        }
+        "HttpPostAsync" | "Rede::HttpPostAsync" => {
+            eprintln!(
+                "[aviso] {} não implementado ainda (requer reqwest); retornando vazio",
+                chave
+            );
+            Ok(Valor::Texto(String::new()))
+        }
+        // Fallback: tenta síncrono
+        outro => {
+            eprintln!(
+                "[aviso] Função assíncrona nativa '{}' não implementada; retornando nulo",
+                outro
+            );
+            Ok(Valor::Nulo)
+        }
+    }
+}
+
 /// Registro centralizado de funções nativas estáticas.
 /// Chave: string do atributo [Nativo("chave")], ex. "Console::EscreverLinha".
 /// Equivalente ao InternalCall do .NET CLR — sem acoplamento de nome entre .pr e Rust.
@@ -2196,12 +2642,20 @@ fn despachar_nativo_estatico(chave: &str, args: Vec<Valor>) -> Result<Valor, Str
     match chave {
         // ============ Sistema.Console ============
         "Console::EscreverLinha" => {
-            let msg = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            let msg = args
+                .into_iter()
+                .next()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
             println!("{}", msg);
             Ok(Valor::Nulo)
         }
         "Console::Escrever" => {
-            let msg = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            let msg = args
+                .into_iter()
+                .next()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
             use std::io::Write;
             print!("{}", msg);
             let _ = std::io::stdout().flush();
@@ -2212,14 +2666,20 @@ fn despachar_nativo_estatico(chave: &str, args: Vec<Valor>) -> Result<Valor, Str
             std::io::stdin()
                 .read_line(&mut entrada)
                 .map_err(|e| format!("Erro ao ler entrada: {}", e))?;
-            Ok(Valor::Texto(entrada.trim_end_matches(['\r', '\n']).to_string()))
+            Ok(Valor::Texto(
+                entrada.trim_end_matches(['\r', '\n']).to_string(),
+            ))
         }
 
         // ============ Sistema.IO.Arquivo ============
         "Arquivo::LerTexto" => {
-            let caminho = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
-            let conteudo = fs::read_to_string(&caminho)
-                .map_err(|e| format!("Arquivo::LerTexto: {}", e))?;
+            let caminho = args
+                .into_iter()
+                .next()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+            let conteudo =
+                fs::read_to_string(&caminho).map_err(|e| format!("Arquivo::LerTexto: {}", e))?;
             Ok(Valor::Texto(conteudo))
         }
         "Arquivo::EscreverTexto" => {
@@ -2235,17 +2695,28 @@ fn despachar_nativo_estatico(chave: &str, args: Vec<Valor>) -> Result<Valor, Str
             let caminho = it.next().map(|v| v.to_string()).unwrap_or_default();
             let conteudo = it.next().map(|v| v.to_string()).unwrap_or_default();
             let mut f = std::fs::OpenOptions::new()
-                .append(true).create(true).open(&caminho)
+                .append(true)
+                .create(true)
+                .open(&caminho)
                 .map_err(|e| format!("Arquivo::AdicionarTexto: {}", e))?;
-            f.write_all(conteudo.as_bytes()).map_err(|e| format!("Arquivo::AdicionarTexto: {}", e))?;
+            f.write_all(conteudo.as_bytes())
+                .map_err(|e| format!("Arquivo::AdicionarTexto: {}", e))?;
             Ok(Valor::Nulo)
         }
         "Arquivo::Existe" => {
-            let caminho = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            let caminho = args
+                .into_iter()
+                .next()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
             Ok(Valor::Booleano(std::path::Path::new(&caminho).is_file()))
         }
         "Arquivo::Excluir" => {
-            let caminho = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            let caminho = args
+                .into_iter()
+                .next()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
             fs::remove_file(&caminho).map_err(|e| format!("Arquivo::Excluir: {}", e))?;
             Ok(Valor::Nulo)
         }
@@ -2266,11 +2737,19 @@ fn despachar_nativo_estatico(chave: &str, args: Vec<Valor>) -> Result<Valor, Str
 
         // ============ Sistema.IO.Diretorio ============
         "Diretorio::Existe" => {
-            let caminho = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            let caminho = args
+                .into_iter()
+                .next()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
             Ok(Valor::Booleano(std::path::Path::new(&caminho).is_dir()))
         }
         "Diretorio::Criar" => {
-            let caminho = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            let caminho = args
+                .into_iter()
+                .next()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
             fs::create_dir_all(&caminho).map_err(|e| format!("Diretorio::Criar: {}", e))?;
             Ok(Valor::Nulo)
         }
@@ -2292,15 +2771,23 @@ fn despachar_nativo_estatico(chave: &str, args: Vec<Valor>) -> Result<Valor, Str
             Ok(Valor::Texto(cur))
         }
         "Diretorio::DefinirAtual" => {
-            let caminho = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
-            std::env::set_current_dir(&caminho).map_err(|e| format!("Diretorio::DefinirAtual: {}", e))?;
+            let caminho = args
+                .into_iter()
+                .next()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+            std::env::set_current_dir(&caminho)
+                .map_err(|e| format!("Diretorio::DefinirAtual: {}", e))?;
             Ok(Valor::Nulo)
         }
 
         // ============ Sistema.Data.Data ============
         "Data::Agora" | "Data::Hoje" => {
             use std::time::{SystemTime, UNIX_EPOCH};
-            let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+            let secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
             let days = secs / 86400;
             let year = 1970 + days / 365;
             let rem = days % 365;
@@ -2327,19 +2814,29 @@ fn despachar_nativo_estatico(chave: &str, args: Vec<Valor>) -> Result<Valor, Str
             Ok(Valor::Texto(format!("{}", obj)))
         }
         "Json::ValidarJson" => {
-            let json = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            let json = args
+                .into_iter()
+                .next()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
             let valido = json.trim().starts_with('{') || json.trim().starts_with('[');
             Ok(Valor::Booleano(valido))
         }
         "Json::Formatar" => {
-            let json = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            let json = args
+                .into_iter()
+                .next()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
             Ok(Valor::Texto(json)) // Retorna como está por ora
         }
 
         // ============ Sistema.Rede.ClienteHttp (estáticos não existem — só instância) ============
-
         _ => {
-            eprintln!("[aviso nativo] Função nativa estática '{}' não implementada; retornando nulo", chave);
+            eprintln!(
+                "[aviso nativo] Função nativa estática '{}' não implementada; retornando nulo",
+                chave
+            );
             Ok(Valor::Nulo)
         }
     }
@@ -2350,15 +2847,73 @@ fn despachar_nativo_instancia(chave: &str, este: Valor, args: Vec<Valor>) -> Res
     match chave {
         // ============ Sistema.Data.Data — instância ============
         "Data::Formatar" => {
-            let formato = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
+            let formato = args
+                .into_iter()
+                .next()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
             if let Valor::Objeto { campos, .. } = &este {
                 let c = campos.borrow();
-                let dia = c.get("Dia").and_then(|v| if let Valor::Inteiro(n) = v { Some(*n) } else { None }).unwrap_or(1);
-                let mes = c.get("Mes").and_then(|v| if let Valor::Inteiro(n) = v { Some(*n) } else { None }).unwrap_or(1);
-                let ano = c.get("Ano").and_then(|v| if let Valor::Inteiro(n) = v { Some(*n) } else { None }).unwrap_or(2000);
-                let hora = c.get("Hora").and_then(|v| if let Valor::Inteiro(n) = v { Some(*n) } else { None }).unwrap_or(0);
-                let min = c.get("Minuto").and_then(|v| if let Valor::Inteiro(n) = v { Some(*n) } else { None }).unwrap_or(0);
-                let seg = c.get("Segundo").and_then(|v| if let Valor::Inteiro(n) = v { Some(*n) } else { None }).unwrap_or(0);
+                let dia = c
+                    .get("Dia")
+                    .and_then(|v| {
+                        if let Valor::Inteiro(n) = v {
+                            Some(*n)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(1);
+                let mes = c
+                    .get("Mes")
+                    .and_then(|v| {
+                        if let Valor::Inteiro(n) = v {
+                            Some(*n)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(1);
+                let ano = c
+                    .get("Ano")
+                    .and_then(|v| {
+                        if let Valor::Inteiro(n) = v {
+                            Some(*n)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(2000);
+                let hora = c
+                    .get("Hora")
+                    .and_then(|v| {
+                        if let Valor::Inteiro(n) = v {
+                            Some(*n)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0);
+                let min = c
+                    .get("Minuto")
+                    .and_then(|v| {
+                        if let Valor::Inteiro(n) = v {
+                            Some(*n)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0);
+                let seg = c
+                    .get("Segundo")
+                    .and_then(|v| {
+                        if let Valor::Inteiro(n) = v {
+                            Some(*n)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0);
                 let resultado = formato
                     .replace("dd", &format!("{:02}", dia))
                     .replace("MM", &format!("{:02}", mes))
@@ -2375,31 +2930,53 @@ fn despachar_nativo_instancia(chave: &str, este: Valor, args: Vec<Valor>) -> Res
 
         // ============ Sistema.Rede.ClienteHttp — instância ============
         "ClienteHttp::Get" => {
-            let url = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
-            eprintln!("[aviso] ClienteHttp::Get('{}') — requer runtime HTTP; retornando vazio", url);
+            let url = args
+                .into_iter()
+                .next()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+            eprintln!(
+                "[aviso] ClienteHttp::Get('{}') — requer runtime HTTP; retornando vazio",
+                url
+            );
             Ok(Valor::Texto(String::new()))
         }
         "ClienteHttp::Post" | "ClienteHttp::Put" => {
             let mut it = args.into_iter();
             let url = it.next().map(|v| v.to_string()).unwrap_or_default();
-            eprintln!("[aviso] ClienteHttp::Post/Put('{}') — requer runtime HTTP; retornando vazio", url);
+            eprintln!(
+                "[aviso] ClienteHttp::Post/Put('{}') — requer runtime HTTP; retornando vazio",
+                url
+            );
             Ok(Valor::Texto(String::new()))
         }
         "ClienteHttp::Delete" => {
-            let url = args.into_iter().next().map(|v| v.to_string()).unwrap_or_default();
-            eprintln!("[aviso] ClienteHttp::Delete('{}') — requer runtime HTTP; retornando vazio", url);
+            let url = args
+                .into_iter()
+                .next()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+            eprintln!(
+                "[aviso] ClienteHttp::Delete('{}') — requer runtime HTTP; retornando vazio",
+                url
+            );
             Ok(Valor::Texto(String::new()))
         }
 
         _ => {
-            eprintln!("[aviso nativo] Método nativo de instância '{}' não implementado; retornando nulo", chave);
+            eprintln!(
+                "[aviso nativo] Método nativo de instância '{}' não implementado; retornando nulo",
+                chave
+            );
             Ok(Valor::Nulo)
         }
     }
 }
 
 // Ponto de entrada do programa interpretador.
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+// Usa tokio::main para inicializar o runtime multi-thread antes de qualquer código async.
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     let usar_jit = args.iter().any(|a| a == "--jit");
 
@@ -2463,6 +3040,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             breakpoints: HashMap::new(),
             step_mode: Some(StepMode::StepInto),
             last_break_location: None,
+            call_depth: 0,
         };
         vm.debug = Some(Rc::new(RefCell::new(dbg)));
     }
@@ -2480,7 +3058,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Fase 3: Executar código global (funções main, etc.)
-    if let Err(e) = vm.executar_codigo_global() {
+    if let Err(e) = vm.executar_codigo_global().await {
         eprintln!("Erro ao executar código de inicialização: {}", e);
         return Err(e.into());
     }
@@ -2491,7 +3069,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         vm.functions
             .keys()
-            .find(|nome| nome.ends_with("Principal") || nome == &&"Principal".to_string() || nome == &&"principal".to_string())
+            .find(|nome| {
+                nome.ends_with("Principal")
+                    || nome == &&"Principal".to_string()
+                    || nome == &&"principal".to_string()
+            })
             .cloned()
     };
 
@@ -2513,9 +3095,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             base_dir: vm.base_dir.clone(),
             debug: vm.debug.clone(),
             code_id: format!("main:{}", nome_funcao),
+            // A VM principal herda o gerenciador de tasks compartilhado
+            task_counter: vm.task_counter.clone(),
+            tasks: vm.tasks.clone(),
+            call_stack: Vec::new(),
         };
 
-        if let Err(e) = main_vm.run() {
+        if let Err(e) = main_vm.run().await {
             eprintln!("❌ Erro na execução da função {}: {}", nome_funcao, e);
             return Err(e.into());
         }

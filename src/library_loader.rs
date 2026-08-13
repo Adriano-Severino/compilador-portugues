@@ -78,10 +78,7 @@ impl Biblioteca {
 /// Carrega uma biblioteca a partir de um arquivo `.pbl` ou `.pbc`.
 /// Retorna os metadados necessários para a verificação de tipos.
 pub fn carregar_biblioteca(caminho: &Path) -> io::Result<Biblioteca> {
-    let extensao = caminho
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
+    let extensao = caminho.extension().and_then(|s| s.to_str()).unwrap_or("");
     match extensao {
         "pbl" => carregar_pbl(caminho),
         _ => carregar_pbc(caminho),
@@ -100,15 +97,25 @@ fn carregar_pbl(caminho: &Path) -> io::Result<Biblioteca> {
     for linha in conteudo.lines() {
         let linha = linha.trim();
         match linha {
-            "[MANIFESTO]" => { em_manifesto = true; continue; }
-            "[BYTECODE]" | "[PBL]" => { em_manifesto = false; continue; }
+            "[MANIFESTO]" => {
+                em_manifesto = true;
+                continue;
+            }
+            "[BYTECODE]" | "[PBL]" => {
+                em_manifesto = false;
+                continue;
+            }
             _ => {}
         }
         if linha.is_empty() || linha.starts_with(';') || linha.starts_with('#') {
             continue;
         }
         // Ignorar metadados de cabeçalho (nome=, versao=, …)
-        if linha.contains('=') && !linha.starts_with("DEFINE") && !linha.starts_with("PROPERTY") && !linha.starts_with("FIELD") {
+        if linha.contains('=')
+            && !linha.starts_with("DEFINE")
+            && !linha.starts_with("PROPERTY")
+            && !linha.starts_with("FIELD")
+        {
             continue;
         }
         if em_manifesto {
@@ -121,13 +128,19 @@ fn carregar_pbl(caminho: &Path) -> io::Result<Biblioteca> {
 
 fn processar_linha_manifesto(linha: &str, biblioteca: &mut Biblioteca) {
     let partes: Vec<&str> = linha.split_whitespace().collect();
-    if partes.is_empty() { return; }
+    if partes.is_empty() {
+        return;
+    }
 
     match partes[0] {
         "DEFINE_CLASS" => {
             if let Some(fqn) = partes.get(1) {
                 let nome_pai = partes.get(2).and_then(|&p| {
-                    if p == "NULO" { None } else { Some(p.to_string()) }
+                    if p == "NULO" {
+                        None
+                    } else {
+                        Some(p.to_string())
+                    }
                 });
                 let nome_simples = fqn.split('.').last().unwrap_or(fqn).to_string();
                 let classe = LibClasse {
@@ -139,7 +152,9 @@ fn processar_linha_manifesto(linha: &str, biblioteca: &mut Biblioteca) {
                     campos: Vec::new(),
                     eh_estatica: false,
                 };
-                biblioteca.simbolos.insert(fqn.to_string(), LibSimbolo::Classe(classe));
+                biblioteca
+                    .simbolos
+                    .insert(fqn.to_string(), LibSimbolo::Classe(classe));
             }
         }
         "DEFINE_STATIC_CLASS" => {
@@ -154,12 +169,16 @@ fn processar_linha_manifesto(linha: &str, biblioteca: &mut Biblioteca) {
                     campos: Vec::new(),
                     eh_estatica: true,
                 };
-                biblioteca.simbolos.insert(fqn.to_string(), LibSimbolo::Classe(classe));
+                biblioteca
+                    .simbolos
+                    .insert(fqn.to_string(), LibSimbolo::Classe(classe));
             }
         }
         "PROPERTY" => {
             // PROPERTY <fqn_classe> <nome> <tipo>
-            if let (Some(fqn), Some(nome), Some(tipo)) = (partes.get(1), partes.get(2), partes.get(3)) {
+            if let (Some(fqn), Some(nome), Some(tipo)) =
+                (partes.get(1), partes.get(2), partes.get(3))
+            {
                 if let Some(LibSimbolo::Classe(cl)) = biblioteca.simbolos.get_mut(*fqn) {
                     cl.propriedades.push(LibPropriedade {
                         nome: nome.to_string(),
@@ -170,7 +189,9 @@ fn processar_linha_manifesto(linha: &str, biblioteca: &mut Biblioteca) {
         }
         "FIELD" => {
             // FIELD <fqn_classe> <nome> <tipo>
-            if let (Some(fqn), Some(nome), Some(tipo)) = (partes.get(1), partes.get(2), partes.get(3)) {
+            if let (Some(fqn), Some(nome), Some(tipo)) =
+                (partes.get(1), partes.get(2), partes.get(3))
+            {
                 if let Some(LibSimbolo::Classe(cl)) = biblioteca.simbolos.get_mut(*fqn) {
                     cl.campos.push(LibCampo {
                         nome: nome.to_string(),
@@ -222,7 +243,9 @@ fn processar_linha_manifesto(linha: &str, biblioteca: &mut Biblioteca) {
         // Métodos normais: DEFINE_STATIC_METHOD / DEFINE_METHOD <fqn> <nome> <ret> <nparams> [params...]
         "DEFINE_STATIC_METHOD" | "DEFINE_METHOD" => {
             let eh_estatica = partes[0] == "DEFINE_STATIC_METHOD";
-            if let (Some(fqn), Some(nome), Some(ret)) = (partes.get(1), partes.get(2), partes.get(3)) {
+            if let (Some(fqn), Some(nome), Some(ret)) =
+                (partes.get(1), partes.get(2), partes.get(3))
+            {
                 let params = parse_params(if partes.len() > 5 { &partes[5..] } else { &[] });
                 let metodo = LibMetodo {
                     nome: nome.to_string(),
@@ -243,14 +266,17 @@ fn processar_linha_manifesto(linha: &str, biblioteca: &mut Biblioteca) {
 }
 
 fn parse_params(partes: &[&str]) -> Vec<(String, String)> {
-    partes.iter().filter_map(|p| {
-        let mut parts = p.splitn(2, ':');
-        if let (Some(tipo), Some(nome)) = (parts.next(), parts.next()) {
-            Some((tipo.to_string(), nome.to_string()))
-        } else {
-            None
-        }
-    }).collect()
+    partes
+        .iter()
+        .filter_map(|p| {
+            let mut parts = p.splitn(2, ':');
+            if let (Some(tipo), Some(nome)) = (parts.next(), parts.next()) {
+                Some((tipo.to_string(), nome.to_string()))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 // ============================================================================
@@ -265,13 +291,19 @@ fn carregar_pbc(caminho: &Path) -> io::Result<Biblioteca> {
 
     while let Some(Ok(linha)) = iterador_linhas.next() {
         let partes: Vec<&str> = linha.split_whitespace().collect();
-        if partes.is_empty() { continue; }
+        if partes.is_empty() {
+            continue;
+        }
 
         match partes[0] {
             "DEFINE_CLASS" => {
                 if let Some(nome_fqn) = partes.get(1) {
                     let nome_pai = partes.get(2).and_then(|&p| {
-                        if p == "NULO" { None } else { Some(p.to_string()) }
+                        if p == "NULO" {
+                            None
+                        } else {
+                            Some(p.to_string())
+                        }
                     });
                     let nome_simples = nome_fqn.split('.').last().unwrap_or(nome_fqn).to_string();
                     let classe = LibClasse {
@@ -283,7 +315,9 @@ fn carregar_pbc(caminho: &Path) -> io::Result<Biblioteca> {
                         campos: Vec::new(),
                         eh_estatica: false,
                     };
-                    biblioteca.simbolos.insert(nome_fqn.to_string(), LibSimbolo::Classe(classe));
+                    biblioteca
+                        .simbolos
+                        .insert(nome_fqn.to_string(), LibSimbolo::Classe(classe));
                 }
             }
             "DEFINE_STATIC_CLASS" => {
@@ -298,18 +332,26 @@ fn carregar_pbc(caminho: &Path) -> io::Result<Biblioteca> {
                         campos: Vec::new(),
                         eh_estatica: true,
                     };
-                    biblioteca.simbolos.insert(nome_fqn.to_string(), LibSimbolo::Classe(classe));
+                    biblioteca
+                        .simbolos
+                        .insert(nome_fqn.to_string(), LibSimbolo::Classe(classe));
                 }
             }
             "DEFINE_METHOD" | "DEFINE_STATIC_METHOD" => {
                 let eh_estatica = partes[0] == "DEFINE_STATIC_METHOD";
-                if let (Some(nome_classe), Some(nome_metodo), Some(tipo_retorno), Some(corpo_len_str)) =
-                    (partes.get(1), partes.get(2), partes.get(3), partes.get(4))
+                if let (
+                    Some(nome_classe),
+                    Some(nome_metodo),
+                    Some(tipo_retorno),
+                    Some(corpo_len_str),
+                ) = (partes.get(1), partes.get(2), partes.get(3), partes.get(4))
                 {
                     let parametros_str = &partes[5..];
                     let parametros = parse_params(parametros_str);
 
-                    if let Some(LibSimbolo::Classe(classe)) = biblioteca.simbolos.get_mut(*nome_classe) {
+                    if let Some(LibSimbolo::Classe(classe)) =
+                        biblioteca.simbolos.get_mut(*nome_classe)
+                    {
                         let metodo = LibMetodo {
                             nome: nome_metodo.to_string(),
                             nome_classe: nome_classe.to_string(),
@@ -339,7 +381,9 @@ fn carregar_pbc(caminho: &Path) -> io::Result<Biblioteca> {
                         nome: nome_funcao.to_string(),
                         aridade: parametros.len(),
                     };
-                    biblioteca.simbolos.insert(nome_funcao.to_string(), LibSimbolo::Funcao(funcao));
+                    biblioteca
+                        .simbolos
+                        .insert(nome_funcao.to_string(), LibSimbolo::Funcao(funcao));
                 }
             }
             _ => {}

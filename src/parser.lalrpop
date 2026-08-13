@@ -341,7 +341,7 @@ AcessorPropriedade: (bool, Option<ast::ModificadorAcesso>, Option<Vec<ast::Coman
 // com regra nullable separada.
 DeclaracaoFuncao: ast::DeclaracaoFuncao = {
     // A. [mod] [estática] função nome (params) { corpo } → retorno = Vazio
-    <attr:Attribute?> <m:ModificadorAcesso?> <estatica:("estática")?> "função"
+    <attr:Attribute?> <m:ModificadorAcesso?> <estatica:("estática")?> <assincrona:("assíncrona")?> "função"
     <nome:IdentificadorSimples> "(" <params:InnerParamList> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
             attributes: attr.map(|a| vec![a]).unwrap_or_default(),
@@ -352,10 +352,11 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
             modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
             corpo: body,
             eh_estatica: estatica.is_some(),
+            eh_assincrona: assincrona.is_some(),
         }
     },
     // B. [mod] [estática] função nome (params) => Tipo { corpo }
-    <attr:Attribute?> <m:ModificadorAcesso?> <estatica:("estática")?> "função"
+    <attr:Attribute?> <m:ModificadorAcesso?> <estatica:("estática")?> <assincrona:("assíncrona")?> "função"
     <nome:IdentificadorSimples>
     "(" <params:InnerParamList> "=>" <ret:Tipo> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
@@ -367,11 +368,12 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
             modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
             corpo: body,
             eh_estatica: estatica.is_some(),
+            eh_assincrona: assincrona.is_some(),
         }
     },
 
     // E. [mod] [estática] função TipoSimples nome<Ts>? (params) { corpo }
-    <attr:Attribute?> <m:ModificadorAcesso?> <estatica:("estática")?> "função"
+    <attr:Attribute?> <m:ModificadorAcesso?> <estatica:("estática")?> <assincrona:("assíncrona")?> "função"
     <ret:TipoRetornoSimples> <nome:IdentificadorSimples> <generic_params:GenericParamsDecl?>
     "(" <params:InnerParamList> <body:BlocoComando> => {
         ast::DeclaracaoFuncao {
@@ -383,6 +385,7 @@ DeclaracaoFuncao: ast::DeclaracaoFuncao = {
             modificador: m.unwrap_or(ast::ModificadorAcesso::Publico),
             corpo: body,
             eh_estatica: estatica.is_some(),
+            eh_assincrona: assincrona.is_some(),
         }
     },
 };
@@ -428,6 +431,7 @@ MetodoClasse: ast::MetodoClasse = {
             eh_override: false,
             eh_abstrato: false,
             eh_estatica: estatica.is_some(),
+            eh_assincrona: false,
         },
 
     // Método abstrato (sem corpo, termina com ';'; genéricos opcionais)
@@ -445,6 +449,7 @@ MetodoClasse: ast::MetodoClasse = {
             eh_override: sobrescreve.is_some(),
             eh_abstrato: true,
             eh_estatica: estatica.is_some(),
+            eh_assincrona: false,
         },
 
     // Método com corpo (genéricos opcionais via GenericParamsDecl?)
@@ -462,6 +467,7 @@ MetodoClasse: ast::MetodoClasse = {
             eh_override: sobrescreve.is_some(),
             eh_abstrato: abstrato.is_some(),
             eh_estatica: estatica.is_some(),
+            eh_assincrona: false,
         },
 };
 
@@ -826,6 +832,9 @@ ExpressaoTermo: ast::Expressao = {
 };
 
 ExpressaoUnaria: ast::Expressao = {
+    "aguarde" <expr:ExpressaoUnaria> => {
+        ast::Expressao::Aguarde(Box::new(expr))
+    },
     "!" <expr:ExpressaoUnaria> => {
         ast::Expressao::Unario(ast::OperadorUnario::NegacaoLogica, Box::new(expr))
     },
@@ -939,6 +948,8 @@ extern {
         "enquanto" => Token::TEnquanto,
         "para" => Token::TPara,
         "função" => Token::TFuncao,
+        "assíncrona" => Token::TAssincrona,
+        "aguarde" => Token::TAguarde,
         "retorne" => Token::TRetorne,
         "imprima" => Token::TImprima,
         "var" => Token::TVar,

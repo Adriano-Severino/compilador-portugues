@@ -107,6 +107,33 @@ função vazio Principal() {
 }
 
 #[test]
+fn parser_e_tipos_reconhecem_async_await() {
+    let programa = assert_typecheck_ok(
+        r#"
+assíncrona função inteiro calcular(inteiro valor) {
+    retorne valor + 1;
+}
+
+função vazio Principal() {
+    inteiro resultado = aguarde calcular(41);
+}
+"#,
+    );
+
+    let Declaracao::DeclaracaoFuncao(funcao) = &programa.declaracoes[0] else {
+        panic!("esperava função assíncrona");
+    };
+    assert!(funcao.eh_assincrona);
+    let Declaracao::DeclaracaoFuncao(principal) = &programa.declaracoes[1] else {
+        panic!("esperava Principal");
+    };
+    assert!(matches!(
+        principal.corpo[0],
+        Comando::DeclaracaoVariavel(_, _, Some(Expressao::Aguarde(_)))
+    ));
+}
+
+#[test]
 fn typecheck_aceita_primitivos_operadores_var_condicional_enquanto_e_interpolacao() {
     assert_typecheck_ok(
         r#"
