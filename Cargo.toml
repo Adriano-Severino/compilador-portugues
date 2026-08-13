@@ -17,6 +17,7 @@ rust_decimal = { version = "1", features = ["serde"] }
 rust_decimal_macros = "1"
 walkdir = "2"
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "io-util", "fs", "time"] }
+colored = "2.1"
 
 # JIT opcional (Cranelift). Mantido atrás de feature para não impactar builds padrão.
 cranelift-codegen = { version = "0.104", optional = true }

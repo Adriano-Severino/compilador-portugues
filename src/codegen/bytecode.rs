@@ -707,10 +707,6 @@ impl<'a> BytecodeGenerator<'a> {
                     let full_class_name = self
                         .type_checker
                         .resolver_nome_classe(nome_classe, &self.namespace_path);
-                    eprintln!(
-                        "DEBUG: Identificador classe - nome: {}, full_class_name: {}",
-                        nome_classe, full_class_name
-                    );
                     if let Some(classe_info) =
                         self.type_checker.resolved_classes.get(&full_class_name)
                     {
@@ -724,7 +720,6 @@ impl<'a> BytecodeGenerator<'a> {
                             if let Some(LibSimbolo::Classe(lib_classe)) =
                                 bib.simbolos.get(&full_class_name)
                             {
-                                eprintln!("DEBUG: Classe {} encontrada na biblioteca externa, eh_estatica: {}", full_class_name, lib_classe.eh_estatica);
                                 if lib_classe.eh_estatica {
                                     is_static_call = true;
                                     class_fqn_opt = Some(full_class_name);

@@ -2,7 +2,6 @@
 
 use std::collections::HashSet;
 use std::env;
-use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -10,6 +9,7 @@ use walkdir::WalkDir;
 // Declaração dos módulos do projeto
 mod ast;
 mod codegen;
+mod error;
 mod inferencia_tipos;
 mod interpolacao;
 mod lexer;
@@ -55,17 +55,6 @@ use logos::Logos;
 //help
 //cargo run --bin compilador
 //cargo run --bin compilador -- --help
-
-// Struct de erro customizada
-#[derive(Debug)]
-struct CompilerError(String);
-
-impl fmt::Display for CompilerError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-impl std::error::Error for CompilerError {}
 
 // Enum para os alvos de compilação
 #[derive(Debug, Clone)]
@@ -118,7 +107,8 @@ EXEMPLOS DE USO:
 /// A ordem de prioridade é:
 /// 1. Argumento de linha de comando `--stdlib-src-path=<path>`.
 /// 2. Variável de ambiente `PORTUGOL_STDLIB_PATH`.
-/// 3. Caminho relativo ao executável do compilador (`../../sistema-padrao`).
+/// 3. Variável de ambiente `PORDOSOL_HOME` (deduz como `$PORDOSOL_HOME/tools/stdlib`).
+/// 4. Caminho relativo ao executável do compilador (`../../sistema-padrao`).
 fn find_stdlib_source_path(args: &[String]) -> Option<PathBuf> {
     // 1. Argumento de linha de comando
     if let Some(path_str) = args
@@ -137,7 +127,7 @@ fn find_stdlib_source_path(args: &[String]) -> Option<PathBuf> {
         }
     }
 
-    // 2. Variável de ambiente
+    // 2. Variável de ambiente PORTUGOL_STDLIB_PATH
     if let Ok(path_str) = env::var("PORTUGOL_STDLIB_PATH") {
         let path = PathBuf::from(path_str);
         if path.exists() && path.is_dir() {
@@ -147,6 +137,14 @@ fn find_stdlib_source_path(args: &[String]) -> Option<PathBuf> {
                 "Aviso: O caminho da biblioteca padrão especificado em PORTUGOL_STDLIB_PATH não existe: {}",
                 path.display()
             );
+        }
+    }
+
+    // 3. Variável de ambiente PORDOSOL_HOME (instalação padrão)
+    if let Ok(home) = env::var("PORDOSOL_HOME") {
+        let stdlib_path = PathBuf::from(home).join("tools").join("stdlib");
+        if stdlib_path.exists() && stdlib_path.is_dir() {
+            return Some(stdlib_path);
         }
     }
 
@@ -196,8 +194,9 @@ fn compilar_biblioteca(
     }
 
     if caminhos_arquivos.is_empty() {
-        return Err(Box::new(CompilerError(
-            "Nenhum arquivo .pr encontrado na biblioteca.".into(),
+        return Err(Box::new(error::ErroCompilador::novo(
+            error::TipoErro::Sintático,
+            "Nenhum arquivo .pr encontrado na biblioteca.".to_string(),
         )));
     }
 
@@ -213,23 +212,17 @@ fn compilar_biblioteca(
             .spanned()
             .map(|(tok, span)| {
                 tok.map(|t| (span.start, t, span.end)).map_err(|_| {
-                    Box::new(CompilerError(format!(
-                        "Erro léxico na biblioteca (arquivo {}): posição {}:{}",
-                        _caminho.display(),
-                        span.start,
-                        span.end
-                    ))) as Box<dyn std::error::Error>
+                    Box::new(error::ErroCompilador::novo(
+                        error::TipoErro::Léxico,
+                        format!("Erro léxico na biblioteca (arquivo {}): posição {}:{}", _caminho.display(), span.start, span.end)
+                    )) as Box<dyn std::error::Error>
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
         let mut ast = parser::ArquivoParser::new()
             .parse(tokens.iter().cloned())
             .map_err(|e| {
-                Box::new(CompilerError(format!(
-                    "Erro sintático na biblioteca (arquivo {}): {:?}",
-                    _caminho.display(),
-                    e
-                )))
+                Box::new(error::de_lalrpop_error_unit(&e, _caminho.clone(), codigo))
             })?;
         crate::interpolacao::walk_programa(&mut ast, |e| {
             *e = crate::interpolacao::planificar_interpolada(e.clone());
@@ -267,8 +260,9 @@ fn compilar_biblioteca(
         for erro in &erros {
             eprintln!("Erro Semântico na biblioteca: {}", erro);
         }
-        return Err(Box::new(CompilerError(
-            "Houve erros semânticos na compilação da biblioteca.".into(),
+        return Err(Box::new(error::ErroCompilador::novo(
+            error::TipoErro::Semântico,
+            "Houve erros semânticos na compilação da biblioteca.".to_string(),
         )));
     }
 
@@ -425,7 +419,6 @@ fn carregar_fontes_stdlib(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("DEBUG: O compilador iniciou a execução.");
     let args: Vec<String> = env::args().collect();
 
     if let Some(lib_path) = args
@@ -456,7 +449,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if caminhos_arquivos.is_empty() {
         eprintln!("Erro: Nenhum arquivo de entrada (.pr) especificado.");
         exibir_ajuda();
-        return Err(Box::new(CompilerError("Nenhum arquivo de entrada".into())));
+        return Err(Box::new(error::ErroCompilador::novo(
+            error::TipoErro::Sintático,
+            "Nenhum arquivo de entrada".to_string(),
+        )));
     }
 
     // Carrega a biblioteca padrão — strategy:
@@ -627,20 +623,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let tokens = match tokens_result {
             Ok(tokens) => tokens,
             Err(_) => {
-                return Err(Box::new(CompilerError(format!(
-                    "Erro Léxico: Token inválido encontrado em '{}'",
-                    caminho.display()
-                ))))
+                let erro = error::ErroCompilador::novo(
+                    error::TipoErro::Léxico,
+                    format!("Token inválido encontrado em '{}'", caminho.display()),
+                )
+                .com_arquivo(caminho.clone());
+                eprintln!("{}", erro.formatar());
+                return Err(Box::new(erro));
             }
         };
 
         let parser = parser::ArquivoParser::new();
         let mut ast = parser.parse(tokens.iter().cloned()).map_err(|e| {
-            Box::new(CompilerError(format!(
-                "Erro sintático em '{}': {:?}",
-                caminho.display(),
-                e
-            )))
+            let erro = error::de_lalrpop_error_unit(&e, caminho.clone(), codigo);
+            eprintln!("{}", erro.formatar());
+            Box::new(erro)
         })?;
 
         crate::interpolacao::walk_programa(&mut ast, |e| {
@@ -713,7 +710,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Informa ao verificador de tipos quais namespaces pertencem à stdlib
     for ns in &stdlib_namespaces {
         type_checker.registrar_namespace_stdlib(ns);
-        eprintln!("DEBUG: Registrando namespace stdlib: {}", ns);
     }
 
     // NOTA: Não chamamos carregar_biblioteca no type_checker principal para evitar stack overflow
@@ -722,9 +718,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Err(erros) = type_checker.verificar_programa(&programa_final) {
         for erro in erros {
-            eprintln!("Erro Semântico: {}", erro);
+            let erro_formatado = error::ErroCompilador::novo(
+                error::TipoErro::Semântico,
+                erro,
+            );
+            eprintln!("{}", erro_formatado.formatar());
         }
-        return Err(Box::new(CompilerError(
+        return Err(Box::new(error::ErroCompilador::novo(
+            error::TipoErro::Semântico,
             "Houve erros semânticos.".to_string(),
         )));
     }
@@ -747,7 +748,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Err(error) =
                 codegen::compilar_llvm_ir_com_runtime(Path::new(&ll_path), nome_base)
             {
-                return Err(Box::new(CompilerError(error)));
+                return Err(Box::new(error::ErroCompilador::novo(
+                    error::TipoErro::Sintático,
+                    error,
+                )));
             }
             println!("Executável gerado: ./{}", nome_base);
             Ok(())
@@ -821,7 +825,10 @@ fn compilar_para_cil_bytecode<'a>(
     let gerador = codegen::GeradorCodigo::new()?;
     gerador
         .gerar_cil(ast, nome_base)
-        .map_err(|e| Box::new(CompilerError(e)))?;
+        .map_err(|e| Box::new(error::ErroCompilador::novo(
+            error::TipoErro::Sintático,
+            e,
+        )))?;
     println!("  ✓ {}.il gerado.", nome_base);
     println!(
         "  Para compilar: ilasm {0}.il /exe /output:{0}.exe",
@@ -838,7 +845,10 @@ fn compilar_para_console<'a>(
     let gerador = codegen::GeradorCodigo::new()?;
     gerador
         .gerar_console(ast, nome_base)
-        .map_err(|e| Box::new(CompilerError(e)))?;
+        .map_err(|e| Box::new(error::ErroCompilador::novo(
+            error::TipoErro::Sintático,
+            e,
+        )))?;
     println!("  ✓ Projeto '{}' gerado.", nome_base);
     println!("  Para executar: cd {} && dotnet run", nome_base);
     Ok(())
@@ -853,7 +863,10 @@ fn compilar_para_bytecode<'a>(
     let mut gerador = codegen::GeradorCodigo::new()?;
     gerador
         .gerar_bytecode(ast, type_checker, nome_base)
-        .map_err(|e| Box::new(CompilerError(e)))?;
+        .map_err(|e| Box::new(error::ErroCompilador::novo(
+            error::TipoErro::Sintático,
+            e,
+        )))?;
     println!("  ✓ {}.pbc gerado.", nome_base);
     println!(" ✓ Executando o bytecode...");
     println!("Você pode executar o bytecode usando o interpretador personalizado.");

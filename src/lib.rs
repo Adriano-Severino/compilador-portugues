@@ -10,8 +10,11 @@
 //! - Análise de ownership
 //! - Geração de código LLVM
 
+use std::path::PathBuf;
+
 // Declarar módulos principais
 pub mod ast;
+pub mod error;
 pub mod lexer;
 // pub mod runtime; // Comentado se não estiver em uso
 pub mod codegen;
@@ -90,9 +93,8 @@ impl<'a> CompiladorPortugues<'a> {
                     return Ok(ast);
                 }
                 Err(err) => {
-                    let err_msg = format!("{:?}", err);
                     // Se chegamos ao final do arquivo esperando '}' tentamos auto-fechar uma única vez
-                    if !tentou_recuperar && err_msg.contains("UnrecognizedEof") {
+                    if !tentou_recuperar && format!("{:?}", err).contains("UnrecognizedEof") {
                         let abre = codigo_fonte.matches('{').count();
                         let fecha = codigo_fonte.matches('}').count();
                         if abre > fecha {
@@ -102,7 +104,13 @@ impl<'a> CompiladorPortugues<'a> {
                             continue; // tenta novamente
                         }
                     }
-                    return Err(format!("Erro sintático: {}", err_msg));
+                    // Converte erro LALRPOP para ErroCompilador rico
+                    let erro_compilador = error::de_lalrpop_error_unit(
+                        &err,
+                        PathBuf::from("<codigo>"),
+                        &codigo_fonte
+                    );
+                    return Err(erro_compilador.to_string());
                 }
             }
         }

@@ -1071,10 +1071,6 @@ impl<'a> VerificadorTipos<'a> {
     }
 
     pub fn get_variable_type(&self, name: &str, namespace_atual: &str) -> Option<Tipo> {
-        println!(
-            "DEBUG: get_variable_type: name='{}', namespace_atual='{}'",
-            name, namespace_atual
-        );
         // Esta é uma implementação simplificada. Em um cenário real, você precisaria
         // de uma tabela de símbolos mais robusta que rastreie os escopos.
         // Por enquanto, vamos apenas verificar os símbolos globais.
@@ -1129,10 +1125,6 @@ impl<'a> VerificadorTipos<'a> {
         namespace_atual: &str,
         escopo_vars: &mut HashMap<String, Tipo>,
     ) {
-        println!(
-            "DEBUG: Verificando declaração em namespace \"{}\". Escopo inicial: {:?}",
-            namespace_atual, escopo_vars
-        );
         match declaracao {
             Declaracao::DeclaracaoClasse(classe) => {
                 let params: std::collections::HashSet<String> =
@@ -1144,10 +1136,6 @@ impl<'a> VerificadorTipos<'a> {
                 } else {
                     format!("{}.{}", namespace_atual, classe.nome)
                 };
-                println!(
-                    "DEBUG: Verificando classe \"{}\". FQN: \"{}\"",
-                    classe.nome, fqn
-                );
                 // Regras de abstracao
                 // 1) Nao pode haver metodo abstrato em classe nao-abstrata
                 for m in &classe.metodos {
@@ -1261,7 +1249,6 @@ impl<'a> VerificadorTipos<'a> {
                 self.generic_scope.pop();
             }
             Declaracao::DeclaracaoFuncao(funcao) => {
-                println!("DEBUG: Verificando função \"{}\"", funcao.nome);
                 let is_nativo = funcao.attributes.iter().any(|a| a.name == "Nativo");
 
                 if is_nativo && !funcao.corpo.is_empty() {
@@ -1275,10 +1262,6 @@ impl<'a> VerificadorTipos<'a> {
                 for param in &funcao.parametros {
                     func_vars.insert(param.nome.clone(), param.tipo.clone());
                 }
-                println!(
-                    "DEBUG: Verificando função \"{}\". Parâmetros no escopo: {:?}",
-                    funcao.nome, func_vars
-                );
 
                 let eh_stdlib = self.stdlib_namespaces.contains(namespace_atual);
 
@@ -1289,7 +1272,6 @@ impl<'a> VerificadorTipos<'a> {
                 }
             }
             Declaracao::Comando(cmd) => {
-                println!("DEBUG: Verificando comando global: {:?}", cmd);
                 self.verificar_comando(cmd, namespace_atual, None, escopo_vars);
             }
             _ => {}
@@ -1302,16 +1284,8 @@ impl<'a> VerificadorTipos<'a> {
         classe_atual: Option<&String>,
         escopo_vars: &mut HashMap<String, Tipo>,
     ) {
-        println!(
-            "DEBUG: Verificando comando: {:?}. Escopo atual: {:?}",
-            comando, escopo_vars
-        );
         match comando {
             Comando::DeclaracaoVariavel(tipo, nome, expr) => {
-                println!(
-                    "DEBUG: DeclaracaoVariavel: nome=\"{}\", tipo={:?}",
-                    nome, tipo
-                );
                 let tipo_resolvido = match tipo {
                     Tipo::Classe(nome_classe) => {
                         let fqn_cls = self.resolver_nome_classe(nome_classe, namespace_atual);
@@ -1328,17 +1302,9 @@ impl<'a> VerificadorTipos<'a> {
                     }
                     _ => tipo.clone(),
                 };
-                println!(
-                    "DEBUG: tipo_resolvido after resolution: {:?}",
-                    tipo_resolvido
-                );
                 if let Some(e) = expr {
                     let tipo_expr =
                         self.inferir_tipo_expressao(e, namespace_atual, classe_atual, escopo_vars);
-                    println!(
-                        "DEBUG: Tipo inferido para expressão de inicialização: {:?}",
-                        tipo_expr
-                    );
                     if tipo_expr != Tipo::Inferido
                         && !self.tipos_compativeis_atribuicao(&tipo_resolvido, &tipo_expr)
                     {
@@ -1349,10 +1315,6 @@ impl<'a> VerificadorTipos<'a> {
                     }
                 }
                 escopo_vars.insert(nome.clone(), tipo_resolvido.clone());
-                println!(
-                    "DEBUG: Variável \"{}\" adicionada ao escopo com tipo {:?}. Escopo atual: {:?}",
-                    nome, tipo_resolvido, escopo_vars
-                );
             }
             Comando::AtribuirIndice(alvo, idx, valor) => {
                 let t_alvo =
@@ -1381,19 +1343,11 @@ impl<'a> VerificadorTipos<'a> {
                 }
             }
             Comando::AtribuirPropriedade(obj_expr, prop_nome, val_expr) => {
-                println!(
-                    "DEBUG: AtribuirPropriedade: objeto_expr={:?}, prop_nome=\"{}\", val_expr={:?}",
-                    obj_expr, prop_nome, val_expr
-                );
                 let obj_tipo = self.inferir_tipo_expressao(
                     obj_expr,
                     namespace_atual,
                     classe_atual,
                     escopo_vars,
-                );
-                println!(
-                    "DEBUG: Tipo do objeto para atribuição de propriedade: {:?}",
-                    obj_tipo
                 );
                 if let Tipo::Classe(nome_classe) = obj_tipo {
                     if let Some(class_info) = self.resolved_classes.get(&nome_classe) {
@@ -1416,10 +1370,6 @@ impl<'a> VerificadorTipos<'a> {
                                 namespace_atual,
                                 classe_atual,
                                 escopo_vars,
-                            );
-                            println!(
-                                "DEBUG: Tipo da propriedade \"{}\": {:?}. Tipo do valor: {:?}",
-                                prop_nome, p_tipo, val_tipo
                             );
                             if val_tipo != Tipo::Inferido
                                 && !self.tipos_compativeis_atribuicao(&p_tipo, &val_tipo)
@@ -1450,17 +1400,12 @@ impl<'a> VerificadorTipos<'a> {
                         classe_atual,
                         escopo_vars,
                     );
-                    println!(
-                        "DEBUG: Atribuição dinâmica ({:?}): prop=\"{}\", valor={:?}",
-                        obj_tipo, prop_nome, val_tipo
-                    );
                 } else {
                     self.erros
                         .push("Atribuição de propriedade em algo que não é um objeto.".to_string());
                 }
             }
             Comando::Bloco(comandos) => {
-                println!("DEBUG: Verificando Bloco de comandos.");
                 let mut bloco_vars = escopo_vars.clone();
                 for cmd in comandos {
                     self.verificar_comando(cmd, namespace_atual, classe_atual, &mut bloco_vars);
@@ -1586,9 +1531,7 @@ impl<'a> VerificadorTipos<'a> {
                     escopo_vars,
                 );
             }
-            _ => {
-                println!("DEBUG: Comando não tratado: {:?}", comando);
-            }
+            _ => {}
         }
     }
 
