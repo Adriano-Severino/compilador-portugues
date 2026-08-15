@@ -683,11 +683,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Err(erros) = type_checker.verificar_programa(&programa_final) {
         for erro in erros {
-            let erro_formatado = error::ErroCompilador::novo(
-                error::TipoErro::Semântico,
-                erro,
-            );
-            eprintln!("{}", erro_formatado.formatar());
+            eprintln!("{}", erro.formatar());
         }
         return Err(Box::new(error::ErroCompilador::novo(
             error::TipoErro::Semântico,

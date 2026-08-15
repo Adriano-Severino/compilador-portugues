@@ -584,7 +584,7 @@ impl<'a> LlvmGenerator<'a> {
         );
         
         // Configurar parâmetros com tipos substituídos
-        for (i, param) in metodo.parametros.iter().enumerate() {
+        for (_i, param) in metodo.parametros.iter().enumerate() {
             let tipo_param_subst = self.subst_generics_local(&param.tipo, &subst);
             let tipo_param_resolvido = self.resolve_type(&tipo_param_subst, &namespace);
             let ptr_reg = format!("%var.{}", param.nome);

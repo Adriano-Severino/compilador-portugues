@@ -1,6 +1,7 @@
 use crate::ast;
 use crate::ast::*;
-use crate::library_loader::{self, Biblioteca, LibSimbolo};
+use crate::error::{ErroCompilador, TipoErro};
+use crate::library_loader::{self, LibSimbolo};
 use std::collections::HashMap;
 
 // Helper function to convert string to ast::Tipo
@@ -26,7 +27,7 @@ pub struct VerificadorTipos<'a> {
     pub interfaces: HashMap<String, &'a ast::DeclaracaoInterface>,
     pub enums: HashMap<String, &'a DeclaracaoEnum>,
     pub resolved_classes: HashMap<String, ResolvedClassInfo<'a>>,
-    erros: Vec<String>,
+    erros: Vec<ErroCompilador>,
     // Biblioteca externa carregada (metadados .pbl sem conversão para AST)
     pub biblioteca_externa: Option<library_loader::Biblioteca>,
     // Storage for library-loaded AST nodes (mantido para compatibilidade com tipo 'objeto')
@@ -284,7 +285,7 @@ impl<'a> VerificadorTipos<'a> {
         }
     }
 
-    fn normalize_tipo_ro(&self, t: &Tipo, namespace_atual: &str) -> (Tipo, Vec<String>) {
+    fn normalize_tipo_ro(&self, t: &Tipo, namespace_atual: &str) -> (Tipo, Vec<ErroCompilador>) {
         use Tipo::*;
         match t {
             Lista(inner) => {
@@ -324,37 +325,45 @@ impl<'a> VerificadorTipos<'a> {
                         nome.clone()
                     },
                 );
-                let mut erros: Vec<String> = Vec::new();
+                let mut erros: Vec<ErroCompilador> = Vec::new();
                 if is_class {
                     if let Some(decl) = self.classes.get(&fqn_cls) {
                         let expected = decl.generic_params.len();
                         if expected == 0 {
-                            erros.push(format!(
+                            erros.push(ErroCompilador::novo(
+                                TipoErro::Semântico,
+                                format!(
                                 "Tipo '{}' não é genérico, mas foi usado como '{}' com argumentos.",
                                 fqn_cls, nome
-                            ));
+                            )));
                         } else if expected != args.len() {
-                            erros.push(format!(
+                            erros.push(ErroCompilador::novo(
+                                TipoErro::Semântico,
+                                format!(
                                 "Aridade genérica incorreta para '{}': esperados {}, recebidos {}.",
                                 fqn_cls,
                                 expected,
                                 args.len()
-                            ));
+                            )));
                         }
                     }
                 } else if is_iface {
                     if let Some(decl) = self.interfaces.get(&fqn_iface) {
                         let expected = decl.generic_params.len();
                         if expected == 0 {
-                            erros.push(format!(
+                            erros.push(ErroCompilador::novo(
+                                TipoErro::Semântico,
+                                format!(
                                 "Interface '{}' não é genérica, mas foi usada como '{}' com argumentos.",
                                 fqn_iface, nome
-                            ));
+                            )));
                         } else if expected != args.len() {
-                            erros.push(format!(
+                            erros.push(ErroCompilador::novo(
+                                TipoErro::Semântico,
+                                format!(
                                 "Aridade genérica incorreta para interface '{}': esperados {}, recebidos {}.",
                                 fqn_iface, expected, args.len()
-                            ));
+                            )));
                         }
                     }
                 }
@@ -535,7 +544,7 @@ impl<'a> VerificadorTipos<'a> {
         false
     }
 
-    pub fn verificar_programa(&mut self, programa: &'a Programa) -> Result<(), Vec<String>> {
+    pub fn verificar_programa(&mut self, programa: &'a Programa) -> Result<(), Vec<ErroCompilador>> {
         // 1. usings
         self.usings = programa.usings.iter().map(|u| u.caminho.clone()).collect();
         // 2. primeira passagem: registra classes, interfaces e enums
@@ -704,23 +713,29 @@ impl<'a> VerificadorTipos<'a> {
                             }
                             let params_c = params_c_norm;
                             if ret_c != Some(ret_i.clone()) || params_c != params_i {
-                                self.erros.push(format!(
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    format!(
                                     "Classe '{}' não implementa corretamente método '{}' da interface '{}'. Assinatura esperada: ({:?}) -> {:?}",
                                     fqn, sig.nome, iface_fqn, params_i, ret_i
-                                ));
+                                )));
                             }
                         } else if !classe_eh_abstrata {
-                            self.erros.push(format!(
+                            self.erros.push(ErroCompilador::novo(
+                                TipoErro::Semântico,
+                                format!(
                                 "Classe '{}' não implementa método obrigatório '{}' da interface '{}'",
                                 fqn, sig.nome, iface_fqn
-                            ));
+                            )));
                         }
                     }
                 } else {
-                    self.erros.push(format!(
+                    self.erros.push(ErroCompilador::novo(
+                        TipoErro::Semântico,
+                        format!(
                         "Interface '{}' não encontrada (referenciada por '{}')",
                         iface_nome, fqn
-                    ));
+                    )));
                 }
             }
         }
@@ -803,10 +818,12 @@ impl<'a> VerificadorTipos<'a> {
             // ciclo direto (auto-referência) — reporte e pare
             let mut ciclo = stack.clone();
             ciclo.push(class_name.to_string());
-            self.erros.push(format!(
+            self.erros.push(ErroCompilador::novo(
+                TipoErro::Semântico,
+                format!(
                 "Herança circular detectada: {}",
                 ciclo.join(" -> ")
-            ));
+            )));
             return;
         }
 
@@ -838,10 +855,12 @@ impl<'a> VerificadorTipos<'a> {
                 ast::Tipo::Classe(n) => n.clone(),
                 ast::Tipo::Aplicado { nome, .. } => nome.clone(),
                 other => {
-                    self.erros.push(format!(
+                    self.erros.push(ErroCompilador::novo(
+                        TipoErro::Semântico,
+                        format!(
                         "Tipo inválido no cabeçalho da classe como base: {:?}",
                         other
-                    ));
+                    )));
                     return;
                 }
             };
@@ -854,10 +873,12 @@ impl<'a> VerificadorTipos<'a> {
                 // Detecta ciclo A -> ... -> B -> A
                 let mut ciclo = stack.clone();
                 ciclo.push(parent_name.clone());
-                self.erros.push(format!(
+                self.erros.push(ErroCompilador::novo(
+                    TipoErro::Semântico,
+                    format!(
                     "Herança circular detectada: {}",
                     ciclo.join(" -> ")
-                ));
+                )));
             } else if let Some(parent_decl) = self.classes.get(&parent_name).copied() {
                 // Resolve pai primeiro (DFS)
                 self.resolve_class_hierarchy_with_stack(
@@ -887,10 +908,12 @@ impl<'a> VerificadorTipos<'a> {
                 // Sem classe pai efetiva
                 } else {
                     // Nem classe, nem interface conhecida — erro
-                    self.erros.push(format!(
+                    self.erros.push(ErroCompilador::novo(
+                        TipoErro::Semântico,
+                        format!(
                         "Classe pai '{}' não encontrada para '{}'.",
                         parent_name, class_name
-                    ));
+                    )));
                 }
             }
         } else if class_name != "objeto" {
@@ -913,7 +936,7 @@ impl<'a> VerificadorTipos<'a> {
                 parent_effective = Some(parent_name);
             } else {
                 self.erros
-                    .push("Classe base 'objeto' não encontrada no sistema.".into());
+                    .push(ErroCompilador::novo(TipoErro::Semântico, "Classe base 'objeto' não encontrada no sistema.".into()));
             }
         }
         // Agora adiciona os membros do próprio filho (sem duplicados), ao final
@@ -1112,7 +1135,10 @@ impl<'a> VerificadorTipos<'a> {
                 let is_generic = self.generic_scope.iter().any(|s| s.contains(class_name));
 
                 if !is_generic && !self.classes.contains_key(&fqn_class) && !self.interfaces.contains_key(&fqn_iface) && !self.enums.contains_key(&fqn_enum) && !in_extern_lib {
-                    self.erros.push(format!("Tipo '{}' desconhecido para {}.", class_name, contexto));
+                    self.erros.push(ErroCompilador::novo(
+                        TipoErro::Semântico,
+                        format!("Tipo '{}' desconhecido para {}.", class_name, contexto)
+                    ));
                 }
             },
             Tipo::Lista(inner) => {
@@ -1171,32 +1197,40 @@ impl<'a> VerificadorTipos<'a> {
                 // 1) Nao pode haver metodo abstrato em classe nao-abstrata
                 for m in &classe.metodos {
                     if m.eh_abstrato && !classe.eh_abstrata {
-                        self.erros.push(format!(
+                        self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            format!(
                             "Método abstrato '{}' em classe não abstrata '{}'",
                             m.nome, fqn
-                        ));
+                        )));
                     }
                     // 2) método abstrato não pode ter corpo
                     if m.eh_abstrato && !m.corpo.is_empty() {
-                        self.erros.push(format!(
+                        self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            format!(
                             "Método abstrato '{}' não pode ter corpo em '{}'",
                             m.nome, fqn
-                        ));
+                        )));
                     }
                     // 3) método abstrato não pode ser estático
                     if m.eh_abstrato && m.eh_estatica {
-                        self.erros.push(format!(
+                        self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            format!(
                             "Método abstrato '{}' não pode ser estático em '{}'",
                             m.nome, fqn
-                        ));
+                        )));
                     }
                 }
                 // 4) Classe estática não pode ser abstrata (como em C#)
                 if classe.eh_abstrata && classe.eh_estatica {
-                    self.erros.push(format!(
+                    self.erros.push(ErroCompilador::novo(
+                        TipoErro::Semântico,
+                        format!(
                         "Classe '{}' não pode ser 'abstrata' e 'estática' ao mesmo tempo",
                         fqn
-                    ));
+                    )));
                 }
                 for metodo in &classe.metodos {
                     let is_nativo = metodo.attributes.iter().any(|a| a.name == "Nativo");
@@ -1210,10 +1244,12 @@ impl<'a> VerificadorTipos<'a> {
                     let _ = is_externo; // será usado em validações futuras
 
                     if is_nativo && !metodo.corpo.is_empty() {
-                        self.erros.push(format!(
+                        self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            format!(
                             "Método nativo '{}' não pode ter corpo em '{}'",
                             metodo.nome, fqn
-                        ));
+                        )));
                     }
 
                     let mut metodo_vars = escopo_vars.clone();
@@ -1231,25 +1267,31 @@ impl<'a> VerificadorTipos<'a> {
                             {
                                 // Em C#, métodos abstratos são implicitamente virtuais (overridáveis)
                                 if !(base_m.eh_virtual || base_m.eh_abstrato) {
-                                    self.erros.push(format!(
+                                    self.erros.push(ErroCompilador::novo(
+                                        TipoErro::Semântico,
+                                        format!(
                                         "Método '{}' em '{}' usa 'sobrescreve' mas o método da classe base não é 'redefinível'. Dica: marque o método da base como 'redefinível'.",
                                         metodo.nome, fqn
-                                    ));
+                                    )));
                                 } else {
                                     let (ret_c, params_c) = self.assinatura_metodo(metodo);
                                     let (ret_b, params_b) = self.assinatura_metodo(base_m);
                                     if ret_c != ret_b || params_c != params_b {
-                                        self.erros.push(format!(
+                                        self.erros.push(ErroCompilador::novo(
+                                            TipoErro::Semântico,
+                                            format!(
                                             "Assinatura incompatível no override de '{}.{}'. Dica: a assinatura deve ser exatamente a mesma da base (retorno e parâmetros).",
                                             fqn, metodo.nome
-                                        ));
+                                        )));
                                     }
                                 }
                             } else {
-                                self.erros.push(format!(
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    format!(
                                     "Método '{}' marcado como 'sobrescreve' mas não existe método correspondente na classe base de '{}'. Dica: verifique nome, parâmetros e se o método da base está visível.",
                                     metodo.nome, fqn
-                                ));
+                                )));
                             }
                         }
                     }
@@ -1291,10 +1333,12 @@ impl<'a> VerificadorTipos<'a> {
                 let is_nativo = funcao.attributes.iter().any(|a| a.name == "Nativo");
 
                 if is_nativo && !funcao.corpo.is_empty() {
-                    self.erros.push(format!(
+                    self.erros.push(ErroCompilador::novo(
+                        TipoErro::Semântico,
+                        format!(
                         "Função nativa '{}' não pode ter corpo.",
                         funcao.nome
-                    ));
+                    )));
                 }
 
                 let mut func_vars = escopo_vars.clone();
@@ -1347,10 +1391,12 @@ impl<'a> VerificadorTipos<'a> {
                     if tipo_expr != Tipo::Inferido
                         && !self.tipos_compativeis_atribuicao(&tipo_resolvido, &tipo_expr)
                     {
-                        self.erros.push(format!(
+                        self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            format!(
                             "Tipo da expressão ({:?}) não corresponde ao tipo da variável \"{}\" ({:?}).",
                             tipo_expr, nome, tipo_resolvido
-                        ));
+                        )));
                     }
                 }
                 escopo_vars.insert(nome.clone(), tipo_resolvido.clone());
@@ -1361,7 +1407,8 @@ impl<'a> VerificadorTipos<'a> {
                 let t_idx =
                     self.inferir_tipo_expressao(idx, namespace_atual, classe_atual, escopo_vars);
                 if t_idx != Tipo::Inteiro {
-                    self.erros.push("Índice de array deve ser inteiro".into());
+                    self.erros
+                        .push(ErroCompilador::novo(TipoErro::Semântico, "Índice de array deve ser inteiro".into()));
                 }
                 if let Tipo::Lista(elem) = t_alvo {
                     let t_val = self.inferir_tipo_expressao(
@@ -1371,14 +1418,16 @@ impl<'a> VerificadorTipos<'a> {
                         escopo_vars,
                     );
                     if !self.tipos_compativeis_atribuicao(&elem, &t_val) {
-                        self.erros.push(format!(
+                        self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            format!(
                             "Atribuição de elemento incompatível: esperado {:?}, recebido {:?}",
                             elem, t_val
-                        ));
+                        )));
                     }
                 } else {
                     self.erros
-                        .push("Atribuição por índice requer alvo do tipo lista".into());
+                        .push(ErroCompilador::novo(TipoErro::Semântico, "Atribuição por índice requer alvo do tipo lista".into()));
                 }
             }
             Comando::AtribuirPropriedade(obj_expr, prop_nome, val_expr) => {
@@ -1401,10 +1450,12 @@ impl<'a> VerificadorTipos<'a> {
 
                         if let Some(p) = prop {
                             if p.definir.is_none() {
-                                self.erros.push(format!(
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    format!(
                                     "A propriedade \"{}\" é somente leitura (read-only) e não pode ser atribuída.",
                                     prop_nome
-                                ));
+                                )));
                             }
                         }
 
@@ -1418,22 +1469,28 @@ impl<'a> VerificadorTipos<'a> {
                             if val_tipo != Tipo::Inferido
                                 && !self.tipos_compativeis_atribuicao(&p_tipo, &val_tipo)
                             {
-                                self.erros.push(format!(
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    format!(
                                     "Atribuição de tipo inválido para propriedade \"{}\". Esperado {:?}, recebido {:?}.",
                                     prop_nome, p_tipo, val_tipo
-                                ));
+                                )));
                             }
                         } else {
-                            self.erros.push(format!(
+                            self.erros.push(ErroCompilador::novo(
+                                TipoErro::Semântico,
+                                format!(
                                 "Propriedade \"{}\" não encontrada na classe \"{}\".",
                                 prop_nome, nome_classe
-                            ));
+                            )));
                         }
                     } else {
-                        self.erros.push(format!(
+                        self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            format!(
                             "Classe \"{}\" não encontrada para atribuição de propriedade.",
                             nome_classe
-                        ));
+                        )));
                     }
                 } else if obj_tipo == Tipo::Inferido || obj_tipo == Tipo::Objeto {
                     // Treat Inferido or Objeto as a dynamic object to avoid blocking compilation of library code
@@ -1446,7 +1503,7 @@ impl<'a> VerificadorTipos<'a> {
                     );
                 } else {
                     self.erros
-                        .push("Atribuição de propriedade em algo que não é um objeto.".to_string());
+                        .push(ErroCompilador::novo(TipoErro::Semântico, "Atribuição de propriedade em algo que não é um objeto.".to_string()));
                 }
             }
             Comando::Bloco(comandos) => {
@@ -1508,14 +1565,16 @@ impl<'a> VerificadorTipos<'a> {
                     if tipo_expr != Tipo::Inferido
                         && !self.tipos_compativeis_atribuicao(tipo_var, &tipo_expr)
                     {
-                        self.erros.push(format!(
+                        self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            format!(
                             "Atribuição de tipo inválido para variável \"{}\". Esperado {:?}, recebido {:?}.",
                             nome, tipo_var, tipo_expr
-                        ));
+                        )));
                     }
                 } else {
                     self.erros
-                        .push(format!("Variável \"{}\" não declarada.", nome));
+                        .push(ErroCompilador::novo(TipoErro::Semântico, format!("Variável \"{}\" não declarada.", nome)));
                 }
             }
             Comando::ChamarMetodo(obj_expr, _, args) => {
@@ -1542,19 +1601,23 @@ impl<'a> VerificadorTipos<'a> {
                             // Método deve existir na interface
                             if let Some(iface) = self.interfaces.get(nome) {
                                 if !iface.metodos.iter().any(|s| &s.nome == metodo_nome) {
-                                    self.erros.push(format!(
+                                    self.erros.push(ErroCompilador::novo(
+                                        TipoErro::Semântico,
+                                        format!(
                                         "Método '{}' não existe na interface '{}'.",
                                         metodo_nome, nome
-                                    ));
+                                    )));
                                 }
                             }
                         } else if let Some(class_info) = self.resolved_classes.get(nome) {
                             if !class_info.methods.contains_key(metodo_nome) {
                                 // Pode existir em declaração bruta, mas resolved já inclui herdados
-                                self.erros.push(format!(
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    format!(
                                     "Método '{}' não existe na classe '{}'.",
                                     metodo_nome, nome
-                                ));
+                                )));
                             } else {
                                 // Verificar modificador de acesso (semântica C#)
                                 let metodo = class_info.methods.get(metodo_nome).unwrap();
@@ -1573,15 +1636,19 @@ impl<'a> VerificadorTipos<'a> {
                                 }
 
                                 if metodo.eh_estatica && !is_static_access {
-                                    self.erros.push(format!(
+                                    self.erros.push(ErroCompilador::novo(
+                                        TipoErro::Semântico,
+                                        format!(
                                         "O método '{}' de '{}' é estático e não pode ser chamado a partir de uma instância.",
                                         metodo_nome, nome
-                                    ));
+                                    )));
                                 } else if !metodo.eh_estatica && is_static_access {
-                                    self.erros.push(format!(
+                                    self.erros.push(ErroCompilador::novo(
+                                        TipoErro::Semântico,
+                                        format!(
                                         "O método '{}' de '{}' não é estático e não pode ser chamado diretamente pela classe.",
                                         metodo_nome, nome
-                                    ));
+                                    )));
                                 }
 
                                 let is_private   = metodo.modificador == ModificadorAcesso::Privado;
@@ -1590,25 +1657,31 @@ impl<'a> VerificadorTipos<'a> {
                                 let inside_sub   = classe_atual.map_or(false, |c| self.is_subclass_of(c, nome));
 
                                 if is_private && !inside_same {
-                                    self.erros.push(format!(
+                                    self.erros.push(ErroCompilador::novo(
+                                        TipoErro::Semântico,
+                                        format!(
                                         "O método '{}' de '{}' é inacessível: é privado e só pode ser chamado dentro da própria classe.",
                                         metodo_nome, nome
-                                    ));
+                                    )));
                                 } else if is_protected && !inside_same && !inside_sub {
-                                    self.erros.push(format!(
+                                    self.erros.push(ErroCompilador::novo(
+                                        TipoErro::Semântico,
+                                        format!(
                                         "O método '{}' de '{}' é inacessível: é protegido e só pode ser chamado dentro da classe ou de subclasses.",
                                         metodo_nome, nome
-                                    ));
+                                    )));
                                 }
                             }
                         }
                     }
                     _ => {
                         // outros tipos por ora não têm métodos
-                        self.erros.push(format!(
+                        self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            format!(
                             "Chamando método '{}' em tipo que não é objeto: {:?}",
                             metodo_nome, obj_tipo
-                        ));
+                        )));
                     }
                 }
             }
@@ -1663,10 +1736,12 @@ impl<'a> VerificadorTipos<'a> {
                                     function.tipo_retorno.clone().unwrap_or(Tipo::Vazio)
                                 }
                                 _ => {
-                                    self.erros.push(format!(
+                                    self.erros.push(ErroCompilador::novo(
+                                        TipoErro::Semântico,
+                                        format!(
                                         "aguarde requer uma função assíncrona; '{}' não foi encontrada ou não foi marcada como assíncrona.",
                                         nome
-                                    ));
+                                    )));
                                     Tipo::Inferido
                                 }
                             }
@@ -1691,7 +1766,7 @@ impl<'a> VerificadorTipos<'a> {
                 }
                 _ => {
                     self.erros
-                        .push("aguarde requer uma chamada assíncrona.".to_string());
+                        .push(ErroCompilador::novo(TipoErro::Semântico, "aguarde requer uma chamada assíncrona.".to_string()));
                     Tipo::Inferido
                 }
             },
@@ -1746,7 +1821,7 @@ impl<'a> VerificadorTipos<'a> {
                     return Tipo::Enum(fqn_enum);
                 }
                 self.erros
-                    .push(format!("Identificador \"{}\" não encontrado.", nome));
+                    .push(ErroCompilador::novo(TipoErro::Semântico, format!("Identificador \"{}\" não encontrado.", nome)));
                 Tipo::Inferido
             }
             Expressao::AcessoMembro(obj_expr, membro_nome) => {
@@ -1788,66 +1863,79 @@ impl<'a> VerificadorTipos<'a> {
                             let inside_sub   = classe_atual.map_or(false, |c| self.is_subclass_of(c, &fqn));
 
                             if is_private && !inside_same {
-                                self.erros.push(format!(
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    format!(
                                     "A propriedade '{}' de '{}' é inacessível: é privada e só pode ser acessada dentro da própria classe.",
                                     membro_nome, fqn
-                                ));
+                                )));
                             } else if is_protected && !inside_same && !inside_sub {
-                                self.erros.push(format!(
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    format!(
                                     "A propriedade '{}' de '{}' é inacessível: é protegida e só pode ser acessada dentro da classe ou de subclasses.",
                                     membro_nome, fqn
-                                ));
+                                )));
                             }
                             return prop.tipo.clone();
-                        }
-                        if let Some(field) =
+                            }
+                            if let Some(field) =
                             class_info.fields.iter().find(|f| f.nome == *membro_nome)
-                        {
+                            {
                             // Verificar modificador de acesso para campos (semântica C#)
-                            let is_private   = field.modificador == ModificadorAcesso::Privado;
+                            let is_private = field.modificador == ModificadorAcesso::Privado;
                             let is_protected = field.modificador == ModificadorAcesso::Protegido;
-                            let inside_same  = classe_atual.map_or(false, |c| c == &fqn);
-                            let inside_sub   = classe_atual.map_or(false, |c| self.is_subclass_of(c, &fqn));
+                            let inside_same = classe_atual.map_or(false, |c| c == &fqn);
+                            let inside_sub =
+                                classe_atual.map_or(false, |c| self.is_subclass_of(c, &fqn));
 
                             if is_private && !inside_same {
-                                self.erros.push(format!(
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    format!(
                                     "O campo '{}' de '{}' é inacessível: é privado e só pode ser acessado dentro da própria classe.",
                                     membro_nome, fqn
-                                ));
+                                )));
                             } else if is_protected && !inside_same && !inside_sub {
-                                self.erros.push(format!(
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    format!(
                                     "O campo '{}' de '{}' é inacessível: é protegido e só pode ser acessado dentro da classe ou de subclasses.",
                                     membro_nome, fqn
-                                ));
+                                )));
                             }
                             return field.tipo.clone();
-                        }
-                    }
-                }
-                // Propriedade especial de arrays e textos
-                if membro_nome == "tamanho" {
-                    if matches!(obj_tipo, Tipo::Lista(_) | Tipo::Texto) {
-                        return Tipo::Inteiro;
-                    }
-                }
-                // Enum membro? O membro possui o tipo do próprio enum
-                if let Tipo::Enum(ref fqn_enum) = obj_tipo {
-                    if let Some(en) = self.enums.get(fqn_enum) {
-                        if en.valores.iter().any(|v| v == membro_nome) {
+                            }
+                            }
+                            }
+                            // Propriedade especial de arrays e textos
+                            if membro_nome == "tamanho" {
+                            if matches!(obj_tipo, Tipo::Lista(_) | Tipo::Texto) {
+                            return Tipo::Inteiro;
+                            }
+                            }
+                            // Enum membro? O membro possui o tipo do próprio enum
+                            if let Tipo::Enum(ref fqn_enum) = obj_tipo {
+                            if let Some(en) = self.enums.get(fqn_enum) {
+                            if en.valores.iter().any(|v| v == membro_nome) {
                             return Tipo::Enum(fqn_enum.clone());
-                        } else {
-                            self.erros.push(format!(
+                            } else {
+                            self.erros.push(ErroCompilador::novo(
+                                TipoErro::Semântico,
+                                format!(
                                 "Membro \"{}\" não existe no enum \"{}\".",
                                 membro_nome, fqn_enum
-                            ));
-                        }
-                    } else {
-                        self.erros.push(format!(
+                            )));
+                            }
+                            } else {
+                            self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            format!(
                             "Enum \"{}\" não encontrado ao acessar membro \"{}\".",
                             fqn_enum, membro_nome
-                        ));
-                    }
-                }
+                            )));
+                            }
+                            }
 
                 // Fallback: if the object is a class, we return Inferido but avoid immediate error
                 if let Tipo::Classe(_) = obj_tipo {
@@ -1913,8 +2001,9 @@ impl<'a> VerificadorTipos<'a> {
                     }
                 }
                 // 3) Falha — tipos heterogêneos sem supertipo comum
-                self.erros
-                    .push("Elementos do array devem ter tipos compatíveis".into());
+                self.erros.push(
+                    ErroCompilador::novo(TipoErro::Semântico, "Elementos do array devem ter tipos compatíveis".into()),
+                );
                 Tipo::Lista(Box::new(Tipo::Inferido))
             }
             Expressao::AcessoIndice(obj, idx) => {
@@ -1923,12 +2012,14 @@ impl<'a> VerificadorTipos<'a> {
                 let t_idx =
                     self.inferir_tipo_expressao(idx, namespace_atual, classe_atual, escopo_vars);
                 if t_idx != Tipo::Inteiro {
-                    self.erros.push("Índice de acesso deve ser inteiro".into());
+                    self.erros
+                        .push(ErroCompilador::novo(TipoErro::Semântico, "Índice de acesso deve ser inteiro".into()));
                 }
                 if let Tipo::Lista(elem) = t_obj {
                     return *elem;
                 }
-                self.erros.push("Acesso por índice requer lista".into());
+                self.erros
+                    .push(ErroCompilador::novo(TipoErro::Semântico, "Acesso por índice requer lista".into()));
                 Tipo::Inferido
             }
             Expressao::NovoObjeto(t, args) => {
@@ -1965,17 +2056,21 @@ impl<'a> VerificadorTipos<'a> {
                             };
 
                             if (is_private && !is_inside_same_class) || (is_protected && !is_inside_subclass) {
-                                self.erros.push(format!(
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    format!(
                                     "O construtor da classe '{}' é inacessível devido ao seu nível de proteção.",
                                     nome_classe
-                                ));
+                                )));
                             }
                         } else {
-                            self.erros.push(format!(
+                            self.erros.push(ErroCompilador::novo(
+                                TipoErro::Semântico,
+                                format!(
                                 "A classe '{}' não contém um construtor que receba {} argumentos.",
                                 nome_classe,
                                 args.len()
-                            ));
+                            )));
                         }
 
                     }
@@ -2037,14 +2132,20 @@ impl<'a> VerificadorTipos<'a> {
                             }
 
                             if metodo.eh_estatica && !is_static_access {
-                                self.erros.push(format!(
-                                    "O método '{}' de '{}' é estático e não pode ser chamado a partir de uma instância.",
-                                    metodo_nome, nome_classe
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    format!(
+                                        "O método '{}' de '{}' é estático e não pode ser chamado a partir de uma instância.",
+                                        metodo_nome, nome_classe
+                                    )
                                 ));
                             } else if !metodo.eh_estatica && is_static_access {
-                                self.erros.push(format!(
-                                    "O método '{}' de '{}' não é estático e não pode ser chamado diretamente pela classe.",
-                                    metodo_nome, nome_classe
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    format!(
+                                        "O método '{}' de '{}' não é estático e não pode ser chamado diretamente pela classe.",
+                                        metodo_nome, nome_classe
+                                    )
                                 ));
                             }
 
@@ -2055,14 +2156,20 @@ impl<'a> VerificadorTipos<'a> {
                             let inside_sub   = classe_atual.map_or(false, |c| self.is_subclass_of(c, &nome_classe));
 
                             if is_private && !inside_same {
-                                self.erros.push(format!(
-                                    "O método '{}' de '{}' é inacessível: é privado e só pode ser chamado dentro da própria classe.",
-                                    metodo_nome, nome_classe
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    format!(
+                                        "O método '{}' de '{}' é inacessível: é privado e só pode ser chamado dentro da própria classe.",
+                                        metodo_nome, nome_classe
+                                    )
                                 ));
                             } else if is_protected && !inside_same && !inside_sub {
-                                self.erros.push(format!(
-                                    "O método '{}' de '{}' é inacessível: é protegido e só pode ser chamado dentro da classe ou de subclasses.",
-                                    metodo_nome, nome_classe
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    format!(
+                                        "O método '{}' de '{}' é inacessível: é protegido e só pode ser chamado dentro da classe ou de subclasses.",
+                                        metodo_nome, nome_classe
+                                    )
                                 ));
                             }
                             return metodo.tipo_retorno.clone().unwrap_or(Tipo::Vazio);
