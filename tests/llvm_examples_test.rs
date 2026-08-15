@@ -95,7 +95,8 @@ fn parse_and_typecheck(files: &[&str]) -> compilador_portugues::ast::Programa {
     // Verificação de tipos
     let mut tc = compilador_portugues::type_checker::VerificadorTipos::new();
     if let Err(erros) = tc.verificar_programa(&programa_final) {
-        panic!("Erros semânticos em {:?}:\n{}", files, erros.join("\n"));
+        let error_strings: Vec<String> = erros.iter().map(|e| e.mensagem.clone()).collect();
+        panic!("Erros semânticos em {:?}:\n{}", files, error_strings.join("\n"));
     }
     programa_final
 }

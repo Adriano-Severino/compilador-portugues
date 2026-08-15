@@ -15,9 +15,10 @@ fn assert_typecheck_ok(codigo: &str) -> compilador_portugues::Programa {
     verificador
         .verificar_programa(&programa)
         .unwrap_or_else(|erros| {
+            let error_strings: Vec<String> = erros.iter().map(|e| e.mensagem.clone()).collect();
             panic!(
                 "verificacao semantica falhou:\n{}\n\ncodigo:\n{}",
-                erros.join("\n"),
+                error_strings.join("\n"),
                 codigo
             )
         });
@@ -27,9 +28,10 @@ fn assert_typecheck_ok(codigo: &str) -> compilador_portugues::Programa {
 fn typecheck_errors(codigo: &str) -> Vec<String> {
     let programa = parse(codigo);
     let mut verificador = VerificadorTipos::new();
-    verificador
+    let erros = verificador
         .verificar_programa(&programa)
-        .expect_err("esperava erro semantico, mas o programa foi aceito")
+        .expect_err("esperava erro semantico, mas o programa foi aceito");
+    erros.iter().map(|e| e.mensagem.clone()).collect()
 }
 
 fn tokens(codigo: &str) -> Vec<Token> {
