@@ -1,0 +1,41 @@
+// Exemplo demonstrando o uso de "nova" para instanciação de objetos
+// Ambas "novo" e "nova" funcionam de forma idêntica
+
+publico classe Pessoa {
+    publico texto Nome { obter; definir; }
+    publico inteiro Idade { obter; definir; }
+
+    publico Pessoa(texto nome, inteiro idade) {
+        Nome = nome;
+        Idade = idade;
+    }
+
+    publico texto Apresentar() {
+        retorne $"Olá, meu nome é {Nome} e tenho {Idade} anos";
+    }
+}
+
+publico classe Animal {
+    publico texto Especie { obter; definir; }
+
+    publico Animal(texto especie) {
+        Especie = especie;
+    }
+}
+
+função vazio Principal() {
+    // Usando "novo" (forma masculina tradicional)
+    var pessoa1 = novo Pessoa("João", 30);
+    imprima(pessoa1.Apresentar());
+
+    // Usando "nova" (forma feminina, útil para classes femininas)
+    var pessoa2 = nova Pessoa("Maria", 25);
+    imprima(pessoa2.Apresentar());
+
+    // Ambos funcionam da mesma forma
+    var animal1 = novo Animal("Cachorro");
+    var animal2 = nova Animal("Gato");
+    
+    imprima($"Animal 1: {animal1.Especie}");
+    imprima($"Animal 2: {animal2.Especie}");
+}

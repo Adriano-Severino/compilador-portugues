@@ -1,0 +1,10 @@
+usando Sistema;
+usando Sistema.Colecoes;
+
+publico função Principal()
+{
+    var lista = novo Lista<inteiro>();
+    lista.Adicionar(10);
+    
+    retorne 42;
+}

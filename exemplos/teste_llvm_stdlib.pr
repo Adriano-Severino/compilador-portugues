@@ -1,0 +1,9 @@
+usando Sistema;
+usando Sistema.Colecoes;
+
+função Principal() {
+    var lista = novo Lista();
+    lista.Adicionar(1);
+    lista.Adicionar(2);
+    retorne lista.Tamanho();
+}
