@@ -1097,6 +1097,37 @@ impl<'a> VerificadorTipos<'a> {
         }
     }
 
+    fn validar_tipo_conhecido(&mut self, tipo: &Tipo, namespace_atual: &str, contexto: String) {
+        match tipo {
+            Tipo::Classe(class_name) => {
+                let fqn_class = self.resolver_nome_classe(class_name, namespace_atual);
+                let fqn_iface = self.resolver_nome_interface(class_name, namespace_atual);
+                let fqn_enum = self.resolver_nome_enum(class_name, namespace_atual);
+
+                let in_extern_lib = if let Some(bib) = &self.biblioteca_externa {
+                    bib.simbolos.contains_key(&fqn_class)
+                } else {
+                    false
+                };
+                let is_generic = self.generic_scope.iter().any(|s| s.contains(class_name));
+
+                if !is_generic && !self.classes.contains_key(&fqn_class) && !self.interfaces.contains_key(&fqn_iface) && !self.enums.contains_key(&fqn_enum) && !in_extern_lib {
+                    self.erros.push(format!("Tipo '{}' desconhecido para {}.", class_name, contexto));
+                }
+            },
+            Tipo::Lista(inner) => {
+                self.validar_tipo_conhecido(inner, namespace_atual, contexto);
+            }
+            Tipo::Aplicado { nome, args } => {
+                self.validar_tipo_conhecido(&Tipo::Classe(nome.clone()), namespace_atual, contexto.clone());
+                for arg in args {
+                    self.validar_tipo_conhecido(arg, namespace_atual, contexto.clone());
+                }
+            }
+            _ => {} // Primitivos são sempre válidos
+        }
+    }
+
     pub fn resolver_nome_enum(&self, nome: &str, namespace_atual: &str) -> String {
         if nome.contains('.') {
             return nome.to_string();
@@ -1222,10 +1253,18 @@ impl<'a> VerificadorTipos<'a> {
                             }
                         }
                     }
+                    if let Some(return_type) = &metodo.tipo_retorno {
+                        let (resolved_return_type, mut errs) = self.normalize_tipo_ro(return_type, namespace_atual);
+                        self.erros.append(&mut errs);
+                        self.validar_tipo_conhecido(&resolved_return_type, namespace_atual, format!("o tipo de retorno do método '{}'", metodo.nome));
+                    }
+
+                    let mut metodo_vars = escopo_vars.clone();
                     for param in &metodo.parametros {
                         let (resolved_param_type, mut e) =
                             self.normalize_tipo_ro(&param.tipo, namespace_atual);
                         self.erros.append(&mut e);
+                        self.validar_tipo_conhecido(&resolved_param_type, namespace_atual, format!("o parâmetro '{}' do método '{}'", param.nome, metodo.nome));
                         metodo_vars.insert(param.nome.clone(), resolved_param_type);
                     }
                     println!(
@@ -1351,18 +1390,23 @@ impl<'a> VerificadorTipos<'a> {
                 );
                 if let Tipo::Classe(nome_classe) = obj_tipo {
                     if let Some(class_info) = self.resolved_classes.get(&nome_classe) {
-                        let prop_tipo = class_info
-                            .properties
-                            .iter()
-                            .find(|p| p.nome == *prop_nome)
-                            .map(|p| p.tipo.clone())
-                            .or_else(|| {
-                                class_info
-                                    .fields
-                                    .iter()
-                                    .find(|f| f.nome == *prop_nome)
-                                    .map(|f| f.tipo.clone())
-                            });
+                        let prop = class_info.properties.iter().find(|p| p.nome == *prop_nome);
+                        let prop_tipo = prop.map(|p| p.tipo.clone()).or_else(|| {
+                            class_info
+                                .fields
+                                .iter()
+                                .find(|f| f.nome == *prop_nome)
+                                .map(|f| f.tipo.clone())
+                        });
+
+                        if let Some(p) = prop {
+                            if p.definir.is_none() {
+                                self.erros.push(format!(
+                                    "A propriedade \"{}\" é somente leitura (read-only) e não pode ser atribuída.",
+                                    prop_nome
+                                ));
+                            }
+                        }
 
                         if let Some(p_tipo) = prop_tipo {
                             let val_tipo = self.inferir_tipo_expressao(
@@ -1511,6 +1555,51 @@ impl<'a> VerificadorTipos<'a> {
                                     "Método '{}' não existe na classe '{}'.",
                                     metodo_nome, nome
                                 ));
+                            } else {
+                                // Verificar modificador de acesso (semântica C#)
+                                let metodo = class_info.methods.get(metodo_nome).unwrap();
+                                
+                                let mut is_static_access = false;
+                                if let Expressao::Identificador(nome_id) = obj_expr.as_ref() {
+                                    if !escopo_vars.contains_key(nome_id) {
+                                        // Verifica se não é um campo ou propriedade da classe atual (implicit this)
+                                        let is_member = classe_atual.and_then(|c| self.resolved_classes.get(c)).map_or(false, |info| {
+                                            info.properties.iter().any(|p| p.nome == *nome_id) || info.fields.iter().any(|f| f.nome == *nome_id)
+                                        });
+                                        if !is_member {
+                                            is_static_access = true;
+                                        }
+                                    }
+                                }
+
+                                if metodo.eh_estatica && !is_static_access {
+                                    self.erros.push(format!(
+                                        "O método '{}' de '{}' é estático e não pode ser chamado a partir de uma instância.",
+                                        metodo_nome, nome
+                                    ));
+                                } else if !metodo.eh_estatica && is_static_access {
+                                    self.erros.push(format!(
+                                        "O método '{}' de '{}' não é estático e não pode ser chamado diretamente pela classe.",
+                                        metodo_nome, nome
+                                    ));
+                                }
+
+                                let is_private   = metodo.modificador == ModificadorAcesso::Privado;
+                                let is_protected = metodo.modificador == ModificadorAcesso::Protegido;
+                                let inside_same  = classe_atual.map_or(false, |c| c == nome);
+                                let inside_sub   = classe_atual.map_or(false, |c| self.is_subclass_of(c, nome));
+
+                                if is_private && !inside_same {
+                                    self.erros.push(format!(
+                                        "O método '{}' de '{}' é inacessível: é privado e só pode ser chamado dentro da própria classe.",
+                                        metodo_nome, nome
+                                    ));
+                                } else if is_protected && !inside_same && !inside_sub {
+                                    self.erros.push(format!(
+                                        "O método '{}' de '{}' é inacessível: é protegido e só pode ser chamado dentro da classe ou de subclasses.",
+                                        metodo_nome, nome
+                                    ));
+                                }
                             }
                         }
                     }
@@ -1692,11 +1781,45 @@ impl<'a> VerificadorTipos<'a> {
                             .iter()
                             .find(|p| p.nome == *membro_nome)
                         {
+                            // Verificar modificador de acesso para propriedades (semântica C#)
+                            let is_private   = prop.modificador == ModificadorAcesso::Privado;
+                            let is_protected = prop.modificador == ModificadorAcesso::Protegido;
+                            let inside_same  = classe_atual.map_or(false, |c| c == &fqn);
+                            let inside_sub   = classe_atual.map_or(false, |c| self.is_subclass_of(c, &fqn));
+
+                            if is_private && !inside_same {
+                                self.erros.push(format!(
+                                    "A propriedade '{}' de '{}' é inacessível: é privada e só pode ser acessada dentro da própria classe.",
+                                    membro_nome, fqn
+                                ));
+                            } else if is_protected && !inside_same && !inside_sub {
+                                self.erros.push(format!(
+                                    "A propriedade '{}' de '{}' é inacessível: é protegida e só pode ser acessada dentro da classe ou de subclasses.",
+                                    membro_nome, fqn
+                                ));
+                            }
                             return prop.tipo.clone();
                         }
                         if let Some(field) =
                             class_info.fields.iter().find(|f| f.nome == *membro_nome)
                         {
+                            // Verificar modificador de acesso para campos (semântica C#)
+                            let is_private   = field.modificador == ModificadorAcesso::Privado;
+                            let is_protected = field.modificador == ModificadorAcesso::Protegido;
+                            let inside_same  = classe_atual.map_or(false, |c| c == &fqn);
+                            let inside_sub   = classe_atual.map_or(false, |c| self.is_subclass_of(c, &fqn));
+
+                            if is_private && !inside_same {
+                                self.erros.push(format!(
+                                    "O campo '{}' de '{}' é inacessível: é privado e só pode ser acessado dentro da própria classe.",
+                                    membro_nome, fqn
+                                ));
+                            } else if is_protected && !inside_same && !inside_sub {
+                                self.erros.push(format!(
+                                    "O campo '{}' de '{}' é inacessível: é protegido e só pode ser acessado dentro da classe ou de subclasses.",
+                                    membro_nome, fqn
+                                ));
+                            }
                             return field.tipo.clone();
                         }
                     }
@@ -1808,9 +1931,56 @@ impl<'a> VerificadorTipos<'a> {
                 self.erros.push("Acesso por índice requer lista".into());
                 Tipo::Inferido
             }
-            Expressao::NovoObjeto(t, _) => {
+            Expressao::NovoObjeto(t, args) => {
                 let (t_norm, mut errs) = self.normalize_tipo_ro(t, namespace_atual);
                 self.erros.append(&mut errs);
+
+                if let Tipo::Classe(nome_classe) = &t_norm {
+                    if let Some(classe_decl) = self.classes.get(nome_classe) {
+                        // Se não houver construtores definidos e a chamada é sem argumentos,
+                        // é uma chamada ao construtor padrão implícito, que é público.
+                        if classe_decl.construtores.is_empty() && args.is_empty() {
+                            // Construtor padrão, acesso permitido.
+                        } else if let Some(construtor) =
+                            classe_decl.construtores.iter().find(|c| {
+                                // Aceita se o número de args está entre
+                                // os parâmetros obrigatórios e o total (C# semantics)
+                                let total = c.parametros.len();
+                                let obrigatorios = c.parametros.iter()
+                                    .filter(|p| p.valor_padrao.is_none())
+                                    .count();
+                                args.len() >= obrigatorios && args.len() <= total
+                            })
+                        {
+                            let is_private = construtor.modificador == ModificadorAcesso::Privado;
+                            let is_protected = construtor.modificador == ModificadorAcesso::Protegido;
+
+                            let is_inside_same_class =
+                                classe_atual.map_or(false, |current_class_fqn| current_class_fqn == nome_classe);
+                            
+                            let is_inside_subclass = if let Some(current_class_fqn) = classe_atual {
+                                self.is_subclass_of(current_class_fqn, nome_classe)
+                            } else {
+                                false
+                            };
+
+                            if (is_private && !is_inside_same_class) || (is_protected && !is_inside_subclass) {
+                                self.erros.push(format!(
+                                    "O construtor da classe '{}' é inacessível devido ao seu nível de proteção.",
+                                    nome_classe
+                                ));
+                            }
+                        } else {
+                            self.erros.push(format!(
+                                "A classe '{}' não contém um construtor que receba {} argumentos.",
+                                nome_classe,
+                                args.len()
+                            ));
+                        }
+
+                    }
+                }
+
                 t_norm
             }
             Expressao::NovoArray(t, _) => {
@@ -1854,6 +2024,47 @@ impl<'a> VerificadorTipos<'a> {
                     }
                     if let Some(class_info) = self.resolved_classes.get(&nome_classe) {
                         if let Some(metodo) = class_info.methods.get(metodo_nome) {
+                            let mut is_static_access = false;
+                            if let Expressao::Identificador(nome_id) = obj_expr.as_ref() {
+                                if !escopo_vars.contains_key(nome_id) {
+                                    let is_member = classe_atual.and_then(|c| self.resolved_classes.get(c)).map_or(false, |info| {
+                                        info.properties.iter().any(|p| p.nome == *nome_id) || info.fields.iter().any(|f| f.nome == *nome_id)
+                                    });
+                                    if !is_member {
+                                        is_static_access = true;
+                                    }
+                                }
+                            }
+
+                            if metodo.eh_estatica && !is_static_access {
+                                self.erros.push(format!(
+                                    "O método '{}' de '{}' é estático e não pode ser chamado a partir de uma instância.",
+                                    metodo_nome, nome_classe
+                                ));
+                            } else if !metodo.eh_estatica && is_static_access {
+                                self.erros.push(format!(
+                                    "O método '{}' de '{}' não é estático e não pode ser chamado diretamente pela classe.",
+                                    metodo_nome, nome_classe
+                                ));
+                            }
+
+                            // Verificar modificador de acesso (semântica C#)
+                            let is_private   = metodo.modificador == ModificadorAcesso::Privado;
+                            let is_protected = metodo.modificador == ModificadorAcesso::Protegido;
+                            let inside_same  = classe_atual.map_or(false, |c| c == &nome_classe);
+                            let inside_sub   = classe_atual.map_or(false, |c| self.is_subclass_of(c, &nome_classe));
+
+                            if is_private && !inside_same {
+                                self.erros.push(format!(
+                                    "O método '{}' de '{}' é inacessível: é privado e só pode ser chamado dentro da própria classe.",
+                                    metodo_nome, nome_classe
+                                ));
+                            } else if is_protected && !inside_same && !inside_sub {
+                                self.erros.push(format!(
+                                    "O método '{}' de '{}' é inacessível: é protegido e só pode ser chamado dentro da classe ou de subclasses.",
+                                    metodo_nome, nome_classe
+                                ));
+                            }
                             return metodo.tipo_retorno.clone().unwrap_or(Tipo::Vazio);
                         }
                     }

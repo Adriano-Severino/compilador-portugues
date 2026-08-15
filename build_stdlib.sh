@@ -13,11 +13,15 @@ fi
 SISTEMA_PADRAO_PATH="../sistema-padrao"
 
 # Executa o compilador com a flag para compilar a biblioteca
-# O compilador irá procurar os fontes em ../sistema-padrao/src e cuspir o resultado em ../sistema-padrao/dist/sistema.pbc
+# O compilador irá procurar os fontes em ../sistema-padrao/src e gerar:
+# - ../sistema-padrao/dist/sistema.pbl (formato moderno)
+# - ../sistema-padrao/dist/sistema.ll (LLVM IR)
 cargo run --bin compilador -- --compilar-biblioteca=$SISTEMA_PADRAO_PATH
 
 if [ $? -eq 0 ]; then
-    echo "Biblioteca padrão compilada com sucesso em $SISTEMA_PADRAO_PATH/dist/sistema.pbc"
+    echo "Biblioteca padrão compilada com sucesso em $SISTEMA_PADRAO_PATH/dist/"
+    echo "  - sistema.pbl (formato moderno)"
+    echo "  - sistema.ll (LLVM IR)"
 else
     echo "Erro ao compilar a biblioteca padrão."
 fi

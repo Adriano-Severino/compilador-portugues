@@ -72,7 +72,9 @@ pub enum Token {
     TEnumeracao,
     #[token("construtor")]
     TConstrutor,
-    #[token("publico")]
+     // publico/público usa termos em português;
+    #[token("publico")] 
+    #[token("público")]
     TPublico,
     #[token("privado")]
     TPrivado,
@@ -87,6 +89,7 @@ pub enum Token {
     #[token("abstrata")]
     TAbstrato,
     #[token("novo")]
+    #[token("nova")]
     TNovo,
     #[token("este")]
     TEste,
@@ -234,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_palavras_chave_oop() {
-        let codigo = "classe construtor publico privado protegido base redefinível sobrescreve abstrata novo este obter definir estática";
+        let codigo = "classe construtor publico público privado protegido base redefinível sobrescreve abstrata novo nova este obter definir estática";
         let mut lex = Token::lexer(codigo);
 
         assert_eq!(lex.next(), Some(Ok(Token::TClasse)));

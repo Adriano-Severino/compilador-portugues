@@ -31,10 +31,15 @@ fn clang_executable() -> PathBuf {
 }
 
 /// Compila o LLVM IR gerado e vincula o runtime nativo de async/await.
+/// Se existir LLVM IR da biblioteca padrão, também faz linkagem automática.
 ///
 /// O caminho do runtime é resolvido a partir do manifesto do compilador, para
 /// que a compilação funcione independentemente do diretório atual do processo.
-pub fn compilar_llvm_ir_com_runtime(ll_path: &Path, nome_base: &str) -> Result<(), String> {
+pub fn compilar_llvm_ir_com_runtime(
+    ll_path: &Path,
+    nome_base: &str,
+    stdlib_path: Option<&Path>,
+) -> Result<(), String> {
     let runtime_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join("runtime")
@@ -48,11 +53,19 @@ pub fn compilar_llvm_ir_com_runtime(ll_path: &Path, nome_base: &str) -> Result<(
     }
 
     let mut command = Command::new(clang_executable());
-    command
-        .arg(ll_path)
-        .arg(&runtime_path)
-        .arg("-o")
-        .arg(nome_base);
+    command.arg(ll_path);
+    command.arg(&runtime_path);
+
+    // Se existe LLVM IR da biblioteca padrão, adiciona para linkagem
+    if let Some(stdlib_dir) = stdlib_path {
+        let stdlib_ll_path = stdlib_dir.join("dist").join("sistema.ll");
+        if stdlib_ll_path.exists() {
+            println!("  📦 Linkando com biblioteca padrão LLVM IR...");
+            command.arg(&stdlib_ll_path);
+        }
+    }
+
+    command.arg("-o").arg(nome_base);
 
     #[cfg(not(windows))]
     command.arg("-pthread");
@@ -90,7 +103,7 @@ impl GeradorCodigo {
         let ll_path = format!("{}.ll", nome_base);
         fs::write(&ll_path, code).map_err(|e| e.to_string())?;
 
-        compilar_llvm_ir_com_runtime(Path::new(&ll_path), nome_base)
+        compilar_llvm_ir_com_runtime(Path::new(&ll_path), nome_base, None)
     }
 
     pub fn gerar_cil(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
@@ -128,6 +141,17 @@ impl GeradorCodigo {
         let mut generator = bytecode::BytecodeGenerator::new(programa, type_checker);
         let bytecode = generator.generate();
         fs::write(format!("{}.pbc", nome_base), bytecode.join("\n")).map_err(|e| e.to_string())
+    }
+
+    pub fn gerar_bytecode_para_arquivo<'a>(
+        &mut self,
+        programa: &'a ast::Programa,
+        type_checker: &'a crate::type_checker::VerificadorTipos,
+        output_path: &Path,
+    ) -> Result<(), String> {
+        let mut generator = bytecode::BytecodeGenerator::new(programa, type_checker);
+        let bytecode = generator.generate();
+        fs::write(output_path, bytecode.join("\n")).map_err(|e| e.to_string())
     }
 
     pub fn gerar_bytecode_para_biblioteca<'a>(
@@ -291,4 +315,19 @@ pub fn gerar_llvm_ir_puro<'a>(
     let mut generator =
         llvm_ir::LlvmGenerator::new(programa, type_checker, &type_checker.resolved_classes);
     generator.generate()
+}
+
+/// Gera LLVM IR para biblioteca (sem função main) e salva em arquivo.
+pub fn gerar_llvm_ir_para_biblioteca<'a>(
+    programa: &'a ast::Programa,
+    type_checker: &'a mut crate::type_checker::VerificadorTipos<'a>,
+    nome_base: &str,
+) -> Result<(), String> {
+    let mut generator =
+        llvm_ir::LlvmGenerator::new(programa, type_checker, &type_checker.resolved_classes);
+    let code = generator.generate_for_library();
+    // nome_base já deve incluir o caminho completo sem extensão
+    let ll_path = format!("{}.ll", nome_base);
+    fs::write(&ll_path, code).map_err(|e| e.to_string())?;
+    Ok(())
 }

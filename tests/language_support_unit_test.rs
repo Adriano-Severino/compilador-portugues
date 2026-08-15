@@ -390,3 +390,262 @@ função vazio Principal() {
 
     assert_eq!(itens.len(), 3);
 }
+
+#[test]
+fn typecheck_aceita_nova_para_instanciacao() {
+    assert_typecheck_ok(
+        r#"
+publico classe Pessoa {
+    publico texto Nome { obter; definir; }
+
+    publico Pessoa(texto nome) {
+        Nome = nome;
+    }
+}
+
+função vazio Principal() {
+    var p = nova Pessoa("Maria");
+    imprima(p.Nome);
+}
+"#,
+    );
+}
+
+#[test]
+fn lexer_reconhece_nova_e_novo() {
+    let tokens = tokens("novo nova");
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens[0], Token::TNovo);
+    assert_eq!(tokens[1], Token::TNovo);
+}
+
+// ============================================================
+// Testes de controle de acesso a membros (semântica C#)
+// ============================================================
+
+/// Chamar método PRIVADO de fora da classe deve gerar erro de compilação.
+#[test]
+fn metodo_privado_inacessivel_externamente() {
+    let erros = typecheck_errors(
+        r#"
+classe Pessoa {
+    publico texto Nome;
+
+    publico Pessoa(texto nome) {
+        Nome = nome;
+    }
+
+    vazio Segredo() {
+        imprima("segredo");
+    }
+}
+
+função vazio Principal() {
+    var p = nova Pessoa("João");
+    p.Segredo();
+}
+"#,
+    );
+    assert!(
+        erros.iter().any(|e| e.contains("Segredo") && e.contains("inacess")),
+        "Esperava erro de inacessibilidade para método privado, mas erros foram: {:?}",
+        erros
+    );
+}
+
+/// Chamar método PRIVADO de dentro da própria classe deve ser permitido.
+#[test]
+fn metodo_privado_acessivel_internamente() {
+    assert_typecheck_ok(
+        r#"
+classe Conta {
+    privado inteiro Saldo;
+
+    publico Conta(inteiro inicial) {
+        Saldo = inicial;
+    }
+
+    vazio AjustarSaldo(inteiro valor) {
+        Saldo = Saldo + valor;
+    }
+
+    publico vazio Depositar(inteiro valor) {
+        este.AjustarSaldo(valor);
+    }
+}
+
+função vazio Principal() {
+    var c = nova Conta(100);
+    c.Depositar(50);
+}
+"#,
+    );
+}
+
+/// Chamar método PROTEGIDO de código externo (não subclasse) deve gerar erro.
+#[test]
+fn metodo_protegido_inacessivel_externamente() {
+    let erros = typecheck_errors(
+        r#"
+classe Animal {
+    protegido vazio Respirar() {
+        imprima("respirando");
+    }
+}
+
+função vazio Principal() {
+    var a = novo Animal();
+    a.Respirar();
+}
+"#,
+    );
+    assert!(
+        erros.iter().any(|e| e.contains("Respirar") && e.contains("inacess")),
+        "Esperava erro de inacessibilidade para método protegido, mas erros foram: {:?}",
+        erros
+    );
+}
+
+/// Chamar método PROTEGIDO de dentro de uma subclasse deve ser permitido.
+#[test]
+fn metodo_protegido_acessivel_em_subclasse() {
+    assert_typecheck_ok(
+        r#"
+classe Animal {
+    protegido vazio Respirar() {
+        imprima("respirando");
+    }
+}
+
+classe Cachorro : Animal {
+    publico vazio Latir() {
+        este.Respirar();
+    }
+}
+
+função vazio Principal() {
+    var c = novo Cachorro();
+    c.Latir();
+}
+"#,
+    );
+}
+
+/// Chamar método PÚBLICO de fora da classe deve ser permitido.
+#[test]
+fn metodo_publico_acessivel_externamente() {
+    assert_typecheck_ok(
+        r#"
+classe Calculadora {
+    publico inteiro Somar(inteiro a, inteiro b) {
+        retorne a + b;
+    }
+}
+
+função vazio Principal() {
+    var calc = nova Calculadora();
+    var resultado = calc.Somar(2, 3);
+    imprima(resultado);
+}
+"#,
+    );
+}
+
+/// Acessar CAMPO privado de fora da classe deve gerar erro de compilação.
+#[test]
+fn campo_privado_inacessivel_externamente() {
+    let erros = typecheck_errors(
+        r#"
+classe ContaBancaria {
+    privado inteiro Saldo;
+
+    publico ContaBancaria(inteiro inicial) {
+        Saldo = inicial;
+    }
+}
+
+função vazio Principal() {
+    var conta = nova ContaBancaria(500);
+    imprima(conta.Saldo);
+}
+"#,
+    );
+    assert!(
+        erros.iter().any(|e| e.contains("Saldo") && e.contains("inacess")),
+        "Esperava erro de inacessibilidade para campo privado, mas erros foram: {:?}",
+        erros
+    );
+}
+
+/// Acessar método não-estático diretamente da classe deve gerar erro.
+#[test]
+fn metodo_instancia_chamado_na_classe_deve_falhar() {
+    let erros = typecheck_errors(
+        r#"
+classe Matematica {
+    publico inteiro Somar(inteiro a, inteiro b) {
+        retorne a + b;
+    }
+}
+
+função vazio Principal() {
+    imprima(Matematica.Somar(2, 3));
+}
+"#,
+    );
+    assert!(
+        erros.iter().any(|e| e.contains("instância") || e.contains("estático")),
+        "Esperava erro indicando que método de instância não pode ser chamado na classe, erros: {:?}",
+        erros
+    );
+}
+
+/// Acessar método estático a partir de uma instância deve gerar erro.
+#[test]
+fn metodo_estatico_chamado_na_instancia_deve_falhar() {
+    let erros = typecheck_errors(
+        r#"
+classe Matematica {
+    publico estática inteiro Multiplicar(inteiro a, inteiro b) {
+        retorne a * b;
+    }
+}
+
+função vazio Principal() {
+    var m = nova Matematica();
+    imprima(m.Multiplicar(2, 3));
+}
+"#,
+    );
+    assert!(
+        erros.iter().any(|e| e.contains("estático") || e.contains("instância")),
+        "Esperava erro indicando que método estático não pode ser chamado na instância, erros: {:?}",
+        erros
+    );
+}
+
+/// Atribuir a uma propriedade somente-leitura (sem 'definir') deve gerar erro.
+#[test]
+fn propriedade_somente_leitura_nao_pode_ser_atribuida() {
+    let erros = typecheck_errors(
+        r#"
+classe Pessoa {
+    publico texto Nome { obter; }
+
+    publico Pessoa(texto nome) {
+        Nome = nome;
+    }
+}
+
+função vazio Principal() {
+    var p = nova Pessoa("João");
+    p.Nome = "Maria"; // Erro esperado
+}
+"#,
+    );
+    assert!(
+        erros.iter().any(|e| e.contains("somente leitura") || e.contains("definir") || e.contains("read-only")),
+        "Esperava erro indicando que a propriedade é somente leitura, erros: {:?}",
+        erros
+    );
+}

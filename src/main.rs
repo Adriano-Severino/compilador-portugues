@@ -78,6 +78,7 @@ Uso: compilador <arquivo.pr>... [OPÇÕES]
 
 OPÇÕES:
   --target=<alvo>               Define o formato de saída da compilação.
+  --output-dir=<path>           Define o diretório de saída para os arquivos compilados.
   --stdlib-src-path=<path>      Especifica o caminho para o código-fonte da biblioteca padrão.
   --compilar-biblioteca=<path>  Compila uma biblioteca a partir do diretório especificado.
   --help                        Exibe esta mensagem de ajuda.
@@ -94,11 +95,9 @@ EXEMPLOS DE USO:
   # Compilar um programa (a biblioteca padrão é encontrada automaticamente)
   cargo run --bin compilador -- exemplos/meu_programa.pr --target=bytecode
 
-  # Compilar a biblioteca padrão para o formato .pbl
-  cargo run --bin compilador -- --compilar-biblioteca=../sistema-padrao --target=biblioteca
-
-  # Modo legado: gerar .pbc da biblioteca
+  # Compilar a biblioteca padrão (sempre gera .pbl + .ll)
   cargo run --bin compilador -- --compilar-biblioteca=../sistema-padrao
+  # O parâmetro --target é opcional e não afeta a geração da biblioteca
 "
     );
 }
@@ -175,13 +174,10 @@ fn find_stdlib_source_path(args: &[String]) -> Option<PathBuf> {
 
 fn compilar_biblioteca(
     caminho_lib: &Path,
-    formato_pbl: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let formato_nome = if formato_pbl { ".pbl" } else { ".pbc" };
     println!(
-        "=== Compilando Biblioteca: {} → {} ===",
-        caminho_lib.display(),
-        formato_nome
+        "=== Compilando Biblioteca: {} → .pbl + .ll ===",
+        caminho_lib.display()
     );
 
     let caminho_src = caminho_lib.join("src");
@@ -271,19 +267,19 @@ fn compilar_biblioteca(
 
     let mut gerador = codegen::GeradorCodigo::new()?;
 
-    if formato_pbl {
-        // Lê o nome e versão do Sistema.toml se disponível
-        let (nome_lib, versao_lib) = ler_metadados_biblioteca(caminho_lib);
-        let conteudo_pbl = gerador.gerar_pbl(&programa_final, &mut tc, &nome_lib, &versao_lib)?;
-        let caminho_saida = caminho_dist.join(format!("{}.pbl", nome_lib.to_lowercase()));
-        fs::write(&caminho_saida, conteudo_pbl)?;
-        println!("✅ Biblioteca .pbl gerada em: {}", caminho_saida.display());
-    } else {
-        let bytecode = gerador.gerar_bytecode_para_biblioteca(&programa_final, &mut tc)?;
-        let caminho_saida = caminho_dist.join("sistema.pbc");
-        fs::write(&caminho_saida, bytecode)?;
-        println!("✅ Biblioteca .pbc gerada em: {}", caminho_saida.display());
-    }
+    // Gera .pbl (formato moderno)
+    let (nome_lib, versao_lib) = ler_metadados_biblioteca(caminho_lib);
+    let conteudo_pbl = gerador.gerar_pbl(&programa_final, &mut tc, &nome_lib, &versao_lib)?;
+    let caminho_saida_pbl = caminho_dist.join(format!("{}.pbl", nome_lib.to_lowercase()));
+    fs::write(&caminho_saida_pbl, conteudo_pbl)?;
+    println!("✅ Biblioteca .pbl gerada em: {}", caminho_saida_pbl.display());
+
+    // Gera LLVM IR da biblioteca
+    let nome_arquivo_ll = nome_lib.to_lowercase();
+    let caminho_saida_ll = caminho_dist.join(&nome_arquivo_ll);
+    codegen::gerar_llvm_ir_para_biblioteca(&programa_final, &mut tc,
+        caminho_saida_ll.to_str().unwrap())?;
+    println!("✅ LLVM IR da biblioteca gerado em: {}", caminho_saida_ll.display());
 
     Ok(())
 }
@@ -426,11 +422,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .find(|arg| arg.starts_with("--compilar-biblioteca="))
     {
         let path = lib_path.split('=').nth(1).unwrap_or(".");
-        // Produz .pbl se --target=biblioteca (ou --target=pbl) for especificado; caso contrário .pbc legado
-        let formato_pbl = args
-            .iter()
-            .any(|a| a == "--target=biblioteca" || a == "--target=pbl");
-        return compilar_biblioteca(Path::new(path), formato_pbl);
+        // Sempre gera .pbl + .ll, independente de --target
+        return compilar_biblioteca(Path::new(path));
     }
 
     if args.len() <= 1 || args.contains(&"--help".to_string()) {
@@ -455,112 +448,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )));
     }
 
-    // Carrega a biblioteca padrão — strategy:
-    //   1. Procura um .pbl pré-compilado em sistema-padrao/dist/ (mais rápido, sem re-parse)
-    //   2. Procura um .pbc legado em sistema-padrao/dist/ (compatibilidade)
-    //   3. Cai de volta para parsear as fontes .pr (desenvolvimento)
-    // Equivalente ao mecanismo de Reference Assemblies do .NET.
-    let stdlib_info: Option<(
-        ast::Programa,
-        HashSet<String>,
-        Option<library_loader::Biblioteca>,
-    )> = if let Some(stdlib_path) = find_stdlib_source_path(&args) {
-        // Tenta carregar .pbl pré-compilado primeiro
-        let pbl_path = stdlib_path.join("dist").join("sistema.pbl");
-        let pbc_path = stdlib_path.join("dist").join("sistema.pbc");
-
-        if pbl_path.exists() {
-            println!(
-                "📦 Carregando biblioteca padrão pré-compilada: {}",
-                pbl_path.display()
-            );
-            match library_loader::carregar_biblioteca(&pbl_path) {
-                Ok(bib) => {
-                    // Extrai namespaces da biblioteca
-                    let mut ns_set: HashSet<String> = HashSet::new();
-                    for fqn in bib.simbolos.keys() {
-                        // Ex: "Sistema.IO.Arquivo" → "Sistema.IO", "Sistema"
-                        let partes: Vec<&str> = fqn.split('.').collect();
-                        let mut acum = String::new();
-                        for (i, p) in partes.iter().enumerate() {
-                            if i == partes.len() - 1 {
-                                break;
-                            } // ignora o nome da classe
-                            if !acum.is_empty() {
-                                acum.push('.');
-                            }
-                            acum.push_str(p);
-                            ns_set.insert(acum.clone());
-                        }
-                    }
-                    // Não carrega no tc_temp para evitar stack overflow
-                    // Apenas retorna os namespaces para o type_checker principal
-                    let prog_vazio = ast::Programa {
-                        usings: vec![],
-                        namespaces: vec![],
-                        declaracoes: vec![],
-                    };
-                    Some((prog_vazio, ns_set, Some(bib)))
-                }
-                Err(e) => {
-                    eprintln!("Aviso: Falha ao carregar .pbl: {}. Tentando .pbc...", e);
-                    None
-                }
-            }
-        } else if pbc_path.exists() {
-            println!(
-                "📦 Carregando biblioteca padrão .pbc: {}",
-                pbc_path.display()
-            );
-            match library_loader::carregar_biblioteca(&pbc_path) {
-                Ok(bib) => {
-                    let mut ns_set: HashSet<String> = HashSet::new();
-                    for fqn in bib.simbolos.keys() {
-                        let partes: Vec<&str> = fqn.split('.').collect();
-                        let mut acum = String::new();
-                        for (i, p) in partes.iter().enumerate() {
-                            if i == partes.len() - 1 {
-                                break;
-                            }
-                            if !acum.is_empty() {
-                                acum.push('.');
-                            }
-                            acum.push_str(p);
-                            ns_set.insert(acum.clone());
-                        }
-                    }
-                    let prog_vazio = ast::Programa {
-                        usings: vec![],
-                        namespaces: vec![],
-                        declaracoes: vec![],
-                    };
-                    Some((prog_vazio, ns_set, Some(bib)))
-                }
-                Err(e) => {
-                    eprintln!("Aviso: Falha ao carregar .pbc: {}. Carregando fontes...", e);
-                    None
-                }
-            }
-        } else {
-            None
-        }
-        .or_else(|| {
-            // Fallback: parseia os fontes .pr
-            match carregar_fontes_stdlib(&stdlib_path) {
-                Ok((prog, ns)) => Some((prog, ns, None)),
-                Err(e) => {
-                    eprintln!("Aviso: Falha ao carregar biblioteca padrão: {}", e);
-                    None
-                }
-            }
-        })
-    } else {
-        eprintln!(
-            "Aviso: Diretório do sistema-padrão não encontrado. Compilando sem biblioteca padrão."
-        );
-        None
-    };
-
+    // Determina o alvo de compilação (precisa estar antes de carregar stdlib)
     let target = args
         .iter()
         .find(|arg| arg.starts_with("--target="))
@@ -574,6 +462,86 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => TargetCompilacao::Universal,
         })
         .unwrap_or(TargetCompilacao::Universal);
+
+    // Determina o diretório de saída
+    let output_dir: Option<PathBuf> = args
+        .iter()
+        .find(|arg| arg.starts_with("--output-dir="))
+        .map(|arg| arg.split('=').nth(1).unwrap_or("build"))
+        .map(|s| PathBuf::from(s));
+
+    // Carrega a biblioteca padrão — strategy:
+    //   1. Para LLVM IR: sempre parseia fontes .pr (precisa da AST completa)
+    //   2. Para outros alvos: tenta .pbl pré-compilado, senão cai de volta para fontes
+    // Equivalente ao mecanismo de Reference Assemblies do .NET.
+    let stdlib_info: Option<(
+        ast::Programa,
+        HashSet<String>,
+        Option<library_loader::Biblioteca>,
+    )> = if let Some(stdlib_path) = find_stdlib_source_path(&args) {
+        // Para LLVM IR, sempre usamos fontes (precisa da AST completa)
+        if matches!(target, TargetCompilacao::LlvmIr) {
+            match carregar_fontes_stdlib(&stdlib_path) {
+                Ok((prog, ns)) => Some((prog, ns, None)),
+                Err(e) => {
+                    eprintln!("Aviso: Falha ao carregar biblioteca padrão: {}", e);
+                    None
+                }
+            }
+        } else {
+            // Para outros alvos, tenta .pbl pré-compilado
+            let pbl_path = stdlib_path.join("dist").join("sistema.pbl");
+
+            if pbl_path.exists() {
+                println!(
+                    "📦 Carregando biblioteca padrão pré-compilada (.pbl): {}",
+                    pbl_path.display()
+                );
+                match library_loader::carregar_biblioteca(&pbl_path) {
+                    Ok(bib) => {
+                        // Extrai namespaces da biblioteca
+                        let mut ns_set: HashSet<String> = HashSet::new();
+                        for fqn in bib.simbolos.keys() {
+                            // Ex: "Sistema.IO.Arquivo" → "Sistema.IO", "Sistema"
+                            let partes: Vec<&str> = fqn.split('.').collect();
+                            let mut acum = String::new();
+                            for (i, p) in partes.iter().enumerate() {
+                                if i == partes.len() - 1 {
+                                    break;
+                                } // ignora o nome da classe
+                                if !acum.is_empty() {
+                                    acum.push('.');
+                                }
+                                acum.push_str(p);
+                                ns_set.insert(acum.clone());
+                            }
+                        }
+                        // Não carrega no tc_temp para evitar stack overflow
+                        // Apenas retorna os namespaces para o type_checker principal
+                        let prog_vazio = ast::Programa {
+                            usings: vec![],
+                            namespaces: vec![],
+                            declaracoes: vec![],
+                        };
+                        Some((prog_vazio, ns_set, Some(bib)))
+                    }
+                    Err(e) => {
+                        eprintln!("Erro: Falha ao carregar .pbl: {}", e);
+                        None
+                    }
+                }
+            } else {
+                eprintln!("Erro: Biblioteca padrão não encontrada em: {}", pbl_path.display());
+                eprintln!("Execute o script de configuração do ambiente para gerar a biblioteca padrão.");
+                None
+            }
+        }
+    } else {
+        eprintln!(
+            "Aviso: Diretório do sistema-padrão não encontrado. Compilando sem biblioteca padrão."
+        );
+        None
+    };
 
     // --- Nova Lógica de Compilação em Fases ---
 
@@ -685,8 +653,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             type_checker.definir_biblioteca_externa(bib.clone());
         }
 
-        // Se não houver biblioteca externa, usa modo legado (carregar fontes .pr)
-        if bib_opt.is_none() {
+        // Para LLVM IR, sempre precisamos da AST completa (mesclar fontes)
+        // Para bytecode, podemos usar apenas metadados do .pbl
+        if matches!(target, TargetCompilacao::LlvmIr) || bib_opt.is_none() {
             // Modo fonte: mescla no AST (comportamento legado)
             for ns in programa_stdlib.namespaces {
                 if let Some(ns_existente) = programa_final
@@ -712,10 +681,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         type_checker.registrar_namespace_stdlib(ns);
     }
 
-    // NOTA: Não chamamos carregar_biblioteca no type_checker principal para evitar stack overflow
-    // O type_checker confia que tipos de namespaces stdlib são válidos (verificado em eh_classe_stdlib)
-    // Os metadados da biblioteca estão em stdlib_biblioteca e podem ser usados na geração de código se necessário
-
     if let Err(erros) = type_checker.verificar_programa(&programa_final) {
         for erro in erros {
             let erro_formatado = error::ErroCompilador::novo(
@@ -739,14 +704,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match target {
         TargetCompilacao::Universal => {
-            compilar_universal(&programa_final, &mut type_checker, nome_base)
+            compilar_universal(&programa_final, &mut type_checker, nome_base, output_dir.as_ref())
         }
         TargetCompilacao::LlvmIr => {
             compilar_para_llvm_ir(&programa_final, &mut type_checker, nome_base)?;
             println!("Compilando com clang...");
             let ll_path = format!("{}.ll", nome_base);
+            let stdlib_path = find_stdlib_source_path(&args);
             if let Err(error) =
-                codegen::compilar_llvm_ir_com_runtime(Path::new(&ll_path), nome_base)
+                codegen::compilar_llvm_ir_com_runtime(
+                    Path::new(&ll_path),
+                    nome_base,
+                    stdlib_path.as_deref()
+                )
             {
                 return Err(Box::new(error::ErroCompilador::novo(
                     error::TipoErro::Sintático,
@@ -759,7 +729,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         TargetCompilacao::CilBytecode => compilar_para_cil_bytecode(&programa_final, nome_base),
         TargetCompilacao::Console => compilar_para_console(&programa_final, nome_base),
         TargetCompilacao::Bytecode => {
-            compilar_para_bytecode(&programa_final, &mut type_checker, nome_base)
+            compilar_para_bytecode(&programa_final, &mut type_checker, nome_base, output_dir.as_ref())
         }
         TargetCompilacao::Biblioteca => {
             // Produz .pbl a partir dos arquivos de entrada (usa a própria lógica de biblioteca)
@@ -778,12 +748,13 @@ fn compilar_universal<'a>(
     ast: &'a ast::Programa,
     type_checker: &'a mut type_checker::VerificadorTipos<'a>,
     nome_base: &str,
+    output_dir: Option<&PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🌍 Iniciando Compilação Universal...");
     compilar_para_llvm_ir(ast, &mut type_checker.clone(), nome_base)?;
     compilar_para_cil_bytecode(ast, nome_base)?;
     compilar_para_console(ast, nome_base)?;
-    compilar_para_bytecode(ast, type_checker, nome_base)?;
+    compilar_para_bytecode(ast, type_checker, nome_base, output_dir)?;
     println!("\n🎉 Compilação Universal Concluída!");
     Ok(())
 }
@@ -858,23 +829,34 @@ fn compilar_para_bytecode<'a>(
     ast: &'a ast::Programa,
     type_checker: &'a mut type_checker::VerificadorTipos,
     nome_base: &str,
+    output_dir: Option<&PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Gerando Bytecode Customizado...");
+    
+    // Determine output directory - default to "build" if not specified
+    let default_build = PathBuf::from("build");
+    let build_dir = output_dir.unwrap_or(&default_build);
+    
+    // Create build directory if it doesn't exist
+    fs::create_dir_all(build_dir)?;
+    
+    let output_path = build_dir.join(format!("{}.pbc", nome_base));
+    
     let mut gerador = codegen::GeradorCodigo::new()?;
     gerador
-        .gerar_bytecode(ast, type_checker, nome_base)
+        .gerar_bytecode_para_arquivo(ast, type_checker, &output_path)
         .map_err(|e| Box::new(error::ErroCompilador::novo(
             error::TipoErro::Sintático,
             e,
         )))?;
-    println!("  ✓ {}.pbc gerado.", nome_base);
+    println!("  ✓ {}/{}.pbc gerado.", build_dir.display(), nome_base);
     println!(" ✓ Executando o bytecode...");
     println!("Você pode executar o bytecode usando o interpretador personalizado.");
     println!(
-        "Execute: cargo run --bin interpretador -- {}.pbc",
-        nome_base
+        "Execute: cargo run --bin interpretador -- {}/{}.pbc",
+        build_dir.display(), nome_base
     );
     println!("ou use o comando:");
-    println!("Para executar: interpretador {}.pbc", nome_base);
+    println!("Para executar: interpretador {}/{}.pbc", build_dir.display(), nome_base);
     Ok(())
 }

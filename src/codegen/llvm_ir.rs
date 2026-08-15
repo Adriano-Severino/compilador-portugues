@@ -118,6 +118,42 @@ impl<'a> LlvmGenerator<'a> {
         format!("{}{}", self.header, self.body)
     }
 
+    pub fn generate_for_library(&mut self) -> String {
+        // Coleta instâncias genéricas (Aplicado) usadas no programa
+        self.collect_applied_instantiations();
+        self.prepare_header();
+        // Constrói vtables antes de definir structs
+        self.build_all_vtables();
+        self.define_all_structs();
+        // Define tipos para interfaces como structs mínimas
+        self.define_all_interface_structs();
+        // Define tipos especializados para interfaces aplicadas
+        self.define_all_applied_interface_structs();
+        self.define_all_vtable_globals();
+        self.define_static_globals();
+
+        // Gera definições de funções e classes (mas SEM função main)
+        for declaracao in &self.programa.declaracoes {
+            match declaracao {
+                ast::Declaracao::DeclaracaoFuncao(func) => {
+                    self.generate_funcao(func, "");
+                }
+                ast::Declaracao::DeclaracaoClasse(class) => {
+                    self.generate_classe_definitions(class, "");
+                }
+                _ => {}
+            }
+        }
+        for ns in &self.programa.namespaces {
+            self.generate_namespace_definitions(ns);
+        }
+        
+        // Gera métodos para classes genéricas aplicadas (monomorfização)
+        self.generate_applied_class_methods();
+
+        format!("{}{}", self.header, self.body)
+    }
+
     // Nome canônico e estável para tipos em mangling
     fn mangle_tipo_simple(&self, t: &ast::Tipo) -> String {
         match t {
@@ -440,6 +476,243 @@ impl<'a> LlvmGenerator<'a> {
         let sanitized = mangled.replace('.', "_");
         let struct_def = format!("%class.{0} = type {{ {1} }}\n", sanitized, struct_body);
         self.header.push_str(&struct_def);
+    }
+    
+    fn generate_applied_class_methods(&mut self) {
+        // Para cada instanciação de classe genérica coletada, gera métodos especializados
+        let mut applied_items: Vec<(String, Vec<ast::Tipo>)> = Vec::new();
+        for (base_fqn, insts) in &self.applied_class_insts {
+            for args in insts {
+                applied_items.push((base_fqn.clone(), args.clone()));
+            }
+        }
+        
+        for (base_fqn, args) in applied_items {
+            let class_decl = match self.type_checker.classes.get(&base_fqn) {
+                Some(c) => *c,
+                None => continue,
+            };
+            
+            if class_decl.generic_params.is_empty() {
+                continue;
+            }
+            
+            let mangled_name = self.mangle_aplicado_name(&base_fqn, &args);
+            let old_namespace = self.namespace_path.clone();
+            let old_classe_atual = self.classe_atual.clone();
+            
+            // Configurar contexto para a classe aplicada
+            self.classe_atual = Some(mangled_name.clone());
+            self.namespace_path = self.get_namespace_from_fqn(&base_fqn);
+            
+            // Gerar métodos para a instanciação
+            for metodo in &class_decl.metodos {
+                if metodo.eh_abstrato {
+                    continue;
+                }
+                self.generate_applied_metodo(metodo, &mangled_name, &base_fqn, &args);
+            }
+            
+            // Gerar construtores para a instanciação
+            for construtor in &class_decl.construtores {
+                self.generate_applied_construtor(construtor, &mangled_name, &base_fqn, &args);
+            }
+            
+            // Restaurar contexto
+            self.namespace_path = old_namespace;
+            self.classe_atual = old_classe_atual;
+        }
+    }
+    
+    fn generate_applied_metodo(&mut self, metodo: &'a ast::MetodoClasse, mangled_name: &str, base_fqn: &str, args: &Vec<ast::Tipo>) {
+        // Monta substituição de tipos genéricos
+        let class_decl = match self.type_checker.classes.get(base_fqn) {
+            Some(c) => *c,
+            None => return,
+        };
+        
+        let mut subst: HashMap<String, ast::Tipo> = HashMap::new();
+        for (g, a) in class_decl.generic_params.iter().zip(args.iter()) {
+            subst.insert(g.clone(), a.clone());
+        }
+        
+        let namespace = self.get_namespace_from_fqn(base_fqn);
+        let nome_metodo = format!("{0}::{1}", mangled_name, metodo.nome).replace('.', "_");
+        
+        // Resolver tipo de retorno com substituição
+        let tipo_retorno_base = metodo.tipo_retorno.clone().unwrap_or(ast::Tipo::Vazio);
+        let tipo_retorno_subst = self.subst_generics_local(&tipo_retorno_base, &subst);
+        let tipo_retorno_resolvido = self.resolve_type(&tipo_retorno_subst, &namespace);
+        let tipo_retorno_llvm = self.map_type_to_llvm_arg(&tipo_retorno_resolvido);
+        
+        let mut params_llvm = Vec::new();
+        let self_type = self.map_type_to_llvm_ptr(&ast::Tipo::Classe(mangled_name.to_string()));
+        params_llvm.push(format!("{0} %param.self", self_type));
+        
+        for param in &metodo.parametros {
+            let tipo_param_subst = self.subst_generics_local(&param.tipo, &subst);
+            let tipo_param_resolvido = self.resolve_type(&tipo_param_subst, &namespace);
+            let tipo_param_llvm = self.map_type_to_llvm_arg(&tipo_param_resolvido);
+            params_llvm.push(format!("{0} %param.{1}", tipo_param_llvm, param.nome));
+        }
+        
+        let mut old_body = self.body.clone();
+        let old_vars = self.variables.clone();
+        self.body = String::new();
+        self.variables.clear();
+        
+        self.body.push_str(&format!(
+            "define {0} @\"{1}\"({2}) {{ \n",
+            tipo_retorno_llvm,
+            nome_metodo,
+            params_llvm.join(", ")
+        ));
+        self.body.push_str("entry:\n");
+        
+        let self_ptr_reg = "%var.self".to_string();
+        self.body.push_str(&format!(
+            "  {0} = alloca {1}, align 8\n",
+            self_ptr_reg, self_type
+        ));
+        self.body.push_str(&format!(
+            "  store {0} %param.self, {0}* {1}\n",
+            self_type, self_ptr_reg
+        ));
+        self.variables.insert(
+            "self".to_string(),
+            (self_ptr_reg, ast::Tipo::Classe(mangled_name.to_string())),
+        );
+        
+        // Configurar parâmetros com tipos substituídos
+        for (i, param) in metodo.parametros.iter().enumerate() {
+            let tipo_param_subst = self.subst_generics_local(&param.tipo, &subst);
+            let tipo_param_resolvido = self.resolve_type(&tipo_param_subst, &namespace);
+            let ptr_reg = format!("%var.{}", param.nome);
+            let llvm_type = self.map_type_to_llvm_storage(&tipo_param_resolvido);
+            let align = self.get_type_alignment(&tipo_param_resolvido);
+            
+            self.body.push_str(&format!(
+                "  {0} = alloca {1}, align {2}\n",
+                ptr_reg, llvm_type, align
+            ));
+            let param_reg = format!("%param.{}", param.nome);
+            self.body.push_str(&format!(
+                "  store {0} {1}, {0}* {2}\n",
+                llvm_type, param_reg, ptr_reg
+            ));
+            self.variables.insert(param.nome.clone(), (ptr_reg, tipo_param_resolvido));
+        }
+        
+        // Gerar corpo do método (reutilizando a lógica existente)
+        for comando in &metodo.corpo {
+            self.generate_comando(comando);
+        }
+        
+        let last_instruction = self.body.trim().lines().last().unwrap_or("").trim();
+        if !last_instruction.starts_with("ret") && !last_instruction.starts_with("unreachable") {
+            if metodo.tipo_retorno.is_none() || metodo.tipo_retorno == Some(ast::Tipo::Vazio) {
+                self.body.push_str("  ret void\n");
+            } else {
+                self.body.push_str(&format!(
+                    "  unreachable ; O método '{0}' deve ter um retorno\n",
+                    metodo.nome
+                ));
+            }
+        }
+        
+        self.body.push_str("}\n");
+        old_body.push_str(&self.body);
+        self.body = old_body;
+        self.variables = old_vars;
+    }
+    
+    fn generate_applied_construtor(&mut self, construtor: &'a ast::ConstrutorClasse, mangled_name: &str, base_fqn: &str, args: &Vec<ast::Tipo>) {
+        // Monta substituição de tipos genéricos
+        let class_decl = match self.type_checker.classes.get(base_fqn) {
+            Some(c) => *c,
+            None => return,
+        };
+        
+        let mut subst: HashMap<String, ast::Tipo> = HashMap::new();
+        for (g, a) in class_decl.generic_params.iter().zip(args.iter()) {
+            subst.insert(g.clone(), a.clone());
+        }
+        
+        let namespace = self.get_namespace_from_fqn(base_fqn);
+        let total_params = construtor.parametros.len();
+        let nome_ctor = format!("{0}::construtor${1}", mangled_name, total_params).replace('.', "_");
+        
+        let tipo_retorno_llvm = "void".to_string();
+        
+        let mut params_llvm = Vec::new();
+        let self_type = self.map_type_to_llvm_ptr(&ast::Tipo::Classe(mangled_name.to_string()));
+        params_llvm.push(format!("{0} %param.self", self_type));
+        
+        for param in &construtor.parametros {
+            let tipo_param_subst = self.subst_generics_local(&param.tipo, &subst);
+            let tipo_param_resolvido = self.resolve_type(&tipo_param_subst, &namespace);
+            let tipo_param_llvm = self.map_type_to_llvm_arg(&tipo_param_resolvido);
+            params_llvm.push(format!("{0} %param.{1}", tipo_param_llvm, param.nome));
+        }
+        
+        let mut old_body = self.body.clone();
+        let old_vars = self.variables.clone();
+        self.body = String::new();
+        self.variables.clear();
+        
+        self.body.push_str(&format!(
+            "define {0} @\"{1}\"({2}) {{ \n",
+            tipo_retorno_llvm,
+            nome_ctor,
+            params_llvm.join(", ")
+        ));
+        self.body.push_str("entry:\n");
+        
+        // Aloca e armazena self
+        let self_ptr_reg = "%var.self".to_string();
+        self.body.push_str(&format!(
+            "  {0} = alloca {1}, align 8\n",
+            self_ptr_reg, self_type
+        ));
+        self.body.push_str(&format!(
+            "  store {0} %param.self, {0}* {1}\n",
+            self_type, self_ptr_reg
+        ));
+        self.variables.insert(
+            "self".to_string(),
+            (self_ptr_reg, ast::Tipo::Classe(mangled_name.to_string())),
+        );
+        
+        // Configurar parâmetros com tipos substituídos
+        for param in &construtor.parametros {
+            let tipo_param_subst = self.subst_generics_local(&param.tipo, &subst);
+            let tipo_param_resolvido = self.resolve_type(&tipo_param_subst, &namespace);
+            let ptr_reg = format!("%var.{}", param.nome);
+            let llvm_type = self.map_type_to_llvm_storage(&tipo_param_resolvido);
+            let align = self.get_type_alignment(&tipo_param_resolvido);
+            
+            self.body.push_str(&format!(
+                "  {0} = alloca {1}, align {2}\n",
+                ptr_reg, llvm_type, align
+            ));
+            let param_reg = format!("%param.{}", param.nome);
+            self.body.push_str(&format!(
+                "  store {0} {1}, {0}* {2}\n",
+                llvm_type, param_reg, ptr_reg
+            ));
+            self.variables.insert(param.nome.clone(), (ptr_reg, tipo_param_resolvido));
+        }
+        
+        // Gerar corpo do construtor (reutilizando a lógica existente)
+        for comando in &construtor.corpo {
+            self.generate_comando(comando);
+        }
+        
+        self.body.push_str("  ret void\n");
+        self.body.push_str("}\n");
+        old_body.push_str(&self.body);
+        self.body = old_body;
+        self.variables = old_vars;
     }
 
     fn generate_namespace_definitions(&mut self, ns: &'a ast::DeclaracaoNamespace) {
@@ -1026,8 +1299,19 @@ impl<'a> LlvmGenerator<'a> {
                 // Caso instância
                 let (value_reg, value_type) = self.generate_expressao(val_expr);
                 let (obj_ptr_reg, obj_type) = self.generate_expressao(obj_expr);
-                let class_name = match obj_type {
-                    ast::Tipo::Classe(name) => name,
+                let class_name = match &obj_type {
+                    ast::Tipo::Classe(name) => name.clone(),
+                    ast::Tipo::Aplicado { ref nome, ref args } => {
+                        if args.is_empty() {
+                            // Tipo já resolvido e mangled por `resolve_type`, `nome` é o FQN mangled.
+                            nome.clone()
+                        } else {
+                           // Tipo não resolvido (ex: de um acesso a membro), precisa ser processado.
+                           let fqn_base = self.type_checker.resolver_nome_classe(nome, &self.namespace_path);
+                           let norm_args: Vec<ast::Tipo> = args.iter().map(|a| self.resolve_type(a, &self.namespace_path)).collect();
+                           self.mangle_aplicado_name(&fqn_base, &norm_args)
+                        }
+                    },
                     _ => panic!(
                         "Atribuição de propriedade em algo que não é uma classe: {:?}",
                         obj_type
@@ -1737,21 +2021,33 @@ impl<'a> LlvmGenerator<'a> {
                 (result_reg, result_tipo)
             }
             ast::Expressao::NovoObjeto(tipo, argumentos) => {
-                let nome_classe = match tipo {
-                    ast::Tipo::Classe(n) => n.clone(),
-                    ast::Tipo::Aplicado { nome, .. } => nome.clone(),
+                let (nome_classe, tipo_resultado, base_fqn) = match tipo {
+                    ast::Tipo::Classe(n) => (n.clone(), ast::Tipo::Classe(n.clone()), n.clone()),
+                    ast::Tipo::Aplicado { ref nome, ref args } => {
+                        let fqn_base = self.type_checker.resolver_nome_classe(nome, &self.namespace_path);
+                        let norm_args: Vec<ast::Tipo> = args.iter().map(|a| self.resolve_type(a, &self.namespace_path)).collect();
+                        let mangled_name = self.mangle_aplicado_name(&fqn_base, &norm_args);
+                        // Register this instantiation for struct generation
+                        self.applied_class_insts
+                            .entry(fqn_base.clone())
+                            .or_default()
+                            .push(norm_args.clone());
+                        // Generate the struct definition immediately in the header
+                        self.define_applied_struct(&fqn_base, &norm_args);
+                        (mangled_name.clone(), ast::Tipo::Aplicado { nome: mangled_name, args: norm_args.clone() }, fqn_base)
+                    },
                     _ => panic!("Instanciação de tipo não suportado em LLVM IR: {:?}", tipo),
                 };
                 let fqn = self
                     .type_checker
-                    .resolver_nome_classe(&nome_classe, &self.namespace_path);
+                    .resolver_nome_classe(&base_fqn, &self.namespace_path);
                 // Bloquear instanciação de classe abstrata
                 if let Some(class_decl) = self.type_checker.classes.get(&fqn) {
                     if class_decl.eh_abstrata {
                         panic!("Não é possível instanciar classe abstrata: {}", fqn);
                     }
                 }
-                let sanitized_fqn = fqn.replace('.', "_");
+                let sanitized_fqn = nome_classe.replace('.', "_");
                 let struct_type = format!("%class.{0}", sanitized_fqn);
                 let struct_ptr_type = format!("%class.{0}*", sanitized_fqn);
 
@@ -1759,6 +2055,12 @@ impl<'a> LlvmGenerator<'a> {
                 self.body.push_str(&format!(
                     "  {0} = getelementptr inbounds {1}, {2} null, i32 1\n",
                     size_temp_reg, struct_type, struct_ptr_type
+                ));
+
+                let size_reg = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = ptrtoint {1} {2} to i64\n",
+                    size_reg, struct_ptr_type, size_temp_reg
                 ));
 
                 let size_reg = self.get_unique_temp_name();
@@ -1786,6 +2088,7 @@ impl<'a> LlvmGenerator<'a> {
                 ));
 
                 // Inicializa o ponteiro de vtable no primeiro campo
+                // Use the base FQN for vtable (generic classes reuse base class vtable)
                 if let Some(vt_len) = self.vtables.get(&fqn).map(|v| v.len()) {
                     let vt_sym = self.vtable_global_symbol(&fqn);
                     // Obter ponteiro para o primeiro elemento da vtable (i8**)
@@ -1809,7 +2112,7 @@ impl<'a> LlvmGenerator<'a> {
                 }
 
                 // Chama um construtor: seleciona pelo número de argumentos (com suporte a defaults)
-                if let Some(class_decl) = self.type_checker.classes.get(&fqn) {
+                if let Some(class_decl) = self.type_checker.classes.get(&base_fqn) {
                     // Encontrar melhor construtor compatível
                     let mut escolhido: Option<&ast::ConstrutorClasse> = None;
                     let mut melhor_total = 0usize;
@@ -1839,13 +2142,13 @@ impl<'a> LlvmGenerator<'a> {
                                 if let Some(def_expr) = &param.valor_padrao {
                                     final_args.push(self.generate_expressao(def_expr));
                                 } else {
-                                    panic!("Argumento obrigatório ausente para parâmetro '{}' do construtor de '{}'", param.nome, fqn);
+                                    panic!("Argumento obrigatório ausente para parâmetro '{}' do construtor de '{}'", param.nome, base_fqn);
                                 }
                             }
                         }
 
                         // Chamada ao construtor LLVM
-                        let func_name = format!("{0}::construtor${1}", fqn, ctor.parametros.len())
+                        let func_name = format!("{0}::construtor${1}", nome_classe, ctor.parametros.len())
                             .replace('.', "_");
                         let mut args_llvm = Vec::new();
                         // self primeiro
@@ -1862,13 +2165,21 @@ impl<'a> LlvmGenerator<'a> {
                     }
                 }
 
-                (obj_ptr_reg, ast::Tipo::Classe(fqn))
+                (obj_ptr_reg, tipo_resultado)
             }
             ast::Expressao::NovoArray(tipo, _tamanho) => {
-                panic!(
-                    "NovoArray não implementado em LLVM IR para o tipo {:?}",
-                    tipo
-                );
+                // Para biblioteca padrão, criamos um array vazio como placeholder
+                // Em uma implementação completa, precisaria alocar dinamicamente
+                let array_reg = self.get_unique_temp_name();
+                self.body.push_str(&format!("  {} = call i8* @malloc(i64 16)\n", array_reg));
+                // Inicializa array vazio: tamanho = 0, ponteiro = null
+                let gep_len = self.get_unique_temp_name();
+                self.body.push_str(&format!("  {} = getelementptr inbounds [2 x i32], [2 x i32]* {}, i32 0, i32 0\n", gep_len, array_reg));
+                self.body.push_str(&format!("  store i32 0, i32* {}\n", gep_len));
+                let gep_data = self.get_unique_temp_name();
+                self.body.push_str(&format!("  {} = getelementptr inbounds [2 x i32], [2 x i32]* {}, i32 0, i32 1\n", gep_data, array_reg));
+                self.body.push_str(&format!("  store i8* null, i8** {}\n", gep_data));
+                (array_reg, ast::Tipo::Lista((*tipo).clone()))
             }
             ast::Expressao::ListaLiteral(items) => {
                 // Infere tipo de elemento a partir do primeiro item (assumindo homogêneo)
@@ -2218,19 +2529,28 @@ impl<'a> LlvmGenerator<'a> {
                     }
                 }
 
-                let class_name = match obj_type {
-                    ast::Tipo::Classe(ref name) => name.clone(),
+                let fqn_class_name = match &obj_type {
+                    ast::Tipo::Classe(ref name) => {
+                        self.type_checker.resolver_nome_classe(name, &self.namespace_path)
+                    }
+                    ast::Tipo::Aplicado { ref nome, ref args } => {
+                        if args.is_empty() {
+                            // Tipo já resolvido e mangled por `resolve_type`, `nome` é o FQN mangled.
+                            nome.clone()
+                        } else {
+                           // Tipo não resolvido (ex: de um acesso a membro), precisa ser processado.
+                           let fqn_base = self.type_checker.resolver_nome_classe(nome, &self.namespace_path);
+                           let norm_args: Vec<ast::Tipo> = args.iter().map(|a| self.resolve_type(a, &self.namespace_path)).collect();
+                           self.mangle_aplicado_name(&fqn_base, &norm_args)
+                        }
+                    },
                     _ => panic!(
                         "Chamada de método em algo que não é um objeto. metodo='{}' obj_type={:?} obj_expr={:?}",
                         metodo_nome,
-                        obj_type,
+                        &obj_type,
                         obj_expr
                     ),
                 };
-
-                let fqn_class_name = self
-                    .type_checker
-                    .resolver_nome_classe(&class_name, &self.namespace_path);
                 // Determina se é virtual (tem índice de vtable)
                 let vtable_idx_opt = self
                     .vtable_index
@@ -2238,11 +2558,24 @@ impl<'a> LlvmGenerator<'a> {
                     .and_then(|m| m.get(metodo_nome).cloned());
 
                 // Resolve tipo de retorno pela classe estática
+                // Para classes genéricas mangled, tenta base name se não encontrar no mangled
                 let resolved_method = self
                     .resolved_classes
                     .get(&fqn_class_name)
                     .and_then(|c| c.methods.get(metodo_nome))
                     .cloned()
+                    .or_else(|| {
+                        // Se não encontrou no nome mangled, tenta extrair o nome base
+                        if fqn_class_name.contains('$') {
+                            let base_name = fqn_class_name.split('$').next().unwrap_or(&fqn_class_name);
+                            self.resolved_classes
+                                .get(base_name)
+                                .and_then(|c| c.methods.get(metodo_nome))
+                                .cloned()
+                        } else {
+                            None
+                        }
+                    })
                     .unwrap_or_else(|| {
                         panic!(
                             "Método '{}' não encontrado em '{}'",
@@ -2396,10 +2729,49 @@ impl<'a> LlvmGenerator<'a> {
                             result_reg, pred, left_reg, right_reg
                         ));
                     }
+                    (ast::Tipo::Classe(_), ast::Tipo::Classe(_)) => {
+                        // Para comparação de classes/objetos, tratamos como comparação de ponteiros
+                        let pred = match op {
+                            ast::OperadorComparacao::Igual => "eq",
+                            ast::OperadorComparacao::Diferente => "ne",
+                            _ => "eq", // Para comparações de objeto, usamos igualdade por padrão
+                        };
+                        self.body.push_str(&format!(
+                            "  {0} = icmp {1} i8* {2}, {3}\n",
+                            result_reg, pred, left_reg, right_reg
+                        ));
+                    }
                     _ => panic!(
                         "Comparação não suportada entre tipos: {:?} e {:?}",
                         left_type, right_type
                     ),
+                }
+                (result_reg, ast::Tipo::Booleano)
+            }
+            ast::Expressao::Logica(op, esq, dir) => {
+                let (left_reg, left_type) = self.generate_expressao(esq);
+                let (right_reg, right_type) = self.generate_expressao(dir);
+                let result_reg = self.get_unique_temp_name();
+                
+                match op {
+                    ast::OperadorLogico::E => {
+                        // Para E (AND): primeiro extende ambos para i1, depois faz and
+                        let left_bool = self.ensure_bool(&left_reg, &left_type);
+                        let right_bool = self.ensure_bool(&right_reg, &right_type);
+                        self.body.push_str(&format!(
+                            "  {0} = and i1 {1}, {2}\n",
+                            result_reg, left_bool, right_bool
+                        ));
+                    }
+                    ast::OperadorLogico::Ou => {
+                        // Para OU (OR): primeiro extende ambos para i1, depois faz or
+                        let left_bool = self.ensure_bool(&left_reg, &left_type);
+                        let right_bool = self.ensure_bool(&right_reg, &right_type);
+                        self.body.push_str(&format!(
+                            "  {0} = or i1 {1}, {2}\n",
+                            result_reg, left_bool, right_bool
+                        ));
+                    }
                 }
                 (result_reg, ast::Tipo::Booleano)
             }
@@ -2475,8 +2847,19 @@ impl<'a> LlvmGenerator<'a> {
                     }
                 }
                 // obj_reg e obj_type já calculados acima
-                let class_name = match obj_type {
-                    ast::Tipo::Classe(name) => name,
+                let class_name = match &obj_type {
+                    ast::Tipo::Classe(name) => name.clone(),
+                    ast::Tipo::Aplicado { ref nome, ref args } => {
+                        if args.is_empty() {
+                            // Tipo já resolvido e mangled por `resolve_type`, `nome` é o FQN mangled.
+                            nome.clone()
+                        } else {
+                           // Tipo não resolvido (ex: de um acesso a membro), precisa ser processado.
+                           let fqn_base = self.type_checker.resolver_nome_classe(nome, &self.namespace_path);
+                           let norm_args: Vec<ast::Tipo> = args.iter().map(|a| self.resolve_type(a, &self.namespace_path)).collect();
+                           self.mangle_aplicado_name(&fqn_base, &norm_args)
+                        }
+                    },
                     _ => panic!(
                         "Acesso de membro em algo que não é uma classe: {:?}",
                         obj_type
@@ -2527,6 +2910,39 @@ impl<'a> LlvmGenerator<'a> {
                 _ => panic!("aguarde requer uma chamada async"),
             },
             ast::Expressao::Este => self.load_variable("self"),
+            ast::Expressao::Nulo => {
+                // Para nulo, retornamos um null pointer para o tipo genérico
+                let null_reg = self.get_unique_temp_name();
+                self.body.push_str(&format!("  {} = getelementptr i8, i8* null, i32 0\n", null_reg));
+                (null_reg, ast::Tipo::Classe("objeto".to_string()))
+            }
+            ast::Expressao::Unario(op, expr) => {
+                let (reg, tipo) = self.generate_expressao(expr);
+                let result_reg = self.get_unique_temp_name();
+                match op {
+                    ast::OperadorUnario::NegacaoNumerica => {
+                        match tipo {
+                            ast::Tipo::Inteiro => {
+                                self.body.push_str(&format!("  {} = sub i32 0, {}\n", result_reg, reg));
+                            }
+                            ast::Tipo::Flutuante => {
+                                let ensured = self.ensure_float(&reg, &tipo);
+                                self.body.push_str(&format!("  {} = fsub float -0.0, {}\n", result_reg, ensured));
+                            }
+                            ast::Tipo::Duplo => {
+                                let ensured = self.ensure_double(&reg, &tipo);
+                                self.body.push_str(&format!("  {} = fsub double -0.0, {}\n", result_reg, ensured));
+                            }
+                            _ => panic!("Negação numérica não suportada para tipo: {:?}", tipo),
+                        }
+                    }
+                    ast::OperadorUnario::NegacaoLogica => {
+                        let bool_reg = self.ensure_bool(&reg, &tipo);
+                        self.body.push_str(&format!("  {} = xor i1 {}, true\n", result_reg, bool_reg));
+                    }
+                }
+                (result_reg, tipo)
+            }
             _ => panic!("Expressão não suportada: {:?}", expr),
         }
     }
@@ -2731,6 +3147,25 @@ impl<'a> LlvmGenerator<'a> {
                 tmp
             }
             _ => panic!("Conversão para double não suportada: {:?}", tipo),
+        }
+    }
+
+    fn ensure_bool(&mut self, reg: &str, tipo: &ast::Tipo) -> String {
+        match tipo {
+            ast::Tipo::Booleano => reg.to_string(),
+            ast::Tipo::Inteiro => {
+                let tmp = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = icmp ne i32 {1}, 0\n", tmp, reg));
+                tmp
+            }
+            ast::Tipo::Enum(_) => {
+                let tmp = self.get_unique_temp_name();
+                self.body
+                    .push_str(&format!("  {0} = icmp ne i32 {1}, 0\n", tmp, reg));
+                tmp
+            }
+            _ => panic!("Conversão para bool não suportada: {:?}", tipo),
         }
     }
 
@@ -2975,6 +3410,27 @@ impl<'a> LlvmGenerator<'a> {
             }
             self.vtable_index.insert(fqn.clone(), index);
             self.vtables.insert(fqn, entries);
+        }
+        
+        // Criar vtables para classes genéricas aplicadas (monomorfização)
+        let mut applied_items: Vec<(String, Vec<ast::Tipo>)> = Vec::new();
+        for (base_fqn, insts) in &self.applied_class_insts {
+            for args in insts {
+                applied_items.push((base_fqn.clone(), args.clone()));
+            }
+        }
+        for (base_fqn, args) in applied_items {
+            let mangled_name = self.mangle_aplicado_name(&base_fqn, &args);
+            // Reusa a vtable da classe base para instanciações genéricas
+            // (os métodos têm a mesma assinatura, apenas os tipos de campo mudam)
+            if let Some(base_entries) = self.vtables.get(&base_fqn) {
+                let mut index = HashMap::new();
+                for (i, (name, _)) in base_entries.iter().enumerate() {
+                    index.insert(name.clone(), i);
+                }
+                self.vtable_index.insert(mangled_name.clone(), index);
+                self.vtables.insert(mangled_name, base_entries.clone());
+            }
         }
     }
 
