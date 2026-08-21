@@ -65,7 +65,13 @@ pub fn compilar_llvm_ir_com_runtime(
         }
     }
 
-    command.arg("-o").arg(nome_base);
+    let mut output_file = nome_base.to_string();
+    #[cfg(windows)]
+    if !output_file.ends_with(".exe") {
+        output_file.push_str(".exe");
+    }
+    
+    command.arg("-o").arg(&output_file);
 
     #[cfg(not(windows))]
     command.arg("-pthread");

@@ -438,9 +438,14 @@ impl<'a> VerificadorTipos<'a> {
                 if da.len() != oa.len() {
                     return false;
                 }
+                // Genéricos no C# são invariantes por padrão (salvo in/out, que não suportamos aqui)
+                // Portanto, T1 deve ser estritamente igual a T2, não apenas assignable.
                 da.iter()
                     .zip(oa.iter())
-                    .all(|(a1, a2)| self.tipos_compativeis_atribuicao(a1, a2))
+                    .all(|(a1, a2)| a1 == a2)
+            }
+            (Aplicado { nome: dn, args: da }, Classe(orig)) => {
+                self.class_implements_applied_interface(orig, dn, da)
             }
             (Lista(d), Lista(o)) => self.tipos_compativeis_atribuicao(d, o),
             (Classe(dest), Classe(orig)) => {
@@ -470,6 +475,51 @@ impl<'a> VerificadorTipos<'a> {
     fn class_implements_interface(&self, class_fqn: &str, iface_fqn: &str) -> bool {
         let ifaces = self.get_all_interfaces_of_class(class_fqn);
         ifaces.contains(iface_fqn)
+    }
+
+    fn class_implements_applied_interface(&self, class_fqn: &str, iface_fqn: &str, iface_args: &[Tipo]) -> bool {
+        let mut current = Some(class_fqn.to_string());
+        while let Some(cls) = current {
+            if let Some(ci) = self.resolved_classes.get(&cls) {
+                let ns = self.get_namespace_from_full_name(&ci.name);
+                // Check if any applied interface matches
+                // Wait, resolved_classes stores the interface name as string, it lost the generic arguments!
+                // Wait, I need to check the AST declaration instead.
+            }
+            if let Some(decl) = self.classes.get(&cls) {
+                let ns = self.get_namespace_from_full_name(&cls);
+                let mut potential_interfaces = decl.interfaces.clone();
+                if let Some(ref pai) = decl.classe_pai {
+                    potential_interfaces.push(pai.clone());
+                }
+
+                for i in &potential_interfaces {
+                    if let Tipo::Aplicado { nome, args } = i {
+                        let fqn = self.resolver_nome_interface(nome, &ns);
+                        if (fqn == iface_fqn || fqn.ends_with(iface_fqn)) && args.len() == iface_args.len() {
+                            let mut ok = true;
+                            for (a1, a2) in args.iter().zip(iface_args.iter()) {
+                                if a1 != a2 {
+                                    ok = false;
+                                    break;
+                                }
+                            }
+                            if ok {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                current = decl.classe_pai.as_ref().map(|p| match p {
+                    Tipo::Classe(n) => self.resolver_nome_classe(n, &ns),
+                    Tipo::Aplicado { nome, .. } => self.resolver_nome_classe(nome, &ns),
+                    _ => String::new(),
+                });
+            } else {
+                break;
+            }
+        }
+        false
     }
 
     fn get_all_interfaces_of_class(&self, class_fqn: &str) -> std::collections::HashSet<String> {

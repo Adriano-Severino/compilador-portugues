@@ -479,62 +479,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         HashSet<String>,
         Option<library_loader::Biblioteca>,
     )> = if let Some(stdlib_path) = find_stdlib_source_path(&args) {
-        // Para LLVM IR, sempre usamos fontes (precisa da AST completa)
-        if matches!(target, TargetCompilacao::LlvmIr) {
-            match carregar_fontes_stdlib(&stdlib_path) {
-                Ok((prog, ns)) => Some((prog, ns, None)),
+        // Tenta .pbl pré-compilado para todos os alvos.
+        // O gerador LLVM IR emitirá `declare` para as funções da stdlib carregadas via .pbl.
+        let pbl_path = stdlib_path.join("dist").join("sistema.pbl");
+
+        if pbl_path.exists() {
+            println!(
+                "📦 Carregando biblioteca padrão pré-compilada (.pbl): {}",
+                pbl_path.display()
+            );
+            match library_loader::carregar_biblioteca(&pbl_path) {
+                Ok(bib) => {
+                    // Extrai namespaces da biblioteca
+                    let mut ns_set: HashSet<String> = HashSet::new();
+                    for fqn in bib.simbolos.keys() {
+                        // Ex: "Sistema.IO.Arquivo" → "Sistema.IO", "Sistema"
+                        let partes: Vec<&str> = fqn.split('.').collect();
+                        let mut acum = String::new();
+                        for (i, p) in partes.iter().enumerate() {
+                            if i == partes.len() - 1 {
+                                break;
+                            } // ignora o nome da classe
+                            if !acum.is_empty() {
+                                acum.push('.');
+                            }
+                            acum.push_str(p);
+                            ns_set.insert(acum.clone());
+                        }
+                    }
+                    // Não carrega no tc_temp para evitar stack overflow
+                    // Apenas retorna os namespaces para o type_checker principal
+                    let prog_vazio = ast::Programa {
+                        usings: vec![],
+                        namespaces: vec![],
+                        declaracoes: vec![],
+                    };
+                    Some((prog_vazio, ns_set, Some(bib)))
+                }
                 Err(e) => {
-                    eprintln!("Aviso: Falha ao carregar biblioteca padrão: {}", e);
+                    eprintln!("Erro: Falha ao carregar .pbl: {}", e);
                     None
                 }
             }
         } else {
-            // Para outros alvos, tenta .pbl pré-compilado
-            let pbl_path = stdlib_path.join("dist").join("sistema.pbl");
-
-            if pbl_path.exists() {
-                println!(
-                    "📦 Carregando biblioteca padrão pré-compilada (.pbl): {}",
-                    pbl_path.display()
-                );
-                match library_loader::carregar_biblioteca(&pbl_path) {
-                    Ok(bib) => {
-                        // Extrai namespaces da biblioteca
-                        let mut ns_set: HashSet<String> = HashSet::new();
-                        for fqn in bib.simbolos.keys() {
-                            // Ex: "Sistema.IO.Arquivo" → "Sistema.IO", "Sistema"
-                            let partes: Vec<&str> = fqn.split('.').collect();
-                            let mut acum = String::new();
-                            for (i, p) in partes.iter().enumerate() {
-                                if i == partes.len() - 1 {
-                                    break;
-                                } // ignora o nome da classe
-                                if !acum.is_empty() {
-                                    acum.push('.');
-                                }
-                                acum.push_str(p);
-                                ns_set.insert(acum.clone());
-                            }
-                        }
-                        // Não carrega no tc_temp para evitar stack overflow
-                        // Apenas retorna os namespaces para o type_checker principal
-                        let prog_vazio = ast::Programa {
-                            usings: vec![],
-                            namespaces: vec![],
-                            declaracoes: vec![],
-                        };
-                        Some((prog_vazio, ns_set, Some(bib)))
-                    }
-                    Err(e) => {
-                        eprintln!("Erro: Falha ao carregar .pbl: {}", e);
-                        None
-                    }
-                }
-            } else {
-                eprintln!("Erro: Biblioteca padrão não encontrada em: {}", pbl_path.display());
-                eprintln!("Execute o script de configuração do ambiente para gerar a biblioteca padrão.");
-                None
-            }
+            eprintln!("Erro: Biblioteca padrão não encontrada em: {}", pbl_path.display());
+            eprintln!("Execute o script de configuração do ambiente para gerar a biblioteca padrão.");
+            None
         }
     } else {
         eprintln!(
@@ -653,9 +643,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             type_checker.definir_biblioteca_externa(bib.clone());
         }
 
-        // Para LLVM IR, sempre precisamos da AST completa (mesclar fontes)
-        // Para bytecode, podemos usar apenas metadados do .pbl
-        if matches!(target, TargetCompilacao::LlvmIr) || bib_opt.is_none() {
+        // Se não conseguiu carregar o .pbl, precisa mesclar a AST fonte para funcionar.
+        if bib_opt.is_none() {
             // Modo fonte: mescla no AST (comportamento legado)
             for ns in programa_stdlib.namespaces {
                 if let Some(ns_existente) = programa_final
@@ -771,7 +760,7 @@ fn compilar_para_llvm_ir<'a>(
     println!("  ✓ {}.ll gerado.", nome_base);
     #[cfg(windows)]
     println!(
-        "  Para compilar: clang {0}.ll <runtime>/async_runtime.c -o {0}",
+        "  Para compilar: clang {0}.ll <runtime>/async_runtime.c -o {0}.exe",
         nome_base
     );
     #[cfg(not(windows))]
@@ -780,6 +769,9 @@ fn compilar_para_llvm_ir<'a>(
         nome_base
     );
     println!("🎯 Pipeline LLVM: AST → LLVM IR → Código de Máquina");
+    #[cfg(windows)]
+    println!("Para executar: .\\{}.exe", nome_base);
+    #[cfg(not(windows))]
     println!("Para executar: ./{}", nome_base);
     Ok(())
 }

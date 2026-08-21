@@ -59,6 +59,7 @@ impl<'a> LlvmGenerator<'a> {
         // Coleta instâncias genéricas (Aplicado) usadas no programa, antes de gerar tipos
         self.collect_applied_instantiations();
         self.prepare_header();
+        self.declare_external_functions();
         // Constrói vtables antes de definir structs
         self.build_all_vtables();
         self.define_all_structs();
@@ -84,6 +85,9 @@ impl<'a> LlvmGenerator<'a> {
         for ns in &self.programa.namespaces {
             self.generate_namespace_definitions(ns);
         }
+
+        // Gera métodos para classes genéricas aplicadas (monomorfização)
+        self.generate_applied_class_methods();
 
         // Gera a função `main`: executa comandos globais e, se existir, chama `Principal`.
         let mut old_body = self.body.clone();
@@ -852,6 +856,10 @@ impl<'a> LlvmGenerator<'a> {
     }
 
     fn generate_classe_definitions(&mut self, class: &'a ast::DeclaracaoClasse, namespace: &str) {
+        if !class.generic_params.is_empty() {
+            return;
+        }
+
         let fqn = if namespace.is_empty() {
             class.nome.clone()
         } else {
@@ -2022,7 +2030,10 @@ impl<'a> LlvmGenerator<'a> {
             }
             ast::Expressao::NovoObjeto(tipo, argumentos) => {
                 let (nome_classe, tipo_resultado, base_fqn) = match tipo {
-                    ast::Tipo::Classe(n) => (n.clone(), ast::Tipo::Classe(n.clone()), n.clone()),
+                    ast::Tipo::Classe(n) => {
+                        let fqn = self.type_checker.resolver_nome_classe(n, &self.namespace_path);
+                        (fqn.clone(), ast::Tipo::Classe(fqn.clone()), fqn)
+                    },
                     ast::Tipo::Aplicado { ref nome, ref args } => {
                         let fqn_base = self.type_checker.resolver_nome_classe(nome, &self.namespace_path);
                         let norm_args: Vec<ast::Tipo> = args.iter().map(|a| self.resolve_type(a, &self.namespace_path)).collect();
@@ -2943,7 +2954,6 @@ impl<'a> LlvmGenerator<'a> {
                 }
                 (result_reg, tipo)
             }
-            _ => panic!("Expressão não suportada: {:?}", expr),
         }
     }
 
@@ -3468,12 +3478,148 @@ impl<'a> LlvmGenerator<'a> {
         result
     }
 
+    fn get_classes_in_ast(&self) -> std::collections::HashSet<String> {
+        let mut local_classes = std::collections::HashSet::new();
+        for ns in &self.programa.namespaces {
+            for decl in &ns.declaracoes {
+                if let ast::Declaracao::DeclaracaoClasse(c) = decl {
+                    local_classes.insert(format!("{}.{}", ns.nome, c.nome));
+                }
+            }
+        }
+        for decl in &self.programa.declaracoes {
+            if let ast::Declaracao::DeclaracaoClasse(c) = decl {
+                local_classes.insert(c.nome.clone());
+            }
+        }
+        local_classes
+    }
+
+    fn map_string_to_llvm_type(&self, tipo_str: &str) -> String {
+        let tipo_str_lower = tipo_str.to_lowercase();
+        match tipo_str_lower.as_str() {
+            "inteiro" | "i32" => "i32".to_string(),
+            "texto" | "i8*" => "i8*".to_string(),
+            "booleano" | "i1" => "i1".to_string(),
+            "flutuante" | "float" => "float".to_string(),
+            "duplo" | "double" => "double".to_string(),
+            "vazio" | "void" | "" => "void".to_string(),
+            _ => {
+                if tipo_str.ends_with("[]") {
+                    return "%array*".to_string();
+                }
+                let sanitized = tipo_str.replace('.', "_").replace('<', "$").replace('>', "").replace(", ", "_");
+                format!("%class.{}*", sanitized)
+            }
+        }
+    }
+
+    fn declare_external_functions(&mut self) {
+        if self.type_checker.biblioteca_externa.is_none() {
+            return;
+        }
+        let ext_lib = self.type_checker.biblioteca_externa.as_ref().unwrap();
+        let mut classes: Vec<_> = ext_lib.simbolos.values().filter_map(|s| {
+            if let crate::library_loader::LibSimbolo::Classe(c) = s {
+                Some(c)
+            } else {
+                None
+            }
+        }).collect();
+        classes.sort_by(|a, b| a.fqn.cmp(&b.fqn));
+
+        let mut undefined_structs = std::collections::HashSet::new();
+
+        for lib_classe in &classes {
+            let fqn = &lib_classe.fqn;
+            let sanitized = fqn.replace('.', "_");
+            let struct_name = format!("%class.{}", sanitized);
+            undefined_structs.insert(struct_name);
+
+            for m in lib_classe.metodos.values() {
+                let ret_llvm = self.map_string_to_llvm_type(&m.tipo_retorno);
+                if ret_llvm.starts_with("%class.") {
+                    undefined_structs.insert(ret_llvm.trim_end_matches('*').to_string());
+                }
+                for (p_tipo, _) in &m.parametros {
+                    let p_llvm = self.map_string_to_llvm_type(p_tipo);
+                    if p_llvm.starts_with("%class.") {
+                        undefined_structs.insert(p_llvm.trim_end_matches('*').to_string());
+                    }
+                }
+            }
+        }
+
+        let mut fqns_defined_locally = std::collections::HashSet::new();
+        for fqn in self.resolved_classes.keys() {
+            fqns_defined_locally.insert(format!("%class.{}", fqn.replace('.', "_")));
+        }
+        for (base_fqn, insts) in &self.applied_class_insts {
+            for args in insts {
+                let mangled = self.mangle_aplicado_name(base_fqn, args);
+                fqns_defined_locally.insert(format!("%class.{}", mangled));
+            }
+        }
+
+        let mut undefined_structs_vec: Vec<_> = undefined_structs.into_iter().collect();
+        undefined_structs_vec.sort();
+        for struct_name in undefined_structs_vec {
+            if !fqns_defined_locally.contains(&struct_name) {
+                self.header.push_str(&format!("{} = type opaque\n", struct_name));
+            }
+        }
+
+        for lib_classe in classes {
+            let fqn = &lib_classe.fqn;
+            let sanitized = fqn.replace('.', "_");
+            let struct_name = format!("%class.{}", sanitized);
+            let self_ptr_ty = format!("{}*", struct_name);
+
+            let mut metodos: Vec<_> = lib_classe.metodos.values().collect();
+            metodos.sort_by(|a, b| a.nome.cmp(&b.nome));
+
+            for m in metodos {
+                let fun_sym = format!("{}::{}", fqn, m.nome).replace('.', "_");
+                let ret_llvm = self.map_string_to_llvm_type(&m.tipo_retorno);
+
+                let mut params_llvm: Vec<String> = if m.eh_estatica {
+                    vec![]
+                } else {
+                    vec![self_ptr_ty.clone()]
+                };
+
+                for (p_tipo, _p_nome) in &m.parametros {
+                    params_llvm.push(self.map_string_to_llvm_type(p_tipo));
+                }
+
+                self.header.push_str(&format!(
+                    "declare {0} @\"{1}\"({2})\n",
+                    ret_llvm,
+                    fun_sym,
+                    params_llvm.join(", ")
+                ));
+            }
+        }
+    }
+
     fn define_all_vtable_globals(&mut self) {
         let mut fqns: Vec<_> = self.vtables.keys().cloned().collect();
         fqns.sort();
+        let local_classes = self.get_classes_in_ast();
         for fqn in fqns {
-            let entries = self.vtables.get(&fqn).cloned().unwrap_or_default();
+            let is_local = local_classes.contains(&fqn) || fqn.contains('$');
+            let is_external = !is_local && self.type_checker.biblioteca_externa.is_some();
             let sym = self.vtable_global_symbol(&fqn);
+
+            if is_external {
+                self.header.push_str(&format!(
+                    "{0} = external global [0 x i8*], align 8\n",
+                    sym
+                ));
+                continue;
+            }
+
+            let entries = self.vtables.get(&fqn).cloned().unwrap_or_default();
             let elems: Vec<String> = entries
                 .iter()
                 .map(|(metodo_nome, decl_cls)| {

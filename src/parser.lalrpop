@@ -545,6 +545,12 @@ ComandoOutro: ast::Comando = {
     "var" <nome:IdentificadorSimples> "=" <expr:Expressao> ";" => {
         ast::Comando::DeclaracaoVar(nome, expr)
     },
+    "var" <nome:IdentificadorSimples> ":" <tipo:Tipo> "=" <expr:Expressao> ";" => {
+        ast::Comando::DeclaracaoVariavel(tipo, nome, Some(expr))
+    },
+    "var" <nome:IdentificadorSimples> ":" <tipo:Tipo> ";" => {
+        ast::Comando::DeclaracaoVariavel(tipo, nome, None)
+    },
     <cmd:ComandosBasicos> => cmd,
 };
 

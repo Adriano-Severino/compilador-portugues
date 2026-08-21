@@ -15,14 +15,14 @@ classe Caixa<T> {
 }
 
 // Tipos aplicados em assinaturas de funções (suportado pelo parser atual)
-publico função usar_caixa(Caixa<inteiro> c) {
+publico função vazio usar_caixa(Caixa<inteiro> c) {
     imprima("assinatura com Caixa<inteiro>");
 }
 
-publico função usar_repo(IRepositorio<texto> repo) {
+publico função vazio usar_repo(IRepositorio<texto> repo) {
     imprima("assinatura com IRepositorio<texto>");
 }
 
-publico função Principal() {
+publico função vazio Principal() {
     imprima("Teste de genéricos: assinaturas OK");
 }
