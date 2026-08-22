@@ -71,8 +71,8 @@ pub enum Token {
     TEnumeracao,
     #[token("construtor")]
     TConstrutor,
-     // publico/público usa termos em português;
-    #[token("publico")] 
+    // publico/público usa termos em português;
+    #[token("publico")]
     #[token("público")]
     TPublico,
     #[token("privado")]

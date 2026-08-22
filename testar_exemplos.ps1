@@ -24,7 +24,7 @@ $compilou_multi = $LASTEXITCODE -eq 0
 
 if ($compilou_multi) {
     Write-Host "Compilou OK. Testando interpretador..."
-    & $interpretador "biblioteca.pbc"
+    & $interpretador "build\biblioteca.pbc"
     $executou_multi = $LASTEXITCODE -eq 0
     if ($executou_multi) {
         Write-Host "Interpretador OK.`n"
@@ -51,7 +51,8 @@ foreach ($exemplo in $exemplos) {
 
     if ($compilou) {
         Write-Host "Compilou OK. Testando interpretador..."
-        $bytecode = [System.IO.Path]::ChangeExtension($exemplo.Name, ".pbc")
+        $bytecode_name = [System.IO.Path]::ChangeExtension($exemplo.Name, ".pbc")
+        $bytecode = "build\$bytecode_name"
         & $interpretador $bytecode
         $executou = $LASTEXITCODE -eq 0
         if ($executou) {

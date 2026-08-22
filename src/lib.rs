@@ -108,7 +108,7 @@ impl<'a> CompiladorPortugues<'a> {
                     let erro_compilador = error::de_lalrpop_error_unit(
                         &err,
                         PathBuf::from("<codigo>"),
-                        &codigo_fonte
+                        &codigo_fonte,
                     );
                     return Err(erro_compilador.to_string());
                 }

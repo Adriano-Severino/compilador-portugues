@@ -43,7 +43,7 @@ path = "src/main.rs"
 
 [[bin]]
 name = "interpretador"
-path = "src/bin/interpretador.rs"
+path = "src/bin/interpretador/main.rs"
 
 # Perfis de compilação para a versão de release
 [profile.release]

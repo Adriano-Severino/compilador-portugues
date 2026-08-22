@@ -15,6 +15,11 @@ Criar uma linguagem de programação que seja:
 - Performática gerando código nativo via LLVM.
 - Educacional mas capaz de projetos reais.
 
+> **Documentação de Arquitetura**: 
+> Se você quer entender as entranhas do projeto, confira os documentos: 
+> - [Arquitetura do Compilador](docs/arquitetura-compilador.md)
+> - [Arquitetura do Interpretador](docs/arquitetura-interpretador.md)
+
 ### 🚀 Recursos Principais
 
 - Tipagem estática forte para maior segurança e detecção precoce de erros.
@@ -740,16 +745,19 @@ Atalhos rápidos (PowerShell):
 ```text
 compilador-portugues/
 ├── src/
-│   ├── main.rs           # Ponto de entrada do compilador
-│   ├── lexer.rs          # Analisador léxico (geração de tokens)
-│   ├── ast.rs            # Definições da Árvore Sintática Abstrata (AST)
-│   ├── parser.lalrpop    # Gramática da linguagem para LALRPOP (ou similar)
-│   └── codegen.rs        # Geração de código LLVM IR
-├── build_production.sh   # Script para compilação completa de programas .pr
-├── compile_fast.sh       # (Opcional) Script para compilação rápida durante desenvolvimento
-├── Cargo.toml            # Manifesto do projeto Rust
-├── build.rs              # (Opcional) Script de build do Cargo
-└── README.md             # Este arquivo
+│   ├── main.rs                 # Ponto de entrada do compilador
+│   ├── lexer.rs                # Analisador léxico (geração de tokens com Logos)
+│   ├── ast.rs                  # Definições da Árvore Sintática Abstrata (AST)
+│   ├── parser/grammar/         # Fragmentos da gramática (.lalrpop_part) concatenados via build.rs
+│   ├── type_checker/           # Motor de Análise Semântica modularizado
+│   ├── codegen/llvm_ir/        # Geração de código nativo (LLVM IR) modularizada
+│   ├── codegen/bytecode/       # Geração de Bytecode próprio (.pbl/.pbc) modularizada
+│   ├── ownership.rs            # Analisador de ciclos de vida e empréstimos
+│   └── bin/interpretador/      # Máquina Virtual (VM) para execução do Bytecode
+├── build.rs                    # Script para juntar LALRPOP e configs de compilação
+├── build_production.sh         # Script para compilação completa de programas .pr
+├── Cargo.toml                  # Manifesto do projeto Rust
+└── README.md                   # Este arquivo
 ```
 
 ## 🤝 Contribuindo

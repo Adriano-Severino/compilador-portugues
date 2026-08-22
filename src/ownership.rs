@@ -67,16 +67,30 @@ impl AnalisadorOwnership {
     }
 
     pub fn analisar_programa(&mut self, programa: &Programa) -> Result<Vec<String>, Vec<String>> {
-        //   Primeiro registrar todas as classes
+        // Primeiro registrar todas as classes globais e de namespaces
         for declaracao in &programa.declaracoes {
             if let Declaracao::DeclaracaoClasse(classe) = declaracao {
                 self.registrar_classe(classe.clone());
             }
         }
+        for ns in &programa.namespaces {
+            for declaracao in &ns.declaracoes {
+                if let Declaracao::DeclaracaoClasse(classe) = declaracao {
+                    self.registrar_classe(classe.clone());
+                }
+            }
+        }
 
-        // Analisar declarações
+        // Analisar declarações globais
         for declaracao in &programa.declaracoes {
             self.analisar_declaracao(declaracao);
+        }
+        
+        // Analisar declarações em namespaces
+        for ns in &programa.namespaces {
+            for declaracao in &ns.declaracoes {
+                self.analisar_declaracao(declaracao);
+            }
         }
 
         // Verificar variáveis não utilizadas
@@ -127,14 +141,23 @@ impl AnalisadorOwnership {
 
             Comando::DeclaracaoVar(nome, expr) => {
                 self.analisar_expressao(expr);
+                
+                let pode_ser_movido = match expr {
+                    Expressao::Inteiro(_) | Expressao::Booleano(_) | Expressao::Decimal(_) | 
+                    Expressao::FlutuanteLiteral(_) | Expressao::DuploLiteral(_) => false,
+                    Expressao::Aritmetica(_, _, _) => false,
+                    Expressao::Comparacao(_, _, _) | Expressao::Logica(_, _, _) => false,
+                    _ => true,
+                };
+                
                 self.variaveis.insert(
                     nome.clone(),
                     InfoOwnership {
                         status: StatusOwnership::Dono,
                         escopo_criacao: self.escopo_atual,
                         ultimo_uso: None,
-                        pode_ser_movido: true,
-                        eh_parametro_este: false, // ✅ NOVO
+                        pode_ser_movido,
+                        eh_parametro_este: false,
                     },
                 );
             }

@@ -449,7 +449,9 @@ função vazio Principal() {
 "#,
     );
     assert!(
-        erros.iter().any(|e| e.contains("Segredo") && e.contains("inacess")),
+        erros
+            .iter()
+            .any(|e| e.contains("Segredo") && e.contains("inacess")),
         "Esperava erro de inacessibilidade para método privado, mas erros foram: {:?}",
         erros
     );
@@ -502,7 +504,9 @@ função vazio Principal() {
 "#,
     );
     assert!(
-        erros.iter().any(|e| e.contains("Respirar") && e.contains("inacess")),
+        erros
+            .iter()
+            .any(|e| e.contains("Respirar") && e.contains("inacess")),
         "Esperava erro de inacessibilidade para método protegido, mas erros foram: {:?}",
         erros
     );
@@ -573,7 +577,9 @@ função vazio Principal() {
 "#,
     );
     assert!(
-        erros.iter().any(|e| e.contains("Saldo") && e.contains("inacess")),
+        erros
+            .iter()
+            .any(|e| e.contains("Saldo") && e.contains("inacess")),
         "Esperava erro de inacessibilidade para campo privado, mas erros foram: {:?}",
         erros
     );
@@ -646,7 +652,9 @@ função vazio Principal() {
 "#,
     );
     assert!(
-        erros.iter().any(|e| e.contains("somente leitura") || e.contains("definir") || e.contains("read-only")),
+        erros.iter().any(|e| e.contains("somente leitura")
+            || e.contains("definir")
+            || e.contains("read-only")),
         "Esperava erro indicando que a propriedade é somente leitura, erros: {:?}",
         erros
     );

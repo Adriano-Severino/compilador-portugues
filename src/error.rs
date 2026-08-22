@@ -89,7 +89,10 @@ impl ErroCompilador {
     }
 
     /// Extrai o contexto do código fonte baseado na posição do erro
-    pub fn extrair_contexto(codigo_fonte: &str, posicao: usize) -> (usize, usize, String, usize, usize) {
+    pub fn extrair_contexto(
+        codigo_fonte: &str,
+        posicao: usize,
+    ) -> (usize, usize, String, usize, usize) {
         let linhas: Vec<&str> = codigo_fonte.lines().collect();
         let mut posicao_atual = 0;
 
@@ -131,15 +134,15 @@ impl ErroCompilador {
                             "Em declarações de função, use a sintaxe: `funcao TipoRetorno Nome()`"
                                 .to_string(),
                         );
-                        sugestoes.push(
-                            "Se o retorno for vazio, use: `funcao vazio Nome()`".to_string(),
-                        );
+                        sugestoes
+                            .push("Se o retorno for vazio, use: `funcao vazio Nome()`".to_string());
                         sugestoes.push(
                             "Verifique se 'vazio' está sendo usado corretamente como tipo de retorno."
                                 .to_string(),
                         );
                     } else if token == ";" {
-                        sugestoes.push("Verifique se não há ponto e vírgula em excesso.".to_string());
+                        sugestoes
+                            .push("Verifique se não há ponto e vírgula em excesso.".to_string());
                     }
                 }
 
@@ -178,10 +181,7 @@ impl ErroCompilador {
             .and_then(|n| n.to_str())
             .unwrap_or("desconhecido");
 
-        output.push_str(&format!(
-            "{}: em '{}'\n",
-            tipo_formatado, arquivo_nome
-        ));
+        output.push_str(&format!("{}: em '{}'\n", tipo_formatado, arquivo_nome));
 
         // Localização
         if self.linha > 0 || self.coluna > 0 {
@@ -246,18 +246,15 @@ where
             let (linha, coluna, contexto, inicio, fim) =
                 ErroCompilador::extrair_contexto(codigo_fonte, *location);
 
-            ErroCompilador::novo(
-                TipoErro::Léxico,
-                "Token inválido encontrado".to_string(),
-            )
-            .com_arquivo(arquivo)
-            .com_localizacao(linha, coluna)
-            .com_contexto(contexto, inicio, fim)
-            .com_sugestoes(ErroCompilador::gerar_sugestoes_automaticas(
-                &TipoErro::Léxico,
-                None,
-                &[],
-            ))
+            ErroCompilador::novo(TipoErro::Léxico, "Token inválido encontrado".to_string())
+                .com_arquivo(arquivo)
+                .com_localizacao(linha, coluna)
+                .com_contexto(contexto, inicio, fim)
+                .com_sugestoes(ErroCompilador::gerar_sugestoes_automaticas(
+                    &TipoErro::Léxico,
+                    None,
+                    &[],
+                ))
         }
         lalrpop_util::ParseError::UnrecognizedToken {
             token: (inicio, token, _fim),
@@ -302,21 +299,15 @@ where
 
             let esperados: Vec<&str> = expected.iter().map(|s| s.as_str()).collect();
 
-            ErroCompilador::novo(
-                TipoErro::Sintático,
-                "Fim de arquivo inesperado".to_string(),
-            )
-            .com_arquivo(arquivo)
-            .com_localizacao(linha, coluna)
-            .com_contexto(contexto, inicio, fim)
-            .com_sugestao(format!("Esperava: {}", esperados.join(", ")))
+            ErroCompilador::novo(TipoErro::Sintático, "Fim de arquivo inesperado".to_string())
+                .com_arquivo(arquivo)
+                .com_localizacao(linha, coluna)
+                .com_contexto(contexto, inicio, fim)
+                .com_sugestao(format!("Esperava: {}", esperados.join(", ")))
         }
         lalrpop_util::ParseError::User { error } => {
-            ErroCompilador::novo(
-                TipoErro::Sintático,
-                format!("Erro do usuário: {}", error),
-            )
-            .com_arquivo(arquivo)
+            ErroCompilador::novo(TipoErro::Sintático, format!("Erro do usuário: {}", error))
+                .com_arquivo(arquivo)
         }
     }
 }
@@ -332,18 +323,15 @@ pub fn de_lalrpop_error_unit(
             let (linha, coluna, contexto, inicio, fim) =
                 ErroCompilador::extrair_contexto(codigo_fonte, *location);
 
-            ErroCompilador::novo(
-                TipoErro::Léxico,
-                "Token inválido encontrado".to_string(),
-            )
-            .com_arquivo(arquivo)
-            .com_localizacao(linha, coluna)
-            .com_contexto(contexto, inicio, fim)
-            .com_sugestoes(ErroCompilador::gerar_sugestoes_automaticas(
-                &TipoErro::Léxico,
-                None,
-                &[],
-            ))
+            ErroCompilador::novo(TipoErro::Léxico, "Token inválido encontrado".to_string())
+                .com_arquivo(arquivo)
+                .com_localizacao(linha, coluna)
+                .com_contexto(contexto, inicio, fim)
+                .com_sugestoes(ErroCompilador::gerar_sugestoes_automaticas(
+                    &TipoErro::Léxico,
+                    None,
+                    &[],
+                ))
         }
         lalrpop_util::ParseError::UnrecognizedToken {
             token: (inicio, token, _fim),
@@ -388,21 +376,15 @@ pub fn de_lalrpop_error_unit(
 
             let esperados: Vec<&str> = expected.iter().map(|s| s.as_str()).collect();
 
-            ErroCompilador::novo(
-                TipoErro::Sintático,
-                "Fim de arquivo inesperado".to_string(),
-            )
-            .com_arquivo(arquivo)
-            .com_localizacao(linha, coluna)
-            .com_contexto(contexto, inicio, fim)
-            .com_sugestao(format!("Esperava: {}", esperados.join(", ")))
+            ErroCompilador::novo(TipoErro::Sintático, "Fim de arquivo inesperado".to_string())
+                .com_arquivo(arquivo)
+                .com_localizacao(linha, coluna)
+                .com_contexto(contexto, inicio, fim)
+                .com_sugestao(format!("Esperava: {}", esperados.join(", ")))
         }
         lalrpop_util::ParseError::User { .. } => {
-            ErroCompilador::novo(
-                TipoErro::Sintático,
-                "Erro interno do parser".to_string(),
-            )
-            .com_arquivo(arquivo)
+            ErroCompilador::novo(TipoErro::Sintático, "Erro interno do parser".to_string())
+                .com_arquivo(arquivo)
         }
     }
 }
@@ -413,11 +395,8 @@ mod tests {
 
     #[test]
     fn test_criacao_erro_basico() {
-        let erro = ErroCompilador::novo(
-            TipoErro::Sintático,
-            "Teste de erro".to_string(),
-        );
-        
+        let erro = ErroCompilador::novo(TipoErro::Sintático, "Teste de erro".to_string());
+
         assert_eq!(erro.tipo, TipoErro::Sintático);
         assert_eq!(erro.mensagem, "Teste de erro");
     }
@@ -425,9 +404,8 @@ mod tests {
     #[test]
     fn test_extracao_contexto() {
         let codigo = "linha 1\nlinha 2\nlinha 3";
-        let (linha, coluna, contexto, inicio, fim) = 
-            ErroCompilador::extrair_contexto(codigo, 8); // posição na "linha 2"
-        
+        let (linha, coluna, contexto, inicio, fim) = ErroCompilador::extrair_contexto(codigo, 8); // posição na "linha 2"
+
         assert_eq!(linha, 2);
         assert!(contexto.contains("linha 2"));
     }
@@ -439,7 +417,7 @@ mod tests {
             Some("vazio"),
             &["identificador", "publico"],
         );
-        
+
         assert!(!sugestoes.is_empty());
         assert!(sugestoes.iter().any(|s| s.contains("funcao")));
     }

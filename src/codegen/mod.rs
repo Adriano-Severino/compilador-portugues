@@ -70,7 +70,7 @@ pub fn compilar_llvm_ir_com_runtime(
     if !output_file.ends_with(".exe") {
         output_file.push_str(".exe");
     }
-    
+
     command.arg("-o").arg(&output_file);
 
     #[cfg(not(windows))]

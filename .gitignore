@@ -484,3 +484,9 @@ $RECYCLE.BIN/
 Cargo.lock
 
 /target
+/src/parser.lalrpop
+*.ll
+*.il
+*.pbc
+*.pbl
+*.exe

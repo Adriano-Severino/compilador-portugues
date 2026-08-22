@@ -172,9 +172,7 @@ fn find_stdlib_source_path(args: &[String]) -> Option<PathBuf> {
     None
 }
 
-fn compilar_biblioteca(
-    caminho_lib: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn compilar_biblioteca(caminho_lib: &Path) -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "=== Compilando Biblioteca: {} → .pbl + .ll ===",
         caminho_lib.display()
@@ -210,16 +208,19 @@ fn compilar_biblioteca(
                 tok.map(|t| (span.start, t, span.end)).map_err(|_| {
                     Box::new(error::ErroCompilador::novo(
                         error::TipoErro::Léxico,
-                        format!("Erro léxico na biblioteca (arquivo {}): posição {}:{}", _caminho.display(), span.start, span.end)
+                        format!(
+                            "Erro léxico na biblioteca (arquivo {}): posição {}:{}",
+                            _caminho.display(),
+                            span.start,
+                            span.end
+                        ),
                     )) as Box<dyn std::error::Error>
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
         let mut ast = parser::ArquivoParser::new()
             .parse(tokens.iter().cloned())
-            .map_err(|e| {
-                Box::new(error::de_lalrpop_error_unit(&e, _caminho.clone(), codigo))
-            })?;
+            .map_err(|e| Box::new(error::de_lalrpop_error_unit(&e, _caminho.clone(), codigo)))?;
         crate::interpolacao::walk_programa(&mut ast, |e| {
             *e = crate::interpolacao::planificar_interpolada(e.clone());
         });
@@ -262,6 +263,17 @@ fn compilar_biblioteca(
         )));
     }
 
+    let mut analisador_ownership = crate::ownership::AnalisadorOwnership::new();
+    if let Err(erros_ownership) = analisador_ownership.analisar_programa(&programa_final) {
+        for erro in &erros_ownership {
+            eprintln!("Erro de Ownership na biblioteca: {}", erro);
+        }
+        return Err(Box::new(error::ErroCompilador::novo(
+            error::TipoErro::Semântico,
+            "Houve erros de ownership na compilação da biblioteca.".to_string(),
+        )));
+    }
+
     let caminho_dist = caminho_lib.join("dist");
     fs::create_dir_all(&caminho_dist)?;
 
@@ -272,14 +284,23 @@ fn compilar_biblioteca(
     let conteudo_pbl = gerador.gerar_pbl(&programa_final, &mut tc, &nome_lib, &versao_lib)?;
     let caminho_saida_pbl = caminho_dist.join(format!("{}.pbl", nome_lib.to_lowercase()));
     fs::write(&caminho_saida_pbl, conteudo_pbl)?;
-    println!("✅ Biblioteca .pbl gerada em: {}", caminho_saida_pbl.display());
+    println!(
+        "✅ Biblioteca .pbl gerada em: {}",
+        caminho_saida_pbl.display()
+    );
 
     // Gera LLVM IR da biblioteca
     let nome_arquivo_ll = nome_lib.to_lowercase();
     let caminho_saida_ll = caminho_dist.join(&nome_arquivo_ll);
-    codegen::gerar_llvm_ir_para_biblioteca(&programa_final, &mut tc,
-        caminho_saida_ll.to_str().unwrap())?;
-    println!("✅ LLVM IR da biblioteca gerado em: {}", caminho_saida_ll.display());
+    codegen::gerar_llvm_ir_para_biblioteca(
+        &programa_final,
+        &mut tc,
+        caminho_saida_ll.to_str().unwrap(),
+    )?;
+    println!(
+        "✅ LLVM IR da biblioteca gerado em: {}",
+        caminho_saida_ll.display()
+    );
 
     Ok(())
 }
@@ -522,8 +543,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         } else {
-            eprintln!("Erro: Biblioteca padrão não encontrada em: {}", pbl_path.display());
-            eprintln!("Execute o script de configuração do ambiente para gerar a biblioteca padrão.");
+            eprintln!(
+                "Erro: Biblioteca padrão não encontrada em: {}",
+                pbl_path.display()
+            );
+            eprintln!(
+                "Execute o script de configuração do ambiente para gerar a biblioteca padrão."
+            );
             None
         }
     } else {
@@ -680,6 +706,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )));
     }
 
+    // Fase 4.5: Análise de Ownership
+    let mut analisador_ownership = crate::ownership::AnalisadorOwnership::new();
+    if let Err(erros_ownership) = analisador_ownership.analisar_programa(&programa_final) {
+        for erro in erros_ownership {
+            eprintln!("Erro de Ownership: {}", erro);
+        }
+        return Err(Box::new(error::ErroCompilador::novo(
+            error::TipoErro::Semântico,
+            "Houve erros de ownership.".to_string(),
+        )));
+    }
+
     // Fase 5: Geração de código.
     let nome_base = caminhos_arquivos
         .last() // Usa o último arquivo (provavelmente o principal do usuário) para o nome base
@@ -688,21 +726,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or("saida");
 
     match target {
-        TargetCompilacao::Universal => {
-            compilar_universal(&programa_final, &mut type_checker, nome_base, output_dir.as_ref())
-        }
+        TargetCompilacao::Universal => compilar_universal(
+            &programa_final,
+            &mut type_checker,
+            nome_base,
+            output_dir.as_ref(),
+        ),
         TargetCompilacao::LlvmIr => {
             compilar_para_llvm_ir(&programa_final, &mut type_checker, nome_base)?;
             println!("Compilando com clang...");
             let ll_path = format!("{}.ll", nome_base);
             let stdlib_path = find_stdlib_source_path(&args);
-            if let Err(error) =
-                codegen::compilar_llvm_ir_com_runtime(
-                    Path::new(&ll_path),
-                    nome_base,
-                    stdlib_path.as_deref()
-                )
-            {
+            if let Err(error) = codegen::compilar_llvm_ir_com_runtime(
+                Path::new(&ll_path),
+                nome_base,
+                stdlib_path.as_deref(),
+            ) {
                 return Err(Box::new(error::ErroCompilador::novo(
                     error::TipoErro::Sintático,
                     error,
@@ -713,9 +752,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         TargetCompilacao::CilBytecode => compilar_para_cil_bytecode(&programa_final, nome_base),
         TargetCompilacao::Console => compilar_para_console(&programa_final, nome_base),
-        TargetCompilacao::Bytecode => {
-            compilar_para_bytecode(&programa_final, &mut type_checker, nome_base, output_dir.as_ref())
-        }
+        TargetCompilacao::Bytecode => compilar_para_bytecode(
+            &programa_final,
+            &mut type_checker,
+            nome_base,
+            output_dir.as_ref(),
+        ),
         TargetCompilacao::Biblioteca => {
             // Produz .pbl a partir dos arquivos de entrada (usa a própria lógica de biblioteca)
             let mut gerador = codegen::GeradorCodigo::new()?;
@@ -784,10 +826,7 @@ fn compilar_para_cil_bytecode<'a>(
     let gerador = codegen::GeradorCodigo::new()?;
     gerador
         .gerar_cil(ast, nome_base)
-        .map_err(|e| Box::new(error::ErroCompilador::novo(
-            error::TipoErro::Sintático,
-            e,
-        )))?;
+        .map_err(|e| Box::new(error::ErroCompilador::novo(error::TipoErro::Sintático, e)))?;
     println!("  ✓ {}.il gerado.", nome_base);
     println!(
         "  Para compilar: ilasm {0}.il /exe /output:{0}.exe",
@@ -804,10 +843,7 @@ fn compilar_para_console<'a>(
     let gerador = codegen::GeradorCodigo::new()?;
     gerador
         .gerar_console(ast, nome_base)
-        .map_err(|e| Box::new(error::ErroCompilador::novo(
-            error::TipoErro::Sintático,
-            e,
-        )))?;
+        .map_err(|e| Box::new(error::ErroCompilador::novo(error::TipoErro::Sintático, e)))?;
     println!("  ✓ Projeto '{}' gerado.", nome_base);
     println!("  Para executar: cd {} && dotnet run", nome_base);
     Ok(())
@@ -820,31 +856,33 @@ fn compilar_para_bytecode<'a>(
     output_dir: Option<&PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Gerando Bytecode Customizado...");
-    
+
     // Determine output directory - default to "build" if not specified
     let default_build = PathBuf::from("build");
     let build_dir = output_dir.unwrap_or(&default_build);
-    
+
     // Create build directory if it doesn't exist
     fs::create_dir_all(build_dir)?;
-    
+
     let output_path = build_dir.join(format!("{}.pbc", nome_base));
-    
+
     let mut gerador = codegen::GeradorCodigo::new()?;
     gerador
         .gerar_bytecode_para_arquivo(ast, type_checker, &output_path)
-        .map_err(|e| Box::new(error::ErroCompilador::novo(
-            error::TipoErro::Sintático,
-            e,
-        )))?;
+        .map_err(|e| Box::new(error::ErroCompilador::novo(error::TipoErro::Sintático, e)))?;
     println!("  ✓ {}/{}.pbc gerado.", build_dir.display(), nome_base);
     println!(" ✓ Executando o bytecode...");
     println!("Você pode executar o bytecode usando o interpretador personalizado.");
     println!(
         "Execute: cargo run --bin interpretador -- {}/{}.pbc",
-        build_dir.display(), nome_base
+        build_dir.display(),
+        nome_base
     );
     println!("ou use o comando:");
-    println!("Para executar: interpretador {}/{}.pbc", build_dir.display(), nome_base);
+    println!(
+        "Para executar: interpretador {}/{}.pbc",
+        build_dir.display(),
+        nome_base
+    );
     Ok(())
 }
