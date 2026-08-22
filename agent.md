@@ -49,6 +49,9 @@ Recursos ja documentados ou presentes no codigo:
 - enumerações com `enumeração`;
 - parametros opcionais em estilo C#;
 - strings interpoladas com `$"texto {expressao}"`;
+- suporte a atributos customizados como `[NomeAtributo("Valor")]`;
+- funcoes assincronas usando `assíncrona` e operacao de espera com `aguarde`;
+- funcoes curtas (arrow functions) usando sintaxe `=>`;
 - genericos em classes, interfaces, metodos e funcoes em evolucao;
 - verificacao de tipos, resolucao de classes, interfaces e enums;
 - compilacao de multiplos arquivos em uma AST unificada;

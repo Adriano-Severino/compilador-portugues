@@ -56,12 +56,12 @@ fn assert_example_ok(pr: &str, expected_out: Option<&str>) {
         .file_stem()
         .and_then(|s| s.to_str())
         .expect("invalid file name");
-    let pbc = root.join(format!("{}.pbc", stem));
+    let pbc = root.join("build").join(format!("{}.pbc", stem));
     // Alguns exemplos precisam de múltiplos arquivos (e.g., programa_principal depende de biblioteca.pr)
     let (c_code, _c_out, c_err) = if pr.ends_with("programa_principal.pr") {
         run_compiler(&[
-            "exemplos/programa_principal.pr",
             "exemplos/biblioteca.pr",
+            "exemplos/programa_principal.pr",
             "--target=bytecode",
         ])
     } else {
@@ -89,11 +89,11 @@ fn assert_example_ok_auto(pr: &str) {
         .file_stem()
         .and_then(|s| s.to_str())
         .expect("invalid file name");
-    let pbc = root.join(format!("{}.pbc", stem));
+    let pbc = root.join("build").join(format!("{}.pbc", stem));
     let (c_code, _c_out, c_err) = if pr.ends_with("programa_principal.pr") {
         run_compiler(&[
-            "exemplos/programa_principal.pr",
             "exemplos/biblioteca.pr",
+            "exemplos/programa_principal.pr",
             "--target=bytecode",
         ])
     } else {
@@ -321,7 +321,7 @@ publico função vazio Principal() {
     assert_eq!(c_code, 0, "compiler failed: {}", c_err);
 
     // O bytecode é gerado na raiz com o nome do stem
-    let pbc = repo_root().join("array_interface_min.pbc");
+    let pbc = repo_root().join("build").join("array_interface_min.pbc");
     assert!(pbc.exists(), "pbc nao gerado: {}", pbc.display());
 
     let (i_code, i_out, i_err) = run_interpreter(&pbc);

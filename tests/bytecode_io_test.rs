@@ -23,8 +23,8 @@ fn teste_io_bytecode_execucao() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    // Executa interpretador no .pbc gerado (teste_io.pbc na raiz)
-    let pbc = root.join("teste_io.pbc");
+    // Executa interpretador no .pbc gerado (build/teste_io.pbc)
+    let pbc = root.join("build").join("teste_io.pbc");
     assert!(pbc.exists(), "bytecode não encontrado: {:?}", pbc);
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_interpretador"))

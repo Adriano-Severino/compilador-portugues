@@ -10,15 +10,22 @@ grammar<'input>();
 // Temporariamente limitado a 1 atributo para resolver conflito LALRPOP
 #[inline]
 Attribute: ast::Attribute = {
-    // Atributo com argumentos
-    "@" <name:IdentificadorSimples> "(" <args:ListaArgumentos> ")" => ast::Attribute {
-        name,
-        arguments: args,
-    },
-    // Atributo sem argumentos
-    "@" <name:IdentificadorSimples> => ast::Attribute {
-        name,
-        arguments: vec![],
+    "[" <args:ListaElementosArray> "]" => {
+        // Um atributo sempre deve ter ao menos um elemento (o nome).
+        // Se houver mais elementos, por enquanto ignoramos ou tratamos como erro.
+        // O formato esperado: [Nativo("...")] -> args[0] será Chamada(Nativo, ["..."])
+        if args.len() == 1 {
+            let expr = args.into_iter().next().unwrap();
+            match expr {
+                ast::Expressao::Identificador(name) => ast::Attribute { name, arguments: vec![] },
+                ast::Expressao::Chamada(name, func_args) => {
+                    ast::Attribute { name, arguments: func_args }
+                },
+                _ => ast::Attribute { name: "AtributoInvalido".to_string(), arguments: vec![] }
+            }
+        } else {
+            ast::Attribute { name: "AtributoInvalido".to_string(), arguments: vec![] }
+        }
     }
 };
 
@@ -1014,7 +1021,6 @@ extern {
         "}" => Token::TChaveDir,
         "[" => Token::TColcheteEsq,
         "]" => Token::TColcheteDir,
-        "@" => Token::TArroba,
         ";" => Token::TPontoVirgula,
         "," => Token::TVirgula,
         "=>" => Token::TSeta,

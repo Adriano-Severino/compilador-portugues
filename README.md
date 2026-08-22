@@ -25,6 +25,8 @@ Criar uma linguagem de programação que seja:
 - Expressões aritméticas, lógicas e de comparação (`+`, `-`, `*`, `/`, `%`, `>`, `<`, `==`, `!=`, `&&`, `||`, `!`).
 - Propriedades, métodos, funções, construtores com parâmetros opcionais (igual C#).
 - Strings interpoladas com `$"texto {variavel}"`.
+- Suporte a concorrência moderna via `assíncrona` e `aguarde` (Promises/Tasks).
+- Atributos de metadados como `[NomeAtributo("Valor")]` para reflexão e anotações.
 - Compilação multiplataforma para código nativo executável.
 - Comentários com `//` (linha) e `/* */` (bloco).
 

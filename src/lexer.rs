@@ -14,8 +14,7 @@ pub enum Token {
     TColcheteEsq,
     #[token("]")]
     TColcheteDir,
-    #[token("@")]
-    TArroba,
+
     #[token("enquanto")]
     TEnquanto,
     #[token("para")]
@@ -242,20 +241,22 @@ mod tests {
 
         assert_eq!(lex.next(), Some(Ok(Token::TClasse)));
         assert_eq!(lex.next(), Some(Ok(Token::TConstrutor)));
-        assert_eq!(lex.next(), Some(Ok(Token::TPublico)));
+        assert_eq!(lex.next(), Some(Ok(Token::TPublico))); // publico
+        assert_eq!(lex.next(), Some(Ok(Token::TPublico))); // público
         assert_eq!(lex.next(), Some(Ok(Token::TPrivado)));
         assert_eq!(lex.next(), Some(Ok(Token::TProtegido)));
         assert_eq!(lex.next(), Some(Ok(Token::TBase)));
         assert_eq!(lex.next(), Some(Ok(Token::TRedefinivel)));
         assert_eq!(lex.next(), Some(Ok(Token::TSobrescreve)));
         assert_eq!(lex.next(), Some(Ok(Token::TAbstrato)));
-        assert_eq!(lex.next(), Some(Ok(Token::TNovo)));
+        assert_eq!(lex.next(), Some(Ok(Token::TNovo))); // novo
+        assert_eq!(lex.next(), Some(Ok(Token::TNovo))); // nova
         assert_eq!(lex.next(), Some(Ok(Token::TEste)));
         assert_eq!(lex.next(), Some(Ok(Token::TObter)));
         assert_eq!(lex.next(), Some(Ok(Token::TDefinir)));
         assert_eq!(lex.next(), Some(Ok(Token::TEstatica)));
+        assert_eq!(lex.next(), None);
     }
-
     #[test]
     fn test_decimal_type() {
         let codigo = "decimal flutuante duplo";

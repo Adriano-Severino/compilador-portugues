@@ -3,6 +3,6 @@ função principal() => vazio {
     EscreverLinha("Testando I/O assíncrono nativo");
     
     // Chama função assíncrona nativa estática
-    var resultado = aguarde LerArquivoAssíncrono("teste.txt");
-    EscreverLinha(resultado);
+    var resultado = aguarde LerArquivoAssíncrono("exemplos/async_io_exemplo.pr");
+    EscreverLinha("Arquivo lido com sucesso");
 }

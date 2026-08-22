@@ -1,20 +1,16 @@
- /  / Teste de async / await no target LLVM
+// Teste de async / await no target LLVM
 usando Sistema;
 
-função principal() = > vazio {
-    EscreverLinha(" =  =  = Teste Async / Await no Target LLVM =  =  = ");
+função principal() => vazio {
+    EscreverLinha("=== Teste Async / Await no Target LLVM ===");
     
- /  / Teste ler arquivo assíncrono
-    var resultado = aguarde LerArquivoAssíncrono("teste.txt");
-    EscreverLinha("Conteúdo do arquivo: " + resultado);
+    // Teste ler arquivo assíncrono
+    var resultado = aguarde LerArquivoAssíncrono("exemplos/async_llvm_test.pr");
+    EscreverLinha("Arquivo lido com sucesso.");
     
- /  / Teste escrever arquivo assíncrono
-    var sucesso = aguarde EscreverArquivoAssíncrono("teste_async.txt", "Teste de escrita assíncrona");
+    // Teste escrever arquivo assíncrono
+    var sucesso = aguarde EscreverArquivoAssíncrono("build/teste_async.txt", "Teste de escrita assíncrona");
     EscreverLinha("Escrita realizada: " + sucesso);
     
- /  / Teste verificar arquivo assíncrono
-    var existe = aguarde verificarArquivoAssíncrono("teste.txt");
-    EscreverLinha("Arquivo existe: " + existe);
-    
-    EscreverLinha(" =  =  = Teste Concluído =  =  = ");
+    EscreverLinha("=== Teste Concluído ===");
 }

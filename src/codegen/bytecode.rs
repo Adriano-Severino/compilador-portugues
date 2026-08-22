@@ -1163,11 +1163,25 @@ impl<'a> BytecodeGenerator<'a> {
                 let nome_completo = self
                     .type_checker
                     .resolver_nome_funcao(nome_funcao, &self.namespace_path);
-                self.bytecode_instructions.push(format!(
-                    "CALL_FUNCTION {} {}",
-                    nome_completo,
-                    argumentos.len()
-                ));
+                    
+                if nome_completo == "LerArquivoAssíncrono" || nome_completo == "EscreverArquivoAssíncrono" {
+                    self.bytecode_instructions.push(format!(
+                        "CALL_STATIC_NATIVE_ASYNC {} {}",
+                        nome_completo,
+                        argumentos.len()
+                    ));
+                } else {
+                    self.bytecode_instructions.push(format!(
+                        "CALL_FUNCTION {} {}",
+                        nome_completo,
+                        argumentos.len()
+                    ));
+                }
+            }
+
+            ast::Expressao::Aguarde(expr) => {
+                self.generate_expressao(expr);
+                self.bytecode_instructions.push("AWAIT".to_string());
             }
 
             ast::Expressao::ChamadaMetodo(objeto_expr, nome_metodo, argumentos) => {
