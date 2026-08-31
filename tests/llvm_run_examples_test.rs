@@ -66,11 +66,17 @@ fn run_exemplos_llvm_end_to_end() {
         let pr_path = root.join(&pr_rel);
         let stem = pr_path.file_stem().and_then(|s| s.to_str()).unwrap();
 
+        let content = fs::read_to_string(&pr_path).unwrap_or_default();
+        if content.contains("usando Sistema;") || content.contains("usando Sistema.") {
+            // Exemplos que usam a biblioteca externa do sistema (sistema-padrao) requerem pipeline de stdlib
+            continue;
+        }
+
         // programa_principal precisa de biblioteca.pr também
         let args: Vec<String> = if pr_rel.ends_with("programa_principal.pr") {
             vec![
-                "exemplos/programa_principal.pr".into(),
                 "exemplos/biblioteca.pr".into(),
+                "exemplos/programa_principal.pr".into(),
                 "--target=llvm-ir".into(),
             ]
         } else {

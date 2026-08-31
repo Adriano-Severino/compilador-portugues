@@ -68,12 +68,14 @@ enum TargetCompilacao {
     Biblioteca,
 }
 
-//Função para exibir a ajuda
 fn exibir_ajuda() {
+    println!(
+        "Compilador da Linguagem em Português (v{})
+=============================================",
+        env!("CARGO_PKG_VERSION")
+    );
     print!(
-        "Compilador da Linguagem em Português (v0.1.2)
-=============================================
-
+        "
 Uso: compilador <arquivo.pr>... [OPÇÕES]
 
 OPÇÕES:

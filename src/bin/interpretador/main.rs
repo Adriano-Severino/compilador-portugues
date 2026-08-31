@@ -43,12 +43,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    if args.len() < 2 {
-        eprintln!(
-            "Uso: {} <arquivo.pbc> [--executar-funcao <nome_da_funcao_completo>]",
-            args[0]
+    if args.len() < 2 || args[1] == "--help" || args[1] == "-h" {
+        println!(
+            "Interpretador de Bytecode Por do Sol (v{})\n\
+            Uso: {} <arquivo.pbc> [OPÇÕES]\n\n\
+            OPÇÕES:\n  \
+              --executar-funcao <nome>  Executa uma função específica\n  \
+              --debug                   Inicia no modo depurador interativo\n  \
+              --jit                     Ativa compilação JIT (se compilado com suporte)\n  \
+              --help, -h                Exibe esta mensagem de ajuda\n  \
+              --version, -v             Exibe a versão",
+            env!("CARGO_PKG_VERSION"),
+            args.get(0).map(|s| s.as_str()).unwrap_or("interpretador")
         );
-        return Err("Argumento inválido".into());
+        if args.len() < 2 {
+            return Err("Argumento inválido".into());
+        }
+        return Ok(());
+    }
+
+    if args[1] == "--version" || args[1] == "-v" {
+        println!("interpretador v{}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
     }
 
     let caminho_arquivo = &args[1];

@@ -122,8 +122,8 @@ impl AnalisadorOwnership {
                 }
 
                 let pode_ser_movido = match tipo {
-                    Tipo::Inteiro | Tipo::Booleano => false, // Tipos primitivos são copiados
-                    Tipo::Texto | Tipo::Classe(_) | Tipo::Lista(_) => true, // Tipos complexos podem ser movidos
+                    Tipo::Inteiro | Tipo::Booleano | Tipo::Texto | Tipo::Flutuante | Tipo::Duplo | Tipo::Decimal => false, // Tipos de valor são copiados
+                    Tipo::Classe(_) | Tipo::Lista(_) => true, // Tipos complexos podem ser movidos
                     _ => false,
                 };
 
@@ -143,7 +143,7 @@ impl AnalisadorOwnership {
                 self.analisar_expressao(expr);
                 
                 let pode_ser_movido = match expr {
-                    Expressao::Inteiro(_) | Expressao::Booleano(_) | Expressao::Decimal(_) | 
+                    Expressao::Inteiro(_) | Expressao::Booleano(_) | Expressao::Texto(_) | Expressao::Decimal(_) | 
                     Expressao::FlutuanteLiteral(_) | Expressao::DuploLiteral(_) => false,
                     Expressao::Aritmetica(_, _, _) => false,
                     Expressao::Comparacao(_, _, _) | Expressao::Logica(_, _, _) => false,
@@ -163,7 +163,7 @@ impl AnalisadorOwnership {
             }
 
             Comando::Atribuicao(nome, expr) => {
-                self.analisar_movimento_em_expressao(expr);
+                self.analisar_expressao(expr);
                 if let Some(info) = self.variaveis.get_mut(nome) {
                     info.ultimo_uso = Some(self.instrucao_atual);
                     info.status = StatusOwnership::Dono; // Reassinação restaura ownership
@@ -365,13 +365,13 @@ impl AnalisadorOwnership {
                 }
 
                 for arg in args {
-                    self.analisar_movimento_em_expressao(arg);
+                    self.analisar_expressao(arg);
                 }
             }
 
             Expressao::Chamada(_, args) => {
                 for arg in args {
-                    self.analisar_movimento_em_expressao(arg);
+                    self.analisar_expressao(arg);
                 }
             }
 
@@ -471,7 +471,7 @@ impl AnalisadorOwnership {
         // Parâmetros são donos de seus valores
         for param in &funcao.parametros {
             let pode_ser_movido = match param.tipo {
-                Tipo::Inteiro | Tipo::Booleano => false,
+                Tipo::Inteiro | Tipo::Booleano | Tipo::Texto | Tipo::Flutuante | Tipo::Duplo | Tipo::Decimal => false,
                 _ => true,
             };
 
@@ -537,7 +537,7 @@ impl AnalisadorOwnership {
         // Parâmetros
         for param in &metodo.parametros {
             let pode_ser_movido = match param.tipo {
-                Tipo::Inteiro | Tipo::Booleano => false,
+                Tipo::Inteiro | Tipo::Booleano | Tipo::Texto | Tipo::Flutuante | Tipo::Duplo | Tipo::Decimal => false,
                 _ => true,
             };
 
@@ -584,7 +584,7 @@ impl AnalisadorOwnership {
         // Parâmetros
         for param in &construtor.parametros {
             let pode_ser_movido = match param.tipo {
-                Tipo::Inteiro | Tipo::Booleano => false,
+                Tipo::Inteiro | Tipo::Booleano | Tipo::Texto | Tipo::Flutuante | Tipo::Duplo | Tipo::Decimal => false,
                 _ => true,
             };
 

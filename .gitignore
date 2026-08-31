@@ -490,3 +490,5 @@ Cargo.lock
 *.pbc
 *.pbl
 *.exe
+/dist/
+/build/

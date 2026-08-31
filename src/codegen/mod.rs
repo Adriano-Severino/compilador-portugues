@@ -73,6 +73,9 @@ pub fn compilar_llvm_ir_com_runtime(
 
     command.arg("-o").arg(&output_file);
 
+    #[cfg(windows)]
+    command.arg("-llegacy_stdio_definitions");
+
     #[cfg(not(windows))]
     command.arg("-pthread");
 

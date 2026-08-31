@@ -1,0 +1,189 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versao para release (ex: 0.1.5)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: build-${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+            bin_ext: .exe
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+            bin_ext: ""
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive: tar.gz
+            bin_ext: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm build-essential
+
+      - name: Run Tests
+        run: cargo test
+
+      - name: Build Release Binaries
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package Artifacts (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $ver = "${{ github.event.inputs.version }}"
+          if (-not $ver) { $ver = "${{ github.ref_name }}" -replace "^v", "" }
+          if (-not $ver) { $ver = "0.1.0" }
+          
+          $pkgName = "compilador-portugues-v$ver-windows-x64"
+          $pkgDir = "dist/$pkgName"
+          New-Item -ItemType Directory -Force -Path (Join-Path $pkgDir "bin") | Out-Null
+          
+          Copy-Item "target/${{ matrix.target }}/release/compilador.exe" -Destination (Join-Path $pkgDir "bin/compilador.exe") -Force
+          Copy-Item "target/${{ matrix.target }}/release/interpretador.exe" -Destination (Join-Path $pkgDir "bin/interpretador.exe") -Force
+          
+          foreach ($doc in @("README.md", "LICENSE", "agent.md")) {
+            if (Test-Path -LiteralPath $doc) {
+              Copy-Item -LiteralPath $doc -Destination (Join-Path $pkgDir $doc) -Force
+            }
+          }
+          
+          $zipPath = "dist/$pkgName.zip"
+          Compress-Archive -Path "$pkgDir/*" -DestinationPath $zipPath -CompressionLevel Optimal -Force
+          
+          $hash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $pkgName.zip" | Out-File -FilePath "dist/$pkgName.zip.sha256" -Encoding ascii
+
+      - name: Package Artifacts (Linux / macOS)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          ver="${{ github.event.inputs.version }}"
+          if [ -z "$ver" ]; then
+            ver="${{ github.ref_name }}"
+            ver="${ver#v}"
+          fi
+          if [ -z "$ver" ]; then
+            ver="0.1.0"
+          fi
+          
+          os_name="linux"
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            os_name="macos"
+          fi
+          
+          pkgName="compilador-portugues-v${ver}-${os_name}-x64"
+          pkgDir="dist/${pkgName}"
+          mkdir -p "${pkgDir}/bin"
+          
+          cp "target/${{ matrix.target }}/release/compilador" "${pkgDir}/bin/"
+          cp "target/${{ matrix.target }}/release/interpretador" "${pkgDir}/bin/"
+          
+          for doc in README.md LICENSE agent.md; do
+            if [ -f "$doc" ]; then
+              cp "$doc" "${pkgDir}/"
+            fi
+          done
+          
+          tar -czf "dist/${pkgName}.tar.gz" -C dist "${pkgName}"
+          
+          cd dist
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${pkgName}.tar.gz" > "${pkgName}.tar.gz.sha256"
+          else
+            shasum -a 256 "${pkgName}.tar.gz" > "${pkgName}.tar.gz.sha256"
+          fi
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.target }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+            dist/*.sha256
+
+  publish:
+    name: Publish GitHub Release
+    needs: [build-release]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Generate Consolidated SHA256SUMS.txt
+        working-directory: release-artifacts
+        run: |
+          cat *.sha256 > SHA256SUMS.txt || true
+          ls -la
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-artifacts/*.zip
+            release-artifacts/*.tar.gz
+            release-artifacts/*.sha256
+            release-artifacts/SHA256SUMS.txt
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            ## Compilador da Linguagem Por do Sol ${{ github.ref_name }}
+            
+            Compilador e interpretador nativos da linguagem de programação Por do Sol com semântica moderna inspirada em C#.
+            
+            ### Binários incluídos:
+            - `compilador`: Compilador para LLVM IR (.ll), CIL (.il), projeto .NET Console e Bytecode (.pbc/.pbl)
+            - `interpretador`: Máquina virtual de bytecode e depurador interativo
+            
+            ### Downloads
+            
+            - **Windows (x64):** `compilador-portugues-${{ github.ref_name }}-windows-x64.zip`
+            - **Linux (x64):** `compilador-portugues-${{ github.ref_name }}-linux-x64.tar.gz`
+            - **macOS (x64):** `compilador-portugues-${{ github.ref_name }}-macos-x64.tar.gz`
+            
+            ### Verificação de Integridade
+            Os arquivos `.sha256` e o `SHA256SUMS.txt` estão disponíveis para verificação de integridade dos pacotes.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

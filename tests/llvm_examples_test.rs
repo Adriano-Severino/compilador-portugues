@@ -127,8 +127,12 @@ fn test_llvm_ir_all_exemplos() {
     // Descobre todos os exemplos e gera LLVM IR para cada um.
     for pr in list_exemplos() {
         eprintln!("[llvm-test] Gerando IR para: {}", pr);
+        let content = fs::read_to_string(repo_root().join(&pr)).unwrap_or_default();
         if pr.ends_with("programa_principal.pr") {
             assert_llvm_ir_generates(&["exemplos/programa_principal.pr", "exemplos/biblioteca.pr"]);
+        } else if content.contains("usando Sistema;") || content.contains("usando Sistema.") {
+            // Exemplos que utilizam a biblioteca externa do sistema (sistema-padrao) necessitam de .pbl compilado
+            continue;
         } else {
             assert_llvm_ir_generates(&[pr.as_str()]);
         }

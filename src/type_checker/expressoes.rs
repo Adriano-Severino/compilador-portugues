@@ -660,6 +660,10 @@ impl<'a> VerificadorTipos<'a> {
                         return (Generico(n.clone()), vec![]);
                     }
                 }
+                let fqn_enum = self.resolver_nome_enum(n, namespace_atual);
+                if self.enums.contains_key(&fqn_enum) {
+                    return (Enum(fqn_enum), vec![]);
+                }
                 (
                     Classe(self.resolver_nome_classe(n, namespace_atual)),
                     vec![],
