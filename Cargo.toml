@@ -1,6 +1,6 @@
 [package]
 name = "compilador-portugues"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = ["Adriano Xavier"]
 description = "Compilador para linguagem de programação em português com múltiplos backends (LLVM, CIL, Console, Bytecode)"
