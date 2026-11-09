@@ -87,8 +87,8 @@ OPÇÕES:
 
 ALVOS DISPONÍVEIS:
   llvm-ir            Gera código intermediário LLVM (.ll), otimizado para compilação nativa com Clang.
-  cil-bytecode       Gera código CIL (.il) para a plataforma .NET.
-  console            Cria um projeto de console .NET completo, pronto para ser executado com 'dotnet run'.
+  cil-bytecode, dotnet Gera código intermediário CIL (.il) e compila diretamente para código de máquina .NET.
+  console            Alias para dotnet / CIL (gera diretamente .il e compila para código de máquina).
   bytecode           Gera um arquivo de bytecode customizado (.pbc) para ser executado pelo interpretador.
   biblioteca         Gera um arquivo de Biblioteca Por do Sol (.pbl) com manifesto de API e bytecode.
   universal          Executa a compilação para todos os alvos disponíveis (padrão).
@@ -478,8 +478,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|arg| arg.split('=').nth(1).unwrap_or("universal"))
         .map(|t| match t {
             "llvm-ir" => TargetCompilacao::LlvmIr,
-            "cil-bytecode" => TargetCompilacao::CilBytecode,
-            "console" => TargetCompilacao::Console,
+            "cil-bytecode" | "cil" | "dotnet" => TargetCompilacao::CilBytecode,
+            "console" => TargetCompilacao::CilBytecode,
             "bytecode" => TargetCompilacao::Bytecode,
             "biblioteca" | "pbl" => TargetCompilacao::Biblioteca,
             _ => TargetCompilacao::Universal,
@@ -752,8 +752,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Executável gerado: ./{}", nome_base);
             Ok(())
         }
-        TargetCompilacao::CilBytecode => compilar_para_cil_bytecode(&programa_final, nome_base),
-        TargetCompilacao::Console => compilar_para_console(&programa_final, nome_base),
+        TargetCompilacao::CilBytecode | TargetCompilacao::Console => {
+            compilar_para_cil_bytecode(
+                &programa_final,
+                &type_checker,
+                nome_base,
+                output_dir.as_ref(),
+            )
+        }
         TargetCompilacao::Bytecode => compilar_para_bytecode(
             &programa_final,
             &mut type_checker,
@@ -781,8 +787,7 @@ fn compilar_universal<'a>(
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🌍 Iniciando Compilação Universal...");
     compilar_para_llvm_ir(ast, &mut type_checker.clone(), nome_base)?;
-    compilar_para_cil_bytecode(ast, nome_base)?;
-    compilar_para_console(ast, nome_base)?;
+    compilar_para_cil_bytecode(ast, type_checker, nome_base, output_dir)?;
     compilar_para_bytecode(ast, type_checker, nome_base, output_dir)?;
     println!("\n🎉 Compilação Universal Concluída!");
     Ok(())
@@ -822,33 +827,49 @@ fn compilar_para_llvm_ir<'a>(
 
 fn compilar_para_cil_bytecode<'a>(
     ast: &'a ast::Programa,
+    type_checker: &'a type_checker::VerificadorTipos<'a>,
     nome_base: &str,
+    output_dir: Option<&PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("🔧 Gerando CIL Bytecode...");
+    println!("🔧 Gerando CIL Bytecode (.il)...");
     let gerador = codegen::GeradorCodigo::new()?;
-    gerador
-        .gerar_cil(ast, nome_base)
+    let il_path_str = gerador
+        .gerar_cil(ast, type_checker, nome_base)
         .map_err(|e| Box::new(error::ErroCompilador::novo(error::TipoErro::Sintático, e)))?;
-    println!("  ✓ {}.il gerado.", nome_base);
-    println!(
-        "  Para compilar: ilasm {0}.il /exe /output:{0}.exe",
-        nome_base
-    );
+    println!("  ✓ {} gerado.", il_path_str);
+
+    println!("📦 Compilando CIL para código de máquina com ferramentas .NET...");
+    let out_dir_ref = output_dir.map(|p| p.as_path());
+    match codegen::compilar_cil_com_dotnet(
+        Path::new(&il_path_str),
+        nome_base,
+        out_dir_ref,
+    ) {
+        Ok(exe_path) => {
+            println!("🎯 Executável gerado: {}", exe_path.display());
+            #[cfg(windows)]
+            println!("Para executar: .\\{}", exe_path.display());
+            #[cfg(not(windows))]
+            println!("Para executar: ./{}", exe_path.display());
+        }
+        Err(e) => {
+            eprintln!("Aviso na montagem do executável: {}", e);
+            println!(
+                "O arquivo intermediário CIL '{}' foi preservado com sucesso.",
+                il_path_str
+            );
+        }
+    }
     Ok(())
 }
 
 fn compilar_para_console<'a>(
     ast: &'a ast::Programa,
+    type_checker: &'a type_checker::VerificadorTipos<'a>,
     nome_base: &str,
+    output_dir: Option<&PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("🔧 Gerando Projeto de Console .NET...");
-    let gerador = codegen::GeradorCodigo::new()?;
-    gerador
-        .gerar_console(ast, nome_base)
-        .map_err(|e| Box::new(error::ErroCompilador::novo(error::TipoErro::Sintático, e)))?;
-    println!("  ✓ Projeto '{}' gerado.", nome_base);
-    println!("  Para executar: cd {} && dotnet run", nome_base);
-    Ok(())
+    compilar_para_cil_bytecode(ast, type_checker, nome_base, output_dir)
 }
 
 fn compilar_para_bytecode<'a>(

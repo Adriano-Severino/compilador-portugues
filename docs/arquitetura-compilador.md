@@ -43,6 +43,15 @@ Responsável por emitir o arquivo `.pbc` utilizado pelo *Interpretador* embarcad
 - `resolucao.rs`: Funções para descobrir IDs únicos e referências pré-computadas na inicialização.
 - `util.rs`: Ferramentas auxiliares, dicionários de strings (String Pool) para economizar tamanho de arquivo, mapeamento de saltos e tabelas literais.
 
+### 4. `src/codegen/cil/` (Geração de Código .NET / CIL Bytecode)
+Responsável por emitir código intermediário CIL puro (`.il`, ECMA-335) diretamente da AST (sem gerar arquivos C# `.cs`) e compilar para executável nativo release (`.exe`).
+- `mod.rs`: Ponto de entrada do gerador CIL (`CilGenerator`), controle de assembly e entrypoint `Main`.
+- `tipos.rs`: Mapeamento de tipos Pôr do Sol (`inteiro`, `texto`, `decimal`, etc.) para assinaturas de tipo CIL.
+- `declaracoes.rs`: Emissão de `.class`, `.interface`, `.enum`, métodos estáticos/virtuais, construtores e propriedades com backing fields.
+- `comandos.rs`: Emissão de instruções de controle de fluxo (`se`, `enquanto`, `para`), declaração de variáveis locais com `.locals init`, atribuições e chamadas ao console.
+- `expressoes.rs`: Avaliação baseada em pilha (máquina de pilha do CLR) para operações aritméticas, lógicas, chamadas de métodos e instanciação de objetos (`newobj`).
+- `compilador_il.rs`: Orquestrador de compilação: invoca o .NET SDK (`dotnet publish -c Release` com `Microsoft.NET.Sdk.IL` e Native AOT) ou `ilasm` como fallback rápido para gerar o binário de máquina release final.
+
 ## Integração e Segurança
 
 A separação garante que, caso o desenvolvedor mude a checagem de tipos (adicionando novas *features* de OOP ou Memory Safety), ele não afete a máquina de geração de baixo nível. O fluxo atual garante que **somente o código semanticamente correto** e aprovado pelo TypeChecker e Analisador de Ownership (em `ownership.rs`) consiga atingir a etapa de `codegen`.

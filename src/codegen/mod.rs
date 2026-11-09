@@ -3,6 +3,8 @@ pub mod cil;
 pub mod console;
 pub mod llvm_ir;
 
+pub use cil::compilador_il::compilar_cil_para_executavel as compilar_cil_com_dotnet;
+
 use crate::ast;
 use std::env;
 use std::fs;
@@ -115,10 +117,25 @@ impl GeradorCodigo {
         compilar_llvm_ir_com_runtime(Path::new(&ll_path), nome_base, None)
     }
 
-    pub fn gerar_cil(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
-        let generator = cil::CilGenerator::new(programa, nome_base.to_string());
+    pub fn gerar_cil<'a>(
+        &self,
+        programa: &'a ast::Programa,
+        type_checker: &'a crate::type_checker::VerificadorTipos<'a>,
+        nome_base: &str,
+    ) -> Result<String, String> {
+        let mut generator = cil::CilGenerator::new(programa, type_checker, nome_base.to_string());
         let code = generator.generate();
-        fs::write(format!("{}.il", nome_base), code).map_err(|e| e.to_string())
+        let il_path = format!("{}.il", nome_base);
+        fs::write(&il_path, code).map_err(|e| e.to_string())?;
+        Ok(il_path)
+    }
+
+    pub fn compilar_cil_com_dotnet(
+        il_path: &Path,
+        nome_base: &str,
+        output_dir: Option<&Path>,
+    ) -> Result<PathBuf, String> {
+        cil::compilador_il::compilar_cil_para_executavel(il_path, nome_base, output_dir)
     }
 
     pub fn gerar_console(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
@@ -323,6 +340,17 @@ pub fn gerar_llvm_ir_puro<'a>(
 ) -> String {
     let mut generator =
         llvm_ir::LlvmGenerator::new(programa, type_checker, &type_checker.resolved_classes);
+    generator.generate()
+}
+
+/// Gera apenas o código CIL (.il) em string, sem invocar dotnet ou ilasm.
+/// Útil para testes que validam a emissão de CIL puro sem compilação nativa.
+pub fn gerar_cil_puro<'a>(
+    programa: &'a ast::Programa,
+    type_checker: &'a crate::type_checker::VerificadorTipos<'a>,
+    assembly_name: &str,
+) -> String {
+    let mut generator = cil::CilGenerator::new(programa, type_checker, assembly_name.to_string());
     generator.generate()
 }
 
