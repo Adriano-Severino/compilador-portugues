@@ -2,6 +2,24 @@ use crate::ast;
 use std::collections::{HashMap, HashSet};
 use crate::library_loader::LibSimbolo;
 
+/// Escapa um texto para emissão em `LOAD_CONST_STR "..."` (formato de linha única).
+/// O interpretador reverte estes escapes ao carregar a constante.
+pub(crate) fn escapar_texto_bytecode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\0' => out.push_str("\\0"),
+            outro => out.push(outro),
+        }
+    }
+    out
+}
+
 use super::BytecodeGenerator;
 
 impl<'a> BytecodeGenerator<'a> {

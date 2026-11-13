@@ -1,0 +1,66 @@
+usando Sistema;
+usando Sistema.Colecoes;
+usando Sistema.Texto;
+usando Sistema.IO;
+usando Sistema.Data;
+usando Sistema.Threading;
+
+função Principal() {
+    // ===== Matemática =====
+    Console.EscreverLinha($"Abs(-5.5) = {Matematica.Abs(-5.5)}");
+    Console.EscreverLinha($"Max(3, 7.5) = {Matematica.Max(3.0, 7.5)}");
+    Console.EscreverLinha($"RaizQuadrada(16) = {Matematica.RaizQuadrada(16.0)}");
+    Console.EscreverLinha($"Pi = {Matematica.Pi()}");
+    Console.EscreverLinha($"Seno(pi/2) = {Matematica.Seno(Matematica.Pi() / 2.0)}");
+
+    // ===== Dicionário =====
+    var d = novo Dicionario();
+    d.Adicionar("nome", "Ada");
+    d.Adicionar("idade", 36);
+    var nome = d.Obter("nome");
+    Console.EscreverLinha($"d[nome] = {nome}");
+    var ck1 = d.ContemChave("idade");
+    Console.EscreverLinha($"ContemChave(idade) = {ck1}");
+    var ck2 = d.ContemChave("xyz");
+    Console.EscreverLinha($"ContemChave(xyz) = {ck2}");
+    Console.EscreverLinha($"Tamanho = {d.Tamanho}");
+    d.Adicionar("nome", "Grace");
+    var nome2 = d.Obter("nome");
+    Console.EscreverLinha($"apos update: {nome2}");
+    var rm = d.Remover("idade");
+    Console.EscreverLinha($"Remover(idade) = {rm}");
+    Console.EscreverLinha($"Tamanho final = {d.Tamanho}");
+
+    // ===== ConstrutorTexto =====
+    var sb = novo ConstrutorTexto();
+    sb.Anexar("Por");
+    sb.Anexar(" do");
+    sb.AnexarLinha(" Sol");
+    Console.EscreverLinha($"ConstrutorTexto: {sb.ParaTexto()}");
+    Console.EscreverLinha($"Comprimento = {sb.Comprimento()}");
+
+    // ===== Json =====
+    var json_ok = "{\"a\": 1}";
+    var json_bad = "{quebrado";
+    Console.EscreverLinha($"Json valido? {Json.ValidarJson(json_ok)}");
+    Console.EscreverLinha($"Json invalido? {Json.ValidarJson(json_bad)}");
+    var json = Json.Serializar(d);
+    Console.EscreverLinha($"Json serializado: {json}");
+
+    // ===== Data =====
+    var agora = Data.Agora();
+    Console.EscreverLinha($"Agora: {agora.ParaTexto()}");
+    var hoje = Data.Hoje();
+    var fmt = hoje.Formatar("aaaa-MM-dd");
+    Console.EscreverLinha($"Hoje.Formatar: {fmt}");
+
+    // ===== Async =====
+    Arquivo.EscreverTexto("temp_async.txt", "conteudo assíncrono");
+    var conteudo = aguarde Arquivo.LerTextoAssincrono("temp_async.txt");
+    Console.EscreverLinha($"Lido async: {conteudo}");
+    aguarde Tarefa.Atraso(50);
+    Console.EscreverLinha("Atraso concluído");
+
+    Arquivo.Excluir("temp_async.txt");
+    Console.EscreverLinha("FIM");
+}

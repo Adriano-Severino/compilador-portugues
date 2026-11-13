@@ -86,7 +86,11 @@ impl<'a> LlvmGenerator<'a> {
             let tipo_param_subst = self.subst_generics_local(&param.tipo, &subst);
             let tipo_param_resolvido = self.resolve_type(&tipo_param_subst, &namespace);
             let tipo_param_llvm = self.map_type_to_llvm_arg(&tipo_param_resolvido);
-            params_llvm.push(format!("{0} %param.{1}", tipo_param_llvm, param.nome));
+            params_llvm.push(format!(
+                "{0} %param.{1}",
+                tipo_param_llvm,
+                Self::llvm_ident(&param.nome)
+            ));
         }
 
         let mut old_body = self.body.clone();
@@ -120,7 +124,7 @@ impl<'a> LlvmGenerator<'a> {
         for (_i, param) in metodo.parametros.iter().enumerate() {
             let tipo_param_subst = self.subst_generics_local(&param.tipo, &subst);
             let tipo_param_resolvido = self.resolve_type(&tipo_param_subst, &namespace);
-            let ptr_reg = format!("%var.{}", param.nome);
+            let ptr_reg = format!("%var.{}", Self::llvm_ident(&param.nome));
             let llvm_type = self.map_type_to_llvm_storage(&tipo_param_resolvido);
             let align = self.get_type_alignment(&tipo_param_resolvido);
 
@@ -128,7 +132,7 @@ impl<'a> LlvmGenerator<'a> {
                 "  {0} = alloca {1}, align {2}\n",
                 ptr_reg, llvm_type, align
             ));
-            let param_reg = format!("%param.{}", param.nome);
+            let param_reg = format!("%param.{}", Self::llvm_ident(&param.nome));
             self.body.push_str(&format!(
                 "  store {0} {1}, {0}* {2}\n",
                 llvm_type, param_reg, ptr_reg
@@ -193,7 +197,11 @@ impl<'a> LlvmGenerator<'a> {
             let tipo_param_subst = self.subst_generics_local(&param.tipo, &subst);
             let tipo_param_resolvido = self.resolve_type(&tipo_param_subst, &namespace);
             let tipo_param_llvm = self.map_type_to_llvm_arg(&tipo_param_resolvido);
-            params_llvm.push(format!("{0} %param.{1}", tipo_param_llvm, param.nome));
+            params_llvm.push(format!(
+                "{0} %param.{1}",
+                tipo_param_llvm,
+                Self::llvm_ident(&param.nome)
+            ));
         }
 
         let mut old_body = self.body.clone();
@@ -228,7 +236,7 @@ impl<'a> LlvmGenerator<'a> {
         for param in &construtor.parametros {
             let tipo_param_subst = self.subst_generics_local(&param.tipo, &subst);
             let tipo_param_resolvido = self.resolve_type(&tipo_param_subst, &namespace);
-            let ptr_reg = format!("%var.{}", param.nome);
+            let ptr_reg = format!("%var.{}", Self::llvm_ident(&param.nome));
             let llvm_type = self.map_type_to_llvm_storage(&tipo_param_resolvido);
             let align = self.get_type_alignment(&tipo_param_resolvido);
 
@@ -236,7 +244,7 @@ impl<'a> LlvmGenerator<'a> {
                 "  {0} = alloca {1}, align {2}\n",
                 ptr_reg, llvm_type, align
             ));
-            let param_reg = format!("%param.{}", param.nome);
+            let param_reg = format!("%param.{}", Self::llvm_ident(&param.nome));
             self.body.push_str(&format!(
                 "  store {0} {1}, {0}* {2}\n",
                 llvm_type, param_reg, ptr_reg
@@ -320,7 +328,11 @@ impl<'a> LlvmGenerator<'a> {
         for param in &construtor.parametros {
             let tipo_param_resolvido = self.resolve_type(&param.tipo, namespace);
             let tipo_param_llvm = self.map_type_to_llvm_arg(&tipo_param_resolvido);
-            params_llvm.push(format!("{0} %param.{1}", tipo_param_llvm, param.nome));
+            params_llvm.push(format!(
+                "{0} %param.{1}",
+                tipo_param_llvm,
+                Self::llvm_ident(&param.nome)
+            ));
         }
 
         let mut old_body = self.body.clone();
@@ -481,7 +493,11 @@ impl<'a> LlvmGenerator<'a> {
         for param in &func.parametros {
             let tipo_param_resolvido = self.resolve_type(&param.tipo, namespace);
             let tipo_param_llvm = self.map_type_to_llvm_arg(&tipo_param_resolvido);
-            params_llvm.push(format!("{0} %param.{1}", tipo_param_llvm, param.nome));
+            params_llvm.push(format!(
+                "{0} %param.{1}",
+                tipo_param_llvm,
+                Self::llvm_ident(&param.nome)
+            ));
         }
 
         let mut old_body = self.body.clone();
@@ -540,7 +556,11 @@ impl<'a> LlvmGenerator<'a> {
         for param in &metodo.parametros {
             let tipo_param_resolvido = self.resolve_type(&param.tipo, namespace);
             let tipo_param_llvm = self.map_type_to_llvm_arg(&tipo_param_resolvido);
-            params_llvm.push(format!("{0} %param.{1}", tipo_param_llvm, param.nome));
+            params_llvm.push(format!(
+                "{0} %param.{1}",
+                tipo_param_llvm,
+                Self::llvm_ident(&param.nome)
+            ));
         }
 
         let mut old_body = self.body.clone();

@@ -29,6 +29,9 @@ pub(crate) async fn criar_objeto(
                 format!("Sistema.IO.{}", nome_classe),
                 format!("Sistema.Colecoes.{}", nome_classe),
                 format!("Sistema.Data.{}", nome_classe),
+                format!("Sistema.Texto.{}", nome_classe),
+                format!("Sistema.Threading.{}", nome_classe),
+                format!("Sistema.Aleatorio.{}", nome_classe),
                 nome_classe.to_string(),
             ];
             candidatos.into_iter().next().unwrap_or_default()
@@ -43,6 +46,11 @@ pub(crate) async fn criar_objeto(
                     "__tipo__".to_string(),
                     Valor::Texto("ClienteHttp".to_string()),
                 );
+                // O construtor .pr atribui BaseUrl = baseUrl; como o stub
+                // não executa o corpo do construtor, populamos aqui.
+                if let Some(Valor::Texto(base)) = argumentos.first() {
+                    campos_map.insert("BaseUrl".to_string(), Valor::Texto(base.clone()));
+                }
             }
             "Sistema.Colecoes.Lista" => {
                 campos_map.insert("__itens__".to_string(), Valor::Array(Vec::new()));
@@ -50,9 +58,82 @@ pub(crate) async fn criar_objeto(
             "Sistema.Colecoes.Dicionario" => {
                 campos_map.insert("__itens__".to_string(), Valor::Array(Vec::new()));
             }
+            "Sistema.Colecoes.Fila"
+            | "Sistema.Colecoes.Pilha"
+            | "Sistema.Colecoes.Conjunto" => {
+                campos_map.insert("__itens__".to_string(), Valor::Array(Vec::new()));
+            }
+            "Sistema.Texto.ConstrutorTexto" => {
+                campos_map.insert("__texto__".to_string(), Valor::Texto(String::new()));
+            }
+            "Sistema.Texto.Regex" => {
+                let padrao = argumentos
+                    .first()
+                    .map(|v| match v {
+                        Valor::Texto(s) => s.clone(),
+                        outro => outro.to_string(),
+                    })
+                    .unwrap_or_default();
+                campos_map.insert("__padrao__".to_string(), Valor::Texto(padrao));
+            }
+            "Sistema.Aleatorio.Aleatorio" => {
+                let semente = argumentos
+                    .first()
+                    .map(|v| {
+                        if let Valor::Inteiro(n) = v { *n as u64 } else { 0 }
+                    })
+                    .unwrap_or(0);
+                campos_map.insert(
+                    "__estado__".to_string(),
+                    Valor::Inteiro(crate::nativos::semente_aleatoria(semente) as i64),
+                );
+            }
             "Sistema.Data.Data" => {
-                let agora = chrono_or_default_date();
-                campos_map.insert("__data__".to_string(), Valor::Texto(agora));
+                // Popula campos a partir dos argumentos do construtor (ano, mes, dia[, hora, minuto, segundo])
+                let get_int = |i: usize, padrao: i64| -> i64 {
+                    argumentos
+                        .get(i)
+                        .map(|v| {
+                            if let Valor::Inteiro(n) = v {
+                                *n
+                            } else {
+                                padrao
+                            }
+                        })
+                        .unwrap_or(padrao)
+                };
+                campos_map.insert("Ano".to_string(), Valor::Inteiro(get_int(0, 1970)));
+                campos_map.insert("Mes".to_string(), Valor::Inteiro(get_int(1, 1)));
+                campos_map.insert("Dia".to_string(), Valor::Inteiro(get_int(2, 1)));
+                campos_map.insert("Hora".to_string(), Valor::Inteiro(get_int(3, 0)));
+                campos_map.insert("Minuto".to_string(), Valor::Inteiro(get_int(4, 0)));
+                campos_map.insert("Segundo".to_string(), Valor::Inteiro(get_int(5, 0)));
+            }
+            "Sistema.Data.Horario" => {
+                // Construtor (segundos) ou (dias, horas, minutos, segundos)
+                let get_int = |i: usize| -> i64 {
+                    argumentos
+                        .get(i)
+                        .map(|v| {
+                            if let Valor::Inteiro(n) = v {
+                                *n
+                            } else {
+                                0
+                            }
+                        })
+                        .unwrap_or(0)
+                };
+                let segundos = if argumentos.len() >= 4 {
+                    get_int(0) * 86400 + get_int(1) * 3600 + get_int(2) * 60 + get_int(3)
+                } else {
+                    get_int(0)
+                };
+                campos_map.insert("__segundos__".to_string(), Valor::Inteiro(segundos));
+            }
+            "Sistema.Diagnostics.Cronometro" => {
+                campos_map.insert("__inicio_ms__".to_string(), Valor::Inteiro(0));
+                campos_map.insert("__fim_ms__".to_string(), Valor::Inteiro(0));
+                campos_map.insert("__rodando__".to_string(), Valor::Booleano(false));
             }
             _ => {}
         }
@@ -226,29 +307,37 @@ pub(crate) async fn chamar_metodo(
                             }
                             return Ok(Valor::Booleano(false));
                         }
-                        _ => return Ok(Valor::Nulo),
+                        _ => {
+                            // Métodos extras da Lista despachados como nativos
+                            drop(campos_ref);
+                            let chave = format!("Lista::{}", nome_metodo);
+                            if crate::nativos::nativo_instancia_conhecido(&chave) {
+                                return crate::nativos::despachar_nativo_instancia(
+                                    &chave,
+                                    objeto.clone(),
+                                    argumentos,
+                                );
+                            }
+                            return Ok(Valor::Nulo);
+                        }
                     }
                 }
-                // ClienteHttp nativa (stub assíncrono)
-                "Sistema.Rede.ClienteHttp" | "ClienteHttp" => match nome_metodo {
-                    "ObterAsync" | "Obter" => {
-                        eprintln!(
-                            "[aviso] ClienteHttp.{} não implementado neste ambiente",
-                            nome_metodo
-                        );
-                        return Ok(Valor::Texto(String::new()));
-                    }
-                    "EnviarAsync" | "Enviar" => {
-                        eprintln!(
-                            "[aviso] ClienteHttp.{} não implementado neste ambiente",
-                            nome_metodo
-                        );
-                        return Ok(Valor::Nulo);
-                    }
-                    _ => return Ok(Valor::Nulo),
-                },
-                // Fallback para classes stdlib sem handler específico
+                // Fallback genérico: despacha para nativo de instância pela convenção "Classe::Metodo"
                 _ => {
+                    let classe_curta = fqn.rsplit('.').next().unwrap_or(&fqn);
+                    let chave = format!("{}::{}", classe_curta, nome_metodo);
+                    if crate::nativos::nativo_instancia_conhecido(&chave) {
+                        let este_val = Valor::Objeto {
+                            nome_classe: fqn.clone(),
+                            campos: campos.clone(),
+                            metodos: HashMap::new(),
+                        };
+                        return crate::nativos::despachar_nativo_instancia(
+                            &chave,
+                            este_val,
+                            argumentos,
+                        );
+                    }
                     eprintln!(
                         "[aviso stdlib] Método '{}' em '{}' não implementado; retornando nulo",
                         nome_metodo, fqn
@@ -400,6 +489,12 @@ pub(crate) async fn chamar_metodo_estatico(
             Box::pin(vm_metodo.run()).await?;
             return Ok(vm_metodo.pilha.pop().unwrap_or(Valor::Nulo));
         } else if eh_classe_stdlib(nome_classe) {
+            // Tenta nativo estático pela convenção "Classe::Metodo"
+            let classe_curta = nome_classe.rsplit('.').next().unwrap_or(nome_classe);
+            let chave = format!("{}::{}", classe_curta, nome_metodo);
+            if crate::nativos::nativo_estatico_conhecido(&chave) {
+                return crate::nativos::despachar_nativo_estatico(&chave, argumentos);
+            }
             // Método estático stdlib sem handler específico: retorna nulo com aviso
             eprintln!(
                 "[aviso stdlib] Método estático '{}.{}' não implementado; retornando nulo",

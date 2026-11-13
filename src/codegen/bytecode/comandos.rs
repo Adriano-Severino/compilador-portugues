@@ -233,14 +233,16 @@ impl<'a> BytecodeGenerator<'a> {
                             if let Some(lib_metodo) = lib_classe.metodos.get(metodo) {
                                 if let Some(chave_nativa) = &lib_metodo.chave_nativa {
                                     // É uma chamada nativa da biblioteca externa
-                                    // Determinar se é estática baseando-se na classe
-                                    let eh_estatica = lib_classe.eh_estatica;
+                                    // O modificador estático é do método, não da classe
+                                    let eh_estatica = lib_metodo.eh_estatica;
+                                    let sufixo_async = if lib_metodo.eh_assincrona { "_ASYNC" } else { "" };
                                     if eh_estatica {
                                         for arg in argumentos {
                                             self.generate_expressao(arg);
                                         }
                                         self.bytecode_instructions.push(format!(
-                                            "CALL_STATIC_NATIVE {} {}",
+                                            "CALL_STATIC_NATIVE{} {} {}",
+                                            sufixo_async,
                                             chave_nativa,
                                             argumentos.len()
                                         ));
@@ -250,7 +252,8 @@ impl<'a> BytecodeGenerator<'a> {
                                             self.generate_expressao(arg);
                                         }
                                         self.bytecode_instructions.push(format!(
-                                            "CALL_NATIVE {} {}",
+                                            "CALL_NATIVE{} {} {}",
+                                            sufixo_async,
                                             chave_nativa,
                                             argumentos.len()
                                         ));
@@ -273,12 +276,14 @@ impl<'a> BytecodeGenerator<'a> {
                                     nativo_attr.arguments.get(0)
                                 {
                                     // É uma chamada nativa
-                                    if is_static_call {
+                                    let sufixo_async = if metodo_info.eh_assincrona { "_ASYNC" } else { "" };
+                                    if is_static_call || metodo_info.eh_estatica {
                                         for arg in argumentos {
                                             self.generate_expressao(arg);
                                         }
                                         self.bytecode_instructions.push(format!(
-                                            "CALL_STATIC_NATIVE {} {}",
+                                            "CALL_STATIC_NATIVE{} {} {}",
+                                            sufixo_async,
                                             chave_nativa,
                                             argumentos.len()
                                         ));
@@ -288,7 +293,8 @@ impl<'a> BytecodeGenerator<'a> {
                                             self.generate_expressao(arg);
                                         }
                                         self.bytecode_instructions.push(format!(
-                                            "CALL_NATIVE {} {}",
+                                            "CALL_NATIVE{} {} {}",
+                                            sufixo_async,
                                             chave_nativa,
                                             argumentos.len()
                                         ));

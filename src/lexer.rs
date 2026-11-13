@@ -157,10 +157,10 @@ pub enum Token {
     #[regex(r#"\$\"([^"\\]|\\.)*\""#, |lex| {
     // slice = $" … "
     let s = lex.slice();
-    s[2..s.len() - 1].to_string()          // devolve só o miolo
+    desescapar(&s[2..s.len() - 1])      // devolve só o miolo, com escapes resolvidos
     })]
     TStringInterpolada(String),
-    #[regex(r#""([^"\\]|\\.)*""#, |lex| lex.slice()[1..lex.slice().len()-1].to_string())]
+    #[regex(r#""([^"\\]|\\.)*""#, |lex| desescapar(&lex.slice()[1..lex.slice().len()-1]))]
     TString(String),
     #[regex(r"[0-9]+\.[0-9]+[mM]", |lex| lex.slice().to_string())]
     TDecimal(String),
@@ -185,6 +185,34 @@ pub enum Token {
     ComentarioLinha,
     #[regex(r"[ \t\r\n]+", logos::skip)]
     Whitespace,
+}
+
+/// Resolve sequências de escape comuns em literais de texto.
+/// Escapes desconhecidos (ex.: `\U` em caminhos Windows) são preservados com a barra.
+fn desescapar(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('t') => out.push('\t'),
+            Some('0') => out.push('\0'),
+            Some('"') => out.push('"'),
+            Some('\'') => out.push('\''),
+            Some('\\') => out.push('\\'),
+            Some(outro) => {
+                out.push('\\');
+                out.push(outro);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 impl fmt::Display for Token {

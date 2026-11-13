@@ -50,13 +50,46 @@ impl<'a> VerificadorTipos<'a> {
             if self.classes.contains_key(&fqn) {
                 return fqn;
             }
-            // Se o using é um namespace stdlib, confia que a classe existe
-            if self.eh_classe_stdlib(using_path) {
-                return fqn;
+        }
+        // Sem biblioteca externa carregada, mantém o palpite histórico de
+        // namespace stdlib. Com biblioteca, o palpite é perigoso: usings como
+        // `Sistema.Colecoes` fariam `Data` resolver para `Sistema.Colecoes.Data`
+        // mesmo existindo `Sistema.Data.Data`.
+        if self.biblioteca_externa.is_none() {
+            for using_path in &self.usings {
+                let fqn = format!("{}.{}", using_path, nome_classe);
+                if self.eh_classe_stdlib(using_path) {
+                    return fqn;
+                }
             }
         }
         if self.classes.contains_key(nome_classe) {
             return nome_classe.to_string();
+        }
+        // Último recurso: busca por nome simples na biblioteca externa. Cobre
+        // `usando Sistema;` + referência a classes de subnamespaces não
+        // importados (ex.: `Data` -> `Sistema.Data.Data`). Só resolve quando o
+        // nome simples é único para evitar ambiguidade silenciosa.
+        if let Some(bib) = &self.biblioteca_externa {
+            let mut encontrado: Option<&str> = None;
+            let mut ambiguo = false;
+            for (chave, simbolo) in &bib.simbolos {
+                if !matches!(simbolo, LibSimbolo::Classe(_)) {
+                    continue;
+                }
+                if chave.rsplit('.').next() == Some(nome_classe) {
+                    if encontrado.is_some() {
+                        ambiguo = true;
+                        break;
+                    }
+                    encontrado = Some(chave.as_str());
+                }
+            }
+            if !ambiguo {
+                if let Some(fqn) = encontrado {
+                    return fqn.to_string();
+                }
+            }
         }
         nome_classe.to_string()
     }

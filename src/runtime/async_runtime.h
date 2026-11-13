@@ -35,6 +35,11 @@ void *task_get_result(Task *task);
 Task *task_create_read_file(const char *path);
 Task *task_create_write_file(const char *path, const char *content);
 Task *task_create_file_exists(const char *path);
+Task *task_create_append_file(const char *path, const char *content);
+Task *task_create_sleep(long long milliseconds);
+/* metodo: 0=GET 1=POST 2=PUT 3=DELETE. Retorna o corpo da resposta. */
+Task *task_create_http(int metodo, const char *url, const char *corpo,
+                       const char *base_url);
 void free_async_result(void *result);
 
 #ifdef __cplusplus

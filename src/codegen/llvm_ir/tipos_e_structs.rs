@@ -180,8 +180,21 @@ impl<'a> LlvmGenerator<'a> {
             ast::Tipo::Booleano => "i1".to_string(),
             ast::Tipo::Vazio => "void".to_string(),
             ast::Tipo::Enum(_) => "i32".to_string(),
-            ast::Tipo::Classe(_) => self.map_type_to_llvm_ptr(tipo),
-            ast::Tipo::Aplicado { .. } => self.map_type_to_llvm_ptr(tipo),
+            ast::Tipo::Objeto => "i8*".to_string(),
+            ast::Tipo::Classe(_) => {
+                if self.stdlib_tipo_info(tipo).is_some() {
+                    "i8*".to_string()
+                } else {
+                    self.map_type_to_llvm_ptr(tipo)
+                }
+            }
+            ast::Tipo::Aplicado { .. } => {
+                if self.stdlib_tipo_info(tipo).is_some() {
+                    "i8*".to_string()
+                } else {
+                    self.map_type_to_llvm_ptr(tipo)
+                }
+            }
             ast::Tipo::Lista(_) => "%array*".to_string(),
             _ => panic!("Tipo LLVM não mapeado para armazenamento: {:?}", tipo),
         }
@@ -196,11 +209,18 @@ impl<'a> LlvmGenerator<'a> {
             ast::Tipo::Decimal => "i8**".to_string(),
             ast::Tipo::Booleano => "i1*".to_string(),
             ast::Tipo::Enum(_) => "i32*".to_string(),
+            ast::Tipo::Objeto => "i8**".to_string(),
             ast::Tipo::Classe(name) => {
+                if self.stdlib_tipo_info(tipo).is_some() {
+                    return "i8**".to_string();
+                }
                 let sanitized_name = name.replace('.', "_");
                 format!("%class.{0}*", sanitized_name)
             }
             ast::Tipo::Aplicado { nome, .. } => {
+                if self.stdlib_tipo_info(tipo).is_some() {
+                    return "i8**".to_string();
+                }
                 // 'nome' aqui já deve estar mangled via resolve_type
                 let sanitized_name = nome.replace('.', "_");
                 format!("%class.{0}*", sanitized_name)
@@ -220,8 +240,21 @@ impl<'a> LlvmGenerator<'a> {
             ast::Tipo::Booleano => "i1".to_string(),
             ast::Tipo::Vazio => "void".to_string(),
             ast::Tipo::Enum(_) => "i32".to_string(),
-            ast::Tipo::Classe(_) => self.map_type_to_llvm_ptr(tipo),
-            ast::Tipo::Aplicado { .. } => self.map_type_to_llvm_ptr(tipo),
+            ast::Tipo::Objeto => "i8*".to_string(),
+            ast::Tipo::Classe(_) => {
+                if self.stdlib_tipo_info(tipo).is_some() {
+                    "i8*".to_string()
+                } else {
+                    self.map_type_to_llvm_ptr(tipo)
+                }
+            }
+            ast::Tipo::Aplicado { .. } => {
+                if self.stdlib_tipo_info(tipo).is_some() {
+                    "i8*".to_string()
+                } else {
+                    self.map_type_to_llvm_ptr(tipo)
+                }
+            }
             ast::Tipo::Lista(_) => "%array*".to_string(),
             _ => panic!("Tipo LLVM não mapeado para argumento: {:?}", tipo),
         }

@@ -284,6 +284,20 @@ impl<'a> LlvmGenerator<'a> {
                         panic!("Não é possível instanciar classe abstrata: {}", fqn);
                     }
                 }
+
+                // Biblioteca padrão: objetos são handles opacos gerenciados
+                // pelo runtime C (porsol_runtime.c), não structs LLVM.
+                // resolve_stdlib_base tolera FQNs resolvidos errado pelo
+                // type checker (ex.: "Sistema.Colecoes.Data").
+                if let Some(std_fqn) = self.resolve_stdlib_base(&base_fqn) {
+                    let mut ctor_args: Vec<(String, ast::Tipo)> = Vec::new();
+                    for arg in argumentos {
+                        ctor_args.push(self.generate_expressao(arg));
+                    }
+                    let obj = self.stdlib_obj_new(&std_fqn, &ctor_args);
+                    return (obj, tipo_resultado);
+                }
+
                 let sanitized_fqn = nome_classe.replace('.', "_");
                 let struct_type = format!("%class.{0}", sanitized_fqn);
                 let struct_ptr_type = format!("%class.{0}*", sanitized_fqn);
@@ -750,7 +764,20 @@ impl<'a> LlvmGenerator<'a> {
                 }
             }
             ast::Expressao::ChamadaMetodo(obj_expr, metodo_nome, argumentos) => {
+                // Biblioteca padrão: chamada estática via identificador de
+                // classe (ex.: Matematica.Abs, Texto.Dividir).
+                if let Some(res) =
+                    self.try_stdlib_static_call(obj_expr, metodo_nome, argumentos)
+                {
+                    return res;
+                }
                 let (obj_reg, obj_type) = self.generate_expressao(obj_expr);
+                // Biblioteca padrão: método de instância via handle opaco.
+                if let Some(res) =
+                    self.try_stdlib_instance_call(&obj_reg, &obj_type, metodo_nome, argumentos)
+                {
+                    return res;
+                }
                 // Suporte a intrínsecos: tamanho()/comprimento() em listas e textos
                 if (metodo_nome == "tamanho" || metodo_nome == "comprimento")
                     && argumentos.is_empty()
@@ -977,6 +1004,28 @@ impl<'a> LlvmGenerator<'a> {
                             result_reg, pred, left_reg, right_reg
                         ));
                     }
+                    (Texto, Texto) => {
+                        // Comparação de strings via strcmp do runtime C.
+                        let l = self.get_safe_string_ptr(&left_reg);
+                        let r = self.get_safe_string_ptr(&right_reg);
+                        let cmp = self.get_unique_temp_name();
+                        self.body.push_str(&format!(
+                            "  {0} = call i32 @porsol_texto_cmp(i8* {1}, i8* {2})\n",
+                            cmp, l, r
+                        ));
+                        let pred = match op {
+                            ast::OperadorComparacao::Igual => "eq",
+                            ast::OperadorComparacao::Diferente => "ne",
+                            ast::OperadorComparacao::Menor => "slt",
+                            ast::OperadorComparacao::MaiorQue => "sgt",
+                            ast::OperadorComparacao::MenorIgual => "sle",
+                            ast::OperadorComparacao::MaiorIgual => "sge",
+                        };
+                        self.body.push_str(&format!(
+                            "  {0} = icmp {1} i32 {2}, 0\n",
+                            result_reg, pred, cmp
+                        ));
+                    }
                     (ast::Tipo::Classe(_), ast::Tipo::Classe(_)) => {
                         // Para comparação de classes/objetos, tratamos como comparação de ponteiros
                         let pred = match op {
@@ -1060,6 +1109,36 @@ impl<'a> LlvmGenerator<'a> {
                         ));
                         return (loaded_reg, member_type);
                     }
+                    // Propriedade estática da biblioteca padrão
+                    // (ex.: acesso a membro de classe estática stdlib).
+                    if let Some(fqn_std) = self.resolve_stdlib_base(class_ident) {
+                        if let Some(lib) = self.lib_classe_by_fqn(&fqn_std) {
+                            if lib
+                                .propriedades
+                                .iter()
+                                .any(|p| p.nome == *membro_nome)
+                                || lib.campos.iter().any(|c| c.nome == *membro_nome)
+                            {
+                                let tipo_str = lib
+                                    .propriedades
+                                    .iter()
+                                    .find(|p| p.nome == *membro_nome)
+                                    .map(|p| p.tipo.clone())
+                                    .or_else(|| {
+                                        lib.campos
+                                            .iter()
+                                            .find(|c| c.nome == *membro_nome)
+                                            .map(|c| c.tipo.clone())
+                                    })
+                                    .unwrap_or_else(|| "inteiro".to_string());
+                                let ret = self.stdlib_tipo_from_str(&tipo_str, &fqn_std, &[]);
+                                let simples =
+                                    fqn_std.rsplit('.').next().unwrap_or(&fqn_std);
+                                let chave = format!("{}::{}", simples, membro_nome);
+                                return self.emit_native_call(&chave, &[], &ret);
+                            }
+                        }
+                    }
                     // Se for enumeração, emitir o valor inteiro da posição do membro
                     let fqn_enum = self
                         .type_checker
@@ -1072,8 +1151,15 @@ impl<'a> LlvmGenerator<'a> {
                 }
                 // Caso instância: agora podemos avaliar o objeto
                 let (obj_reg, obj_type) = self.generate_expressao(obj_expr);
+                // Biblioteca padrão: propriedade/campo via dispatch nativo.
+                if let Some(res) =
+                    self.try_stdlib_property_get(&obj_reg, &obj_type, membro_nome)
+                {
+                    return res;
+                }
                 // Propriedade especial: tamanho/comprimento em arrays e textos
-                if membro_nome == "tamanho" || membro_nome == "comprimento" {
+                let membro_lower = membro_nome.to_lowercase();
+                if membro_lower == "tamanho" || membro_lower == "comprimento" {
                     match obj_type {
                         ast::Tipo::Lista(_) => {
                             let (_data, len_reg) = self.get_array_data_and_len(&obj_reg);
@@ -1142,6 +1228,36 @@ impl<'a> LlvmGenerator<'a> {
                     self.await_async_function(&fqn, arguments)
                 }
                 ast::Expressao::ChamadaMetodo(object, method, arguments) => {
+                    // Métodos assíncronos da biblioteca padrão
+                    // (Arquivo.*Assíncrono, Tarefa.Atraso, etc.).
+                    if let ast::Expressao::Identificador(nome) = object.as_ref() {
+                        if let Some(fqn) = self.resolve_stdlib_base(nome) {
+                            let eh_assincrono = self
+                                .lib_classe_by_fqn(&fqn)
+                                .and_then(|l| l.metodos.get(method.as_str()))
+                                .map_or(false, |m| m.eh_assincrona);
+                            if eh_assincrono {
+                                return self.await_stdlib_async(&fqn, method, arguments, None);
+                            }
+                        }
+                    }
+                    // Método assíncrono de instância da stdlib
+                    // (ex.: `aguarde http.ObterAssincrono(url)`).
+                    let (obj_reg, obj_type) = self.generate_expressao(object);
+                    if let Some((fqn, _recv_args)) = self.stdlib_tipo_info(&obj_type) {
+                        let eh_assincrono = self
+                            .lib_classe_by_fqn(&fqn)
+                            .and_then(|l| l.metodos.get(method.as_str()))
+                            .map_or(false, |m| m.eh_assincrona);
+                        if eh_assincrono {
+                            return self.await_stdlib_async(
+                                &fqn,
+                                method,
+                                arguments,
+                                Some(obj_reg.as_str()),
+                            );
+                        }
+                    }
                     // A biblioteca padrão expõe as mesmas operações como
                     // Arquivo.LerTextoAssíncrono/EscreverTextoAssíncrono/ExisteAssíncrono.
                     if matches!(object.as_ref(), ast::Expressao::Identificador(name) if name == "Arquivo")

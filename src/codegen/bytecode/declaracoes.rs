@@ -170,6 +170,9 @@ impl<'a> BytecodeGenerator<'a> {
                     if metodo.eh_abstrato {
                         continue; // não gera corpo nem entrada para métodos abstratos
                     }
+                    if metodo.attributes.iter().any(|a| a.name == "Nativo") {
+                        continue; // nativos não têm corpo; já são declarados no manifesto .pbl
+                    }
                     if metodo.eh_estatica {
                         self.gerar_metodo_estatico(metodo, &full_class_name);
                     } else {

@@ -187,6 +187,10 @@ impl<'a> CilGenerator<'a> {
         code.push_str("    .maxstack 64\n");
 
         self.emitir_locals(code);
+        // Garante saída UTF-8 para que caracteres acentuados sejam preservados
+        // independentemente da página de código do console.
+        code.push_str("    call class [System.Runtime]System.Text.Encoding [System.Runtime]System.Text.Encoding::get_UTF8()\n");
+        code.push_str("    call void [System.Console]System.Console::set_OutputEncoding(class [System.Runtime]System.Text.Encoding)\n");
         code.push_str(&main_body);
         code.push_str("  }\n\n");
 

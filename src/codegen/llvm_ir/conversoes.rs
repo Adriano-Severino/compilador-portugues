@@ -271,10 +271,17 @@ impl<'a> LlvmGenerator<'a> {
         let str_len = text.len() + 1;
         let str_name = format!("@.str.{0}", self.string_counter);
         self.string_counter += 1;
-        let sanitized_text = text
-            .replace('\\', "\\")
-            .replace('\n', "\0A")
-            .replace('"', "\"");
+        // LLVM c"..." só aceita escapes \XX (hex). Bytes imprimíveis ASCII
+        // (exceto '"' e '\\') ficam literais; todo o resto vira \XX.
+        let mut sanitized_text = String::with_capacity(text.len() * 4);
+        for &b in text.as_bytes() {
+            match b {
+                b'"' => sanitized_text.push_str("\\22"),
+                b'\\' => sanitized_text.push_str("\\5C"),
+                0x20..=0x7E => sanitized_text.push(b as char),
+                _ => sanitized_text.push_str(&format!("\\{:02X}", b)),
+            }
+        }
         self.header.push_str(&format!(
             "{0} = private unnamed_addr constant [{1} x i8] c\"{2}\\00\", align 1\n",
             str_name, str_len, sanitized_text

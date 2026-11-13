@@ -809,12 +809,12 @@ fn compilar_para_llvm_ir<'a>(
     println!("  ✓ {}.ll gerado.", nome_base);
     #[cfg(windows)]
     println!(
-        "  Para compilar: clang {0}.ll <runtime>/async_runtime.c -o {0}.exe",
+        "  Para compilar: clang {0}.ll src/runtime/async_runtime.c src/runtime/porsol_runtime.c -o {0}.exe -lws2_32 -lshell32 -llegacy_stdio_definitions\n  (programas com Sistema.Rede.ClienteHttp precisam também de target/tls-cache/libporsol_tls.a -DPOR_DO_SOL_HAS_TLS -lbcrypt -Wl,/opt:ref para https://)",
         nome_base
     );
     #[cfg(not(windows))]
     println!(
-        "  Para compilar: clang {0}.ll <runtime>/async_runtime.c -o {0} -pthread",
+        "  Para compilar: clang {0}.ll src/runtime/async_runtime.c src/runtime/porsol_runtime.c -o {0} -pthread\n  (programas com Sistema.Rede.ClienteHttp precisam também de target/tls-cache/libporsol_tls.a -DPOR_DO_SOL_HAS_TLS -Wl,--gc-sections para https://)",
         nome_base
     );
     println!("🎯 Pipeline LLVM: AST → LLVM IR → Código de Máquina");

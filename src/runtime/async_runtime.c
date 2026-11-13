@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -442,6 +444,147 @@ Task *task_create_file_exists(const char *path) {
     if (task != NULL) {
         task_submit_to_pool(task, async_file_exists, copy_string(path));
     }
+    return task;
+}
+
+typedef struct AppendArgument {
+    char *path;
+    char *content;
+} AppendArgument;
+
+static void *async_append_file(void *argument) {
+    AppendArgument *append_argument = (AppendArgument *)argument;
+    FILE *file;
+    int succeeded;
+    if (append_argument == NULL) {
+        return NULL;
+    }
+    file = append_argument->path == NULL ? NULL : fopen(append_argument->path, "ab");
+    succeeded = file != NULL &&
+                fputs(append_argument->content == NULL ? "" : append_argument->content, file) >= 0;
+    if (file != NULL) {
+        fclose(file);
+    }
+    free(append_argument->path);
+    free(append_argument->content);
+    free(append_argument);
+    return succeeded ? (void *)1 : NULL;
+}
+
+Task *task_create_append_file(const char *path, const char *content) {
+    Task *task = task_create(next_task_id());
+    AppendArgument *argument;
+    if (task == NULL) {
+        return NULL;
+    }
+    argument = (AppendArgument *)malloc(sizeof(*argument));
+    if (argument == NULL) {
+        task_complete(task, NULL, TASK_FAILED);
+        return task;
+    }
+    argument->path = copy_string(path);
+    argument->content = copy_string(content);
+    task_submit_to_pool(task, async_append_file, argument);
+    return task;
+}
+
+static void *async_sleep(void *argument) {
+    long long milliseconds = (long long)(intptr_t)argument;
+#ifdef _WIN32
+    Sleep((DWORD)(milliseconds > 0 ? milliseconds : 0));
+#else
+    struct timespec delay;
+    if (milliseconds < 0) {
+        milliseconds = 0;
+    }
+    delay.tv_sec = (time_t)(milliseconds / 1000);
+    delay.tv_nsec = (long)((milliseconds % 1000) * 1000000LL);
+    nanosleep(&delay, NULL);
+#endif
+    return NULL;
+}
+
+Task *task_create_sleep(long long milliseconds) {
+    Task *task = task_create(next_task_id());
+    if (task != NULL) {
+        task_submit_to_pool(task, async_sleep, (void *)(intptr_t)milliseconds);
+    }
+    return task;
+}
+
+/* HTTP/1.1 assíncrono: executa o cliente síncrono de porsol_runtime.c
+ * em uma thread do pool. metodo: 0=GET 1=POST 2=PUT 3=DELETE. */
+extern char *porsol_http_request(const char *metodo, const char *url,
+                                 const char *corpo);
+
+typedef struct HttpArgument {
+    int metodo;
+    char *url;
+    char *corpo;
+    char *base;
+} HttpArgument;
+
+static const char *http_metodo_nome(int metodo) {
+    switch (metodo) {
+        case 1: return "POST";
+        case 2: return "PUT";
+        case 3: return "DELETE";
+        default: return "GET";
+    }
+}
+
+static void *async_http_request(void *argument) {
+    HttpArgument *http_argument = (HttpArgument *)argument;
+    char *url_final = NULL;
+    char *resultado = NULL;
+    if (http_argument == NULL) {
+        return NULL;
+    }
+    /* Resolve URL relativa contra BaseUrl (mesma regra do runtime síncrono). */
+    const char *url = http_argument->url ? http_argument->url : "";
+    const char *base = http_argument->base ? http_argument->base : "";
+    if (strncmp(url, "http://", 7) && strncmp(url, "https://", 8) && base[0]) {
+        size_t bl = strlen(base);
+        while (bl && base[bl - 1] == '/') bl--;
+        const char *rel = url;
+        while (*rel == '/') rel++;
+        size_t tam = bl + 1 + strlen(rel) + 1;
+        url_final = (char *)malloc(tam);
+        if (url_final != NULL) {
+            snprintf(url_final, tam, "%.*s/%s", (int)bl, base, rel);
+        }
+    } else {
+        url_final = copy_string(url);
+    }
+    if (url_final != NULL) {
+        resultado = porsol_http_request(http_metodo_nome(http_argument->metodo),
+                                        url_final, http_argument->corpo);
+    }
+    free(url_final);
+    free(http_argument->url);
+    free(http_argument->corpo);
+    free(http_argument->base);
+    free(http_argument);
+    return resultado;
+}
+
+Task *task_create_http(int metodo, const char *url, const char *corpo,
+                       const char *base_url) {
+    Task *task = task_create(next_task_id());
+    HttpArgument *argument;
+    if (task == NULL) {
+        return NULL;
+    }
+    argument = (HttpArgument *)malloc(sizeof(*argument));
+    if (argument == NULL) {
+        task_complete(task, NULL, TASK_FAILED);
+        return task;
+    }
+    argument->metodo = metodo;
+    argument->url = copy_string(url);
+    argument->corpo = copy_string(corpo);
+    argument->base = copy_string(base_url);
+    task_submit_to_pool(task, async_http_request, argument);
     return task;
 }
 

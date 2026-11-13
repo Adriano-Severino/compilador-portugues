@@ -92,6 +92,29 @@ booleano ativo = verdadeiro;
 imprima("Olá, mundo!");
 ```
 
+### Usando a Biblioteca Padrão (`sistema-padrao`)
+
+A linguagem inclui uma biblioteca padrão escrita em Por do Sol (projeto `../sistema-padrao`), com namespaces inspirados na BCL do .NET: `Sistema.Console`, `Sistema.Colecoes`, `Sistema.Texto`, `Sistema.IO`, `Sistema.Rede`, `Sistema.Data`, `Sistema.Threading`, etc.
+
+```por do sol
+usando Sistema;
+usando Sistema.Colecoes;
+
+função Principal() {
+    var lista = novo Lista<inteiro>();
+    lista.Adicionar(42);
+    Console.EscreverLinha(lista.Obter(0));
+}
+```
+
+Para compilar a biblioteca uma vez (gera `sistema-padrao/dist/sistema.pbl` e `sistema.ll`):
+
+```bash
+cargo run --bin compilador -- --compilar-biblioteca=../sistema-padrao
+```
+
+Depois disso, programas que usam `usando Sistema;` compilam normalmente — o `.pbl` é carregado automaticamente para o type checker e para o bytecode, e o `sistema.ll` é linkado automaticamente no alvo LLVM. Para detalhes de paridade por backend e limitações, veja `docs/biblioteca-padrao.md`.
+
 ## Compilando e Executando (Método Recomendado)
 O projeto inclui um script `build_production.sh` para facilitar o processo completo de compilação.
 
@@ -727,6 +750,7 @@ Para tópicos detalhados e exemplos de uso, consulte os guias em `docs/`:
 - `docs/build-e-testes.md` — Como compilar e rodar apenas os testes de exemplos por alvo
 - `docs/controle-fluxo.md` — `se`/`senão`, `enquanto` e exemplos
 - `docs/debug.md` — Guia de depuração no interpretador (breakpoints, step, inspeção)
+- `docs/biblioteca-padrao.md` — Como a `sistema-padrao` é compilada, carregada e executada em cada backend (bytecode, LLVM, CIL), com tabela de paridade e limitações
 - `README-enum.md` — Suporte a enumerações (declaração, uso e regras de tipo)
 
 Atalhos rápidos (PowerShell):

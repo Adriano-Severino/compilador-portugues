@@ -32,6 +32,181 @@ fn clang_executable() -> PathBuf {
     PathBuf::from("clang")
 }
 
+/* ------------------------------------------------------------------ */
+/* TLS vendored (mbedTLS) — biblioteca estática cacheada               */
+/* ------------------------------------------------------------------ */
+
+const TLS_STAMP: &str = "mbedtls-3.6.7";
+
+/// Compila (uma vez) ou reutiliza `libporsol_tls.a`: mbedTLS + glue
+/// HTTPS do runtime. Retorna None se o toolchain falhar — o backend
+/// LLVM continua funcionando sem HTTPS.
+fn garantir_lib_tls() -> Option<PathBuf> {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let runtime = manifest.join("src").join("runtime");
+    let tls_dir = runtime.join("tls");
+    let mbedtls = tls_dir.join("mbedtls");
+    let include = mbedtls.join("include");
+    let everest = mbedtls.join("3rdparty").join("everest");
+    if !include.is_dir() || !tls_dir.join("porsol_tls.c").is_file() {
+        return None;
+    }
+
+    let cache = manifest.join("target").join("tls-cache");
+    let obj_dir = cache.join("obj");
+    let lib = cache.join("libporsol_tls.a");
+    let stamp = cache.join("stamp.txt");
+
+    // Chave de cache: versão do mbedTLS + hash dos fontes do glue
+    // (porsol_tls.c/porsol_cacert.c) — mudanças neles invalidam o cache.
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    TLS_STAMP.hash(&mut hasher);
+    for f in ["porsol_tls.c", "porsol_cacert.c", "porsol_tls.h"] {
+        if let Ok(conteudo) = fs::read(tls_dir.join(f)) {
+            conteudo.hash(&mut hasher);
+        }
+    }
+    let stamp_esperado = format!("{:016x}", hasher.finish());
+    if lib.is_file()
+        && fs::read_to_string(&stamp).map(|s| s.trim() == stamp_esperado).unwrap_or(false)
+    {
+        return Some(lib);
+    }
+
+    // Fontes: toda a library/ do mbedTLS + everest (X25519) + glue.
+    let mut fontes: Vec<PathBuf> = Vec::new();
+    let lib_dir = mbedtls.join("library");
+    if let Ok(entries) = fs::read_dir(&lib_dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().map(|x| x == "c").unwrap_or(false) {
+                fontes.push(p);
+            }
+        }
+    }
+    // everest: mesmo conjunto do CMake upstream (os .c de kremlib são
+    // apenas para o caminho "verified uint128", não usado no clang/gcc).
+    for rel in [
+        "everest.c",
+        "x25519.c",
+        "Hacl_Curve25519_joined.c",
+    ] {
+        let p = everest.join("library").join(rel);
+        if p.is_file() {
+            fontes.push(p);
+        }
+    }
+    fontes.push(tls_dir.join("porsol_tls.c"));
+    fontes.push(tls_dir.join("porsol_cacert.c"));
+    // Ordem estável: os objetos são nomeados por índice.
+    fontes.sort();
+    if fontes.is_empty() {
+        return None;
+    }
+
+    let clang = clang_executable();
+    fs::create_dir_all(&obj_dir).ok()?;
+    let includes = [
+        include.clone(),
+        everest.join("include"),
+        everest.join("include").join("everest"),
+        everest.join("include").join("everest").join("kremlib"),
+        // common.h do mbedTLS (usado também pelas fontes everest).
+        lib_dir.clone(),
+        runtime.clone(),
+        tls_dir.clone(),
+    ];
+
+    // Compila cada fonte em paralelo (até 8 jobs).
+    let fontes = std::sync::Arc::new(fontes);
+    let proximo = std::sync::Arc::new(std::sync::Mutex::new(0usize));
+    let falhou = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let clang = std::sync::Arc::new(clang);
+    let includes = std::sync::Arc::new(includes);
+    let obj_dir = std::sync::Arc::new(obj_dir);
+    let mut handles = Vec::new();
+    for _ in 0..8 {
+        let fontes = std::sync::Arc::clone(&fontes);
+        let proximo = std::sync::Arc::clone(&proximo);
+        let falhou = std::sync::Arc::clone(&falhou);
+        let clang = std::sync::Arc::clone(&clang);
+        let includes = std::sync::Arc::clone(&includes);
+        let obj_dir = std::sync::Arc::clone(&obj_dir);
+        handles.push(std::thread::spawn(move || loop {
+            if falhou.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
+            let idx = {
+                let mut g = proximo.lock().unwrap();
+                if *g >= fontes.len() {
+                    return;
+                }
+                let i = *g;
+                *g += 1;
+                i
+            };
+            let src = &fontes[idx];
+            let obj = obj_dir.join(format!("{:04}.o", idx));
+            // Reaproveita .o mais novo que o fonte (incremental).
+            let precisa = match (fs::metadata(src), fs::metadata(&obj)) {
+                (Ok(a), Ok(b)) => a.modified().ok() > b.modified().ok(),
+                _ => true,
+            };
+            if !precisa {
+                return;
+            }
+            let mut cmd = Command::new(clang.as_ref());
+            cmd.arg("-c").arg(src).arg("-o").arg(&obj)
+                .arg("-O2")
+                .arg("-ffunction-sections")
+                .arg("-fdata-sections")
+                .arg("-w")
+                .arg("-D_WIN32_WINNT=0x0601");
+            for inc in includes.iter() {
+                cmd.arg("-I").arg(inc);
+            }
+            let ok = cmd.output().map(|o| o.status.success()).unwrap_or(false);
+            if !ok {
+                falhou.store(true, std::sync::atomic::Ordering::Relaxed);
+                return;
+            }
+        }));
+    }
+    for h in handles {
+        let _ = h.join();
+    }
+    if falhou.load(std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("Aviso: falha ao compilar runtime TLS (mbedTLS); HTTPS indisponível no LLVM.");
+        return None;
+    }
+
+    // Arquiva estática com llvm-ar (ou ar).
+    let ar = clang_executable()
+        .parent()
+        .map(|d| d.join(if cfg!(windows) { "llvm-ar.exe" } else { "llvm-ar" }))
+        .filter(|p| p.is_file())
+        .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "llvm-ar" } else { "ar" }));
+    let objs: Vec<PathBuf> = (0..fontes.len())
+        .map(|i| obj_dir.join(format!("{:04}.o", i)))
+        .collect();
+    let saida = Command::new(&ar)
+        .arg("rcs")
+        .arg(&lib)
+        .args(&objs)
+        .output();
+    match saida {
+        Ok(o) if o.status.success() => {
+            fs::write(&stamp, &stamp_esperado).ok();
+            Some(lib)
+        }
+        _ => {
+            eprintln!("Aviso: falha ao arquivar runtime TLS; HTTPS indisponível no LLVM.");
+            None
+        }
+    }
+}
+
 /// Compila o LLVM IR gerado e vincula o runtime nativo de async/await.
 /// Se existir LLVM IR da biblioteca padrão, também faz linkagem automática.
 ///
@@ -46,6 +221,10 @@ pub fn compilar_llvm_ir_com_runtime(
         .join("src")
         .join("runtime")
         .join("async_runtime.c");
+    let stdlib_runtime_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("runtime")
+        .join("porsol_runtime.c");
 
     if !runtime_path.is_file() {
         return Err(format!(
@@ -53,10 +232,21 @@ pub fn compilar_llvm_ir_com_runtime(
             runtime_path.display()
         ));
     }
+    if !stdlib_runtime_path.is_file() {
+        return Err(format!(
+            "Runtime da biblioteca padrão não encontrado: {}",
+            stdlib_runtime_path.display()
+        ));
+    }
 
     let mut command = Command::new(clang_executable());
     command.arg(ll_path);
     command.arg(&runtime_path);
+    command.arg(&stdlib_runtime_path);
+    // Seções por função: permite ao linker remover código não usado
+    // (inclui o runtime TLS inteiro quando o programa não usa https).
+    command.arg("-ffunction-sections");
+    command.arg("-fdata-sections");
 
     // Se existe LLVM IR da biblioteca padrão, adiciona para linkagem
     if let Some(stdlib_dir) = stdlib_path {
@@ -64,6 +254,30 @@ pub fn compilar_llvm_ir_com_runtime(
         if stdlib_ll_path.exists() {
             println!("  📦 Linkando com biblioteca padrão LLVM IR...");
             command.arg(&stdlib_ll_path);
+        }
+    }
+
+    // Runtime TLS (mbedTLS) — biblioteca estática cacheada. Só é linkada
+    // quando o programa usa ClienteHttp (o dispatch http/https é em runtime,
+    // então qualquer uso de ClienteHttp pode receber uma URL https://).
+    // Programas sem ClienteHttp não carregam nada de TLS.
+    // Só conta chamadas reais: os literais nativos são emitidos como
+    // c"ClienteHttp::..." (os declares usam Sistema_Rede_ClienteHttp::).
+    let usa_cliente_http = fs::read_to_string(ll_path)
+        .map(|ir| ir.contains("c\"ClienteHttp::"))
+        .unwrap_or(false);
+    if usa_cliente_http {
+        if let Some(tls_lib) = garantir_lib_tls() {
+            command.arg("-DPOR_DO_SOL_HAS_TLS");
+            // Dead-strip do TLS não referenciado: /opt:ref no lld-link/MSVC,
+            // --gc-sections no ld ELF.
+            if cfg!(windows) {
+                command.arg("-Wl,/opt:ref");
+                command.arg("-lbcrypt");
+            } else {
+                command.arg("-Wl,--gc-sections");
+            }
+            command.arg(&tls_lib);
         }
     }
 
@@ -76,7 +290,12 @@ pub fn compilar_llvm_ir_com_runtime(
     command.arg("-o").arg(&output_file);
 
     #[cfg(windows)]
-    command.arg("-llegacy_stdio_definitions");
+    {
+        command.arg("-llegacy_stdio_definitions");
+        // Winsock (rede/DNS) e CommandLineToArgvW (Ambiente.Argumentos).
+        command.arg("-lws2_32");
+        command.arg("-lshell32");
+    }
 
     #[cfg(not(windows))]
     command.arg("-pthread");
@@ -126,7 +345,10 @@ impl GeradorCodigo {
         let mut generator = cil::CilGenerator::new(programa, type_checker, nome_base.to_string());
         let code = generator.generate();
         let il_path = format!("{}.il", nome_base);
-        fs::write(&il_path, code).map_err(|e| e.to_string())?;
+        // BOM UTF-8: ilasm/ilasm-core interpretam arquivos sem BOM na codepage ANSI,
+        // corrompendo literais ldstr com acentos.
+        let code_com_bom = format!("\u{FEFF}{}", code);
+        fs::write(&il_path, code_com_bom).map_err(|e| e.to_string())?;
         Ok(il_path)
     }
 
@@ -261,13 +483,15 @@ impl GeradorCodigo {
                             });
                         if metodo.eh_estatica {
                             if let Some(chave) = &chave_nativa {
+                                let flag_async = if metodo.eh_assincrona { " ASSINCRONO" } else { "" };
                                 writeln!(
                                     manifesto,
-                                    "DEFINE_STATIC_NATIVE_METHOD {} {} {} {} {}",
+                                    "DEFINE_STATIC_NATIVE_METHOD {} {} {} {}{} {}",
                                     fqn,
                                     metodo.nome,
                                     ret,
                                     chave,
+                                    flag_async,
                                     params.join(" ")
                                 )
                                 .ok();
@@ -285,13 +509,15 @@ impl GeradorCodigo {
                             }
                         } else {
                             if let Some(chave) = &chave_nativa {
+                                let flag_async = if metodo.eh_assincrona { " ASSINCRONO" } else { "" };
                                 writeln!(
                                     manifesto,
-                                    "DEFINE_NATIVE_METHOD {} {} {} {} {}",
+                                    "DEFINE_NATIVE_METHOD {} {} {} {}{} {}",
                                     fqn,
                                     metodo.nome,
                                     ret,
                                     chave,
+                                    flag_async,
                                     params.join(" ")
                                 )
                                 .ok();

@@ -1,0 +1,122 @@
+usando Sistema;
+usando Sistema.Colecoes;
+usando Sistema.Data;
+usando Sistema.Diagnostics;
+usando Sistema.Texto;
+
+função Principal()
+{
+    // ===== Sistema.Data.Horario =====
+    var h1 = Horario.DeMinutos(90);
+    Console.EscreverLinha($"Horario 90min: {h1.ParaTexto()}");
+    var h2 = novo Horario(1, 2, 30, 15);
+    Console.EscreverLinha($"Horario 1d2h30m15s: {h2.ParaTexto()}");
+    var h3 = h1.Adicionar(Horario.DeSegundos(30));
+    Console.EscreverLinha($"Soma: {h3.ParaTexto()} (total {h3.TotalSegundos()}s)");
+    Console.EscreverLinha($"MaiorQue: {h2.MaiorQue(h1)}");
+
+    // ===== Sistema.Texto.Texto (novos métodos) =====
+    var txt = "Portugues do Brasil";
+    Console.EscreverLinha($"Subtexto: {Texto.Subtexto(txt, 0, 8)}");
+    var idx = Texto.IndiceDe(txt, "Brasil");
+    Console.EscreverLinha($"IndiceDe Brasil: {idx}");
+    var uidx = Texto.UltimoIndiceDe(txt, "o");
+    Console.EscreverLinha($"UltimoIndiceDe o: {uidx}");
+    var inv = Texto.Inverter("abc");
+    Console.EscreverLinha($"Inverter: {inv}");
+    var padE = Texto.PadEsquerda("42", 5, "0");
+    Console.EscreverLinha($"PadEsquerda: [{padE}]");
+    var padD = Texto.PadDireita("42", 5, "0");
+    Console.EscreverLinha($"PadDireita: [{padD}]");
+    var cont = Texto.ContarOcorrencias(txt, "o");
+    Console.EscreverLinha($"ContarOcorrencias o: {cont}");
+    var vazia = Texto.EstaVazia("");
+    var naoVazia = Texto.EstaVazia("x");
+    Console.EscreverLinha($"EstaVazia: {vazia} / {naoVazia}");
+    var rep = Texto.Repete("ab", 3);
+    Console.EscreverLinha($"Repete: {rep}");
+    var cmp = Texto.Comparar("a", "b");
+    Console.EscreverLinha($"Comparar: {cmp}");
+    var eq = Texto.IgualIgnoreCase("ABC", "abc");
+    Console.EscreverLinha($"IgualIgnoreCase: {eq}");
+
+    // ===== Coleções =====
+    var lista = novo Lista<inteiro>();
+    lista.Adicionar(30);
+    lista.Adicionar(10);
+    lista.Adicionar(20);
+    lista.Inserir(1, 15);
+    lista.OrdenarDecrescente();
+    Console.EscreverLinha($"Lista ordenada decrescente, primeiro={lista.ObterPrimeiro()} ultimo={lista.ObterUltimo()}");
+    var arr = lista.ParaArray();
+    Console.EscreverLinha($"ParaArray tamanho={arr.tamanho} arr[0]={arr[0]}");
+    var removido = lista.RemoverUltimo();
+    Console.EscreverLinha($"RemoverUltimo={removido} tamanho={lista.Tamanho}");
+    var jaTinha = lista.AdicionarSeAusente(30);
+    var adicionou = lista.AdicionarSeAusente(99);
+    Console.EscreverLinha($"AdicionarSeAusente 30={jaTinha} 99={adicionou}");
+
+    var fila = novo Fila<inteiro>();
+    fila.Enfileirar(1);
+    fila.Enfileirar(2);
+    var filaLista = fila.ParaLista();
+    Console.EscreverLinha($"Fila->Lista tamanho={filaLista.Tamanho}");
+
+    var pilha = novo Pilha<texto>();
+    pilha.Empilhar("topo");
+    pilha.Empilhar("base");
+    var pilhaArr = pilha.ParaArray();
+    Console.EscreverLinha($"Pilha->Array [0]={pilhaArr[0]} [1]={pilhaArr[1]}");
+
+    var c1 = novo Conjunto<inteiro>();
+    c1.Adicionar(1); c1.Adicionar(2); c1.Adicionar(3);
+    var c2 = novo Conjunto<inteiro>();
+    c2.Adicionar(3); c2.Adicionar(4);
+    var uniao = c1.Uniao(c2);
+    var inter = c1.Intersecao(c2);
+    var dif = c1.Diferenca(c2);
+    Console.EscreverLinha($"Uniao={uniao.Tamanho} Inter={inter.Tamanho} Dif={dif.Tamanho}");
+
+    var dic = novo Dicionario<texto, inteiro>();
+    dic.Adicionar("um", 1);
+    dic.Adicionar("dois", 2);
+    var tv1 = dic.TentarObter("um");
+    var tv2 = dic.TentarObter("tres");
+    Console.EscreverLinha($"TentarObter um={tv1} tres={tv2}");
+
+    // ===== Sistema.Conversao =====
+    var pi = Conversao.ParaInteiro("42");
+    Console.EscreverLinha($"ParaInteiro 42={pi}");
+    var pd = Conversao.ParaDuplo("3.14");
+    Console.EscreverLinha($"ParaDuplo 3.14={pd}");
+    var enh = Conversao.EhNumero("12x");
+    var enh2 = Conversao.EhNumero("7");
+    Console.EscreverLinha($"EhNumero 12x={enh} 7={enh2}");
+    var pb = Conversao.ParaBooleano("verdadeiro");
+    Console.EscreverLinha($"ParaBooleano verdadeiro={pb}");
+
+    // ===== Sistema.Ambiente =====
+    Console.EscreverLinha($"NomeComputador={Ambiente.NomeComputador()}");
+    var argsProg = Ambiente.Argumentos();
+    Console.EscreverLinha($"Argumentos count={argsProg.tamanho}");
+    Ambiente.DefinirVariavelAmbiente("POR_DO_SOL_TESTE", "ok");
+    var ve = Ambiente.VariavelAmbiente("POR_DO_SOL_TESTE");
+    Console.EscreverLinha($"VariavelAmbiente={ve}");
+
+    // ===== Sistema.Diagnostics.Cronometro =====
+    var cron = novo Cronometro();
+    cron.Iniciar();
+    var i = 0;
+    enquanto (i < 100000)
+    {
+        i = i + 1;
+    }
+    cron.Parar();
+    Console.EscreverLinha($"Cronometro ms={cron.DecorridoMilissegundos()} rodando={cron.EstaExecutando()}");
+
+    // ===== Sistema.Rede.Dns =====
+    var ip = Dns.Resolver("localhost");
+    Console.EscreverLinha($"Dns localhost={ip}");
+
+    Console.EscreverLinha("FIM FASE6");
+}

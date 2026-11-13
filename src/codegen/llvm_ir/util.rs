@@ -5,6 +5,20 @@ use crate::library_loader::LibSimbolo;
 use super::LlvmGenerator;
 
 impl<'a> LlvmGenerator<'a> {
+    /// Converte um identificador Por do Sol em nome LLVM válido
+    /// (somente [A-Za-z0-9_.$]; demais chars viram '_').
+    pub(crate) fn llvm_ident(nome: &str) -> String {
+        nome.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '$' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
+    }
+
     pub(crate) fn mangle_tipo_simple(&self, t: &ast::Tipo) -> String {
         match t {
             ast::Tipo::Booleano => "bool".to_string(),
@@ -310,7 +324,7 @@ impl<'a> LlvmGenerator<'a> {
 
     pub(crate) fn setup_parameters(&mut self, params: &[ast::Parametro]) {
         for param in params {
-            let ptr_reg = format!("%var.{0}", param.nome);
+            let ptr_reg = format!("%var.{}", Self::llvm_ident(&param.nome));
             let var_type = self.resolve_type(&param.tipo, &self.namespace_path);
             let llvm_type = self.map_type_to_llvm_storage(&var_type);
             let align = self.get_type_alignment(&var_type);
@@ -320,7 +334,7 @@ impl<'a> LlvmGenerator<'a> {
                 ptr_reg, llvm_type, align
             ));
 
-            let param_reg = format!("%param.{0}", param.nome);
+            let param_reg = format!("%param.{}", Self::llvm_ident(&param.nome));
             self.body.push_str(&format!(
                 "  store {0} {1}, {0}* {2}\n",
                 llvm_type, param_reg, ptr_reg

@@ -1,0 +1,36 @@
+usando Sistema;
+usando Sistema.Aleatorio;
+usando Sistema.Texto;
+
+função Principal() {
+    // ===== Aleatorio =====
+    var r = novo Aleatorio(42);
+    var r2 = novo Aleatorio(42);
+    Console.EscreverLinha($"Proximo: {r.Proximo()}");
+    Console.EscreverLinha($"Entre 1-10: {r.ProximoEntre(1, 10)}");
+    Console.EscreverLinha($"Flutuante: {r.ProximoFlutuante()}");
+    Console.EscreverLinha($"Booleano: {r.ProximoBooleano()}");
+    var r4 = novo Aleatorio(99);
+    var r5 = novo Aleatorio(99);
+    var a = r4.Proximo();
+    var b = r5.Proximo();
+    Console.EscreverLinha($"Deterministico: {a == b}");
+
+    var r3 = novo Aleatorio();
+    Console.EscreverLinha($"Auto seed entre 0-100: {r3.ProximoEntre(0, 100)}");
+    r3.Reseed(7);
+    Console.EscreverLinha($"Reseed entre 0-100: {r3.ProximoEntre(0, 100)}");
+
+    // ===== Guid =====
+    var g1 = Guid.Novo();
+    var g2 = Guid.Novo();
+    Console.EscreverLinha($"Guid1: {g1}");
+    Console.EscreverLinha($"Guid2: {g2}");
+    Console.EscreverLinha($"Diferentes: {g1 != g2}");
+    Console.EscreverLinha($"EhValido guid: {Guid.EhValido(g1)}");
+    var lixo = "nao-e-guid";
+    Console.EscreverLinha($"EhValido lixo: {Guid.EhValido(lixo)}");
+    Console.EscreverLinha($"Vazio: {Guid.Vazio()}");
+
+    Console.EscreverLinha("FIM FASE5");
+}

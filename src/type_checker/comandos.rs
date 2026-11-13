@@ -3,7 +3,7 @@ use crate::ast::*;
 use crate::error::{ErroCompilador, TipoErro};
 use crate::library_loader::{self, LibSimbolo};
 use std::collections::{HashMap, HashSet};
-use super::ResolvedClassInfo;
+use super::{ResolvedClassInfo, string_para_tipo};
 use super::VerificadorTipos;
 
 impl<'a> VerificadorTipos<'a> {
@@ -122,6 +122,55 @@ impl<'a> VerificadorTipos<'a> {
                                     prop_nome, nome_classe
                                 ),
                             ));
+                        }
+                    } else if let Some(LibSimbolo::Classe(lib_classe)) = self
+                        .biblioteca_externa
+                        .as_ref()
+                        .and_then(|bib| bib.simbolos.get(&nome_classe))
+                    {
+                        // Classe da biblioteca padrão: resolved_classes não a
+                        // contém, então valida contra os metadados do .pbl.
+                        let prop_tipo = lib_classe
+                            .propriedades
+                            .iter()
+                            .find(|p| p.nome == *prop_nome)
+                            .map(|p| string_para_tipo(&p.tipo))
+                            .or_else(|| {
+                                lib_classe
+                                    .campos
+                                    .iter()
+                                    .find(|c| c.nome == *prop_nome)
+                                    .map(|c| string_para_tipo(&c.tipo))
+                            });
+                        match prop_tipo {
+                            Some(p_tipo) => {
+                                let val_tipo = self.inferir_tipo_expressao(
+                                    val_expr,
+                                    namespace_atual,
+                                    classe_atual,
+                                    escopo_vars,
+                                );
+                                if val_tipo != Tipo::Inferido
+                                    && !self.tipos_compativeis_atribuicao(&p_tipo, &val_tipo)
+                                {
+                                    self.erros.push(ErroCompilador::novo(
+                                        TipoErro::Semântico,
+                                        format!(
+                                            "Atribuição de tipo inválido para propriedade \"{}\". Esperado {:?}, recebido {:?}.",
+                                            prop_nome, p_tipo, val_tipo
+                                        ),
+                                    ));
+                                }
+                            }
+                            None => {
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    format!(
+                                        "Propriedade \"{}\" não encontrada na classe \"{}\".",
+                                        prop_nome, nome_classe
+                                    ),
+                                ));
+                            }
                         }
                     } else {
                         self.erros.push(ErroCompilador::novo(

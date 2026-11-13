@@ -1,0 +1,58 @@
+usando Sistema;
+usando Sistema.IO;
+usando Sistema.Texto;
+
+função Principal() {
+    // ===== Caminho =====
+    var caminho = Caminho.Combinar("dados", "teste.txt");
+    Console.EscreverLinha($"Combinar: {caminho}");
+    Console.EscreverLinha($"NomeArquivo: {Caminho.NomeArquivo(caminho)}");
+    Console.EscreverLinha($"NomeSemExtensao: {Caminho.NomeSemExtensao(caminho)}");
+    Console.EscreverLinha($"Extensao: {Caminho.Extensao(caminho)}");
+    Console.EscreverLinha($"DiretorioPai: {Caminho.DiretorioPai(caminho)}");
+    var absX = Caminho.Absoluto("x.txt");
+    Console.EscreverLinha($"Absoluto: {absX}");
+    Console.EscreverLinha($"Separador: [{Caminho.Separador()}]");
+
+    // ===== Arquivo extras =====
+    var arq = "tmp_fase3_teste.txt";
+    var conteudo = "linha1\nlinha2\nlinha3";
+    Arquivo.EscreverTexto(arq, conteudo);
+    Console.EscreverLinha($"Tamanho: {Arquivo.Tamanho(arq)}");
+    Console.EscreverLinha($"Existe: {Arquivo.Existe(arq)}");
+
+    var linhas = Arquivo.LerLinhas(arq);
+    Console.EscreverLinha($"Linhas: {linhas[0]}|{linhas[1]}|{linhas[2]}");
+    Console.EscreverLinha($"Total linhas: {linhas.Tamanho}");
+
+    // ===== Leitor =====
+    var leitor = Leitor.Abrir(arq);
+    var l1 = leitor.LerLinha();
+    var l2 = leitor.LerLinha();
+    Console.EscreverLinha($"Leitor: {l1}|{l2}");
+    Console.EscreverLinha($"TemMais: {leitor.TemMais()}");
+    var resto = leitor.LerResto();
+    Console.EscreverLinha($"Resto: {resto}");
+    Console.EscreverLinha($"EstaNoFim: {leitor.EstaNoFim()}");
+    leitor.Fechar();
+
+    // ===== InformacaoArquivo =====
+    var info = InformacaoArquivo.Abrir(arq);
+    Console.EscreverLinha($"Info.Existe: {info.Existe()}");
+    Console.EscreverLinha($"Info.Nome: {info.Nome()}");
+    Console.EscreverLinha($"Info.Tamanho: {info.Tamanho()}");
+    Console.EscreverLinha($"Info.Diretorio: {info.Diretorio()}");
+    Console.EscreverLinha($"Info.Modificacao: {info.UltimaModificacao()}");
+
+    // ===== Diretorio =====
+    var atual = Diretorio.ObterAtual();
+    var arquivos = Diretorio.ObterArquivos(atual);
+    Console.EscreverLinha($"Arquivos no dir: {arquivos.Tamanho}");
+    var dirs = Diretorio.ObterDiretorios(atual);
+    Console.EscreverLinha($"Dirs no dir: {dirs.Tamanho}");
+
+    // ===== Limpeza =====
+    Arquivo.Excluir(arq);
+    Console.EscreverLinha($"Apos excluir: {Arquivo.Existe(arq)}");
+    Console.EscreverLinha("FIM FASE3");
+}

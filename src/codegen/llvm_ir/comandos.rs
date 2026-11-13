@@ -186,6 +186,16 @@ impl<'a> LlvmGenerator<'a> {
                 // Caso instância
                 let (value_reg, value_type) = self.generate_expressao(val_expr);
                 let (obj_ptr_reg, obj_type) = self.generate_expressao(obj_expr);
+                // Biblioteca padrão: propriedades via dispatch nativo.
+                if self.try_stdlib_property_set(
+                    &obj_ptr_reg,
+                    &obj_type,
+                    prop_nome,
+                    &value_reg,
+                    &value_type,
+                ) {
+                    return;
+                }
                 let class_name = match &obj_type {
                     ast::Tipo::Classe(name) => name.clone(),
                     ast::Tipo::Aplicado { ref nome, ref args } => {
@@ -242,7 +252,7 @@ impl<'a> LlvmGenerator<'a> {
         value_type: ast::Tipo,
         value_reg: &str,
     ) {
-        let ptr_reg = format!("%var.{0}", name);
+        let ptr_reg = format!("%var.{}", Self::llvm_ident(name));
         let llvm_type = self.map_type_to_llvm_storage(&var_type);
         let align = self.get_type_alignment(&var_type);
 

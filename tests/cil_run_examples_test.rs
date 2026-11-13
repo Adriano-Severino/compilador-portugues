@@ -163,3 +163,93 @@ fn run_exemplos_cil_end_to_end() {
     }
 }
 
+/// Subconjunto da biblioteca padrão mapeado para a BCL .NET
+/// (Matematica→System.Math, Texto→System.String, Guid→System.Guid,
+/// Ambiente→System.Environment, Conversao→Parse com cultura invariante).
+#[test]
+fn cil_stdlib_bcl_mapeado() {
+    if !have_cil_toolchain() {
+        eprintln!("Compilador CIL (.NET / ilasm) não encontrado; ignorando.");
+        return;
+    }
+    let root = repo_root();
+    let dir = root.join("target/test-temp-cil-stdlib");
+    fs::create_dir_all(&dir).unwrap();
+    let pr_path = dir.join("stdlib_bcl.pr");
+    let src = r#"
+        usando Sistema;
+
+        função Principal() {
+            Console.EscreverLinha(Matematica.Abs(-7));
+            Console.EscreverLinha(Matematica.Max(3, 9));
+            Console.EscreverLinha(Texto.ParaMaiusculas("ola"));
+            Console.EscreverLinha(Texto.Tamanho("abc"));
+            Console.EscreverLinha(Texto.ComecaCom("por do sol", "por"));
+            Console.EscreverLinha(Texto.Subtexto("Portugues", 0, 4));
+            Console.EscreverLinha(Texto.Comparar("a", "b"));
+            Console.EscreverLinha(Texto.IgualIgnoreCase("Oi", "oI"));
+            Console.EscreverLinha(Guid.Vazio());
+            Console.EscreverLinha(Conversao.ParaInteiro("42"));
+            Console.EscreverLinha(Conversao.ParaBooleano("verdadeiro"));
+            Console.EscreverLinha(Ambiente.NomeComputador());
+        }
+    "#;
+    fs::write(&pr_path, src).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_compilador"))
+        .current_dir(&root)
+        .args([pr_path.to_str().unwrap(), "--target=dotnet"])
+        .output()
+        .expect("falha ao executar compilador");
+    assert!(
+        output.status.success(),
+        "compilador CIL falhou:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let exe = if cfg!(windows) {
+        root.join("stdlib_bcl.exe")
+    } else {
+        root.join("stdlib_bcl")
+    };
+    let out = Command::new(&exe).output().expect("falha ao executar exe CIL");
+    assert!(
+        out.status.success(),
+        "execução CIL falhou:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
+    let lines: Vec<&str> = stdout.lines().collect();
+    let esperadas = [
+        "7",        // Abs (float64 formatado pela cultura)
+        "9",
+        "OLA",
+        "3",
+        "True",
+        "Port",
+        "-1",
+        "True",
+        "00000000-0000-0000-0000-000000000000",
+        "42",
+        "True",
+    ];
+    for (i, e) in esperadas.iter().enumerate() {
+        let linha = lines.get(i).map(|s| s.trim()).unwrap_or("");
+        // Abs/Max são float64: aceita "7" ou "7,0" conforme cultura.
+        if i < 2 {
+            assert!(
+                linha.starts_with(e),
+                "linha {} divergente: '{}' != prefixo '{}'. stdout:\n{}",
+                i, linha, e, stdout
+            );
+        } else {
+            assert_eq!(linha, *e, "linha {} divergente. stdout:\n{}", i, stdout);
+        }
+    }
+    // NomeComputador varia por máquina — basta existir uma 12ª linha.
+    assert!(lines.len() >= 12, "saída incompleta:\n{}", stdout);
+
+    let _ = fs::remove_file(&exe);
+    let _ = fs::remove_file(root.join("stdlib_bcl.il"));
+}
+

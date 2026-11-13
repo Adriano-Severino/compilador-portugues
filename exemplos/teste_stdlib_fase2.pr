@@ -1,0 +1,68 @@
+usando Sistema;
+usando Sistema.Texto;
+usando Sistema.Colecoes;
+
+função Principal() {
+    // ===== Texto estático =====
+    var partes = Texto.Dividir("um,dois,três", ",");
+    Console.EscreverLinha($"Dividir: {partes[0]}|{partes[1]}|{partes[2]}");
+    var linhas = Texto.DividirLinhas("a\nb\nc");
+    Console.EscreverLinha($"Linhas: {linhas[0]}|{linhas[2]}");
+
+    var junção = Texto.Juntar(partes, "-");
+    Console.EscreverLinha($"Juntar: {junção}");
+
+    var comEspacos = "  oi  ";
+    var aparado = Texto.RemoverEspacos(comEspacos);
+    Console.EscreverLinha($"Trim: [{aparado}]");
+
+    var olá = "Olá";
+    var maius = Texto.ParaMaiusculas(olá);
+    var minus = Texto.ParaMinusculas("MUNDO");
+    Console.EscreverLinha($"Upper: {maius} / Lower: {minus}");
+
+    var aaa = "aaa";
+    var letraA = "a";
+    var letraB = "b";
+    var trocado = Texto.Substituir(aaa, letraA, letraB);
+    Console.EscreverLinha($"Substituir: {trocado}");
+
+    var olaMundo = "Olá mundo";
+    var prefixoOla = "Olá";
+    var sufixoMundo = "mundo";
+    var trechoMundo = "mundo";
+    var textoVazio = "";
+    Console.EscreverLinha($"ComecaCom: {Texto.ComecaCom(olaMundo, prefixoOla)} TerminaCom: {Texto.TerminaCom(olaMundo, sufixoMundo)}");
+    Console.EscreverLinha($"Contem: {Texto.Contem(olaMundo, trechoMundo)} Vazio: {Texto.VazioOuNulo(textoVazio)}");
+    Console.EscreverLinha($"Tamanho: {Texto.Tamanho(olá)}");
+
+    // ===== Codificacao =====
+    var bytes = Codificacao.ParaBytes(olá);
+    Console.EscreverLinha($"Bytes: {bytes[0]},{bytes[1]},{bytes[2]},{bytes[3]}");
+    var tamBytes = Codificacao.TamanhoBytes(olá);
+    Console.EscreverLinha($"TamanhoBytes: {tamBytes}");
+    var deBytes = Codificacao.ParaTexto(bytes);
+    Console.EscreverLinha($"DeBytes: {deBytes}");
+
+    // ===== Regex =====
+    var padraoDigitos = "\\d+";
+    var rx = novo Regex(padraoDigitos);
+    var abc123 = "abc123";
+    Console.EscreverLinha($"Regex.Corresponde: {rx.Corresponde(abc123)}");
+    Console.EscreverLinha($"Regex.Localizar: {rx.Localizar(abc123)}");
+    var misto = "abc123def45";
+    var hash = "#";
+    var substituido = rx.Substituir(misto, hash);
+    Console.EscreverLinha($"Regex.Substituir: {substituido}");
+    var sequencia = "a1b22c333";
+    var contagem = rx.Contar(sequencia);
+    Console.EscreverLinha($"Regex.Contar: {contagem}");
+    var div = rx.Dividir(sequencia);
+    Console.EscreverLinha($"Regex.Dividir[1]: {div[1]}");
+    var literal = "a.b";
+    var escapado = Regex.Escape(literal);
+    Console.EscreverLinha($"Regex.Escape: {escapado}");
+    var padraoLetra = "[a-z]+";
+    var padraoInvalido = "[";
+    Console.EscreverLinha($"Regex.EhValido: {Regex.EhValido(padraoLetra)} / {Regex.EhValido(padraoInvalido)}");
+}

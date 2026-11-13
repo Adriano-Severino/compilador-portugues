@@ -432,6 +432,15 @@ impl<'a> CilGenerator<'a> {
                     }
                 }
 
+                // Biblioteca padrão: mapeamento para a BCL do .NET
+                // (Matematica→System.Math, Texto→System.String, Guid,
+                // Ambiente→System.Environment, Conversao→Parse).
+                if let ast::Expressao::Identificador(nome_id) = &**alvo {
+                    if let Some(res) = self.tentar_stdlib_bcl(nome_id, metodo, args, code) {
+                        return res;
+                    }
+                }
+
                 // Suporte a intrínsecos: tamanho() e comprimento()
                 if (metodo == "tamanho" || metodo == "comprimento") && args.is_empty() {
                     let tipo_alvo = self.generate_expressao(alvo, code);
@@ -945,6 +954,385 @@ impl<'a> CilGenerator<'a> {
         let tipo_cil = tipo_para_cil(tipo);
         code.push_str(&format!("    box {}\n", tipo_cil));
         code.push_str("    callvirt instance string [System.Runtime]System.Object::ToString()\n");
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Mapeamento biblioteca padrão → BCL .NET                              */
+    /* ------------------------------------------------------------------ */
+
+    /// Resolve o identificador para o nome simples de uma classe da
+    /// biblioteca padrão carregada (.pbl). Retorna None se não for stdlib.
+    fn stdlib_classe_simples(&self, nome: &str) -> Option<String> {
+        let bib = self.type_checker.biblioteca_externa.as_ref()?;
+        let fqn = self
+            .type_checker
+            .resolver_nome_classe(nome, &self.namespace_path);
+        // 1) Correspondência exata pelo FQN resolvido.
+        for s in bib.simbolos.values() {
+            if let crate::library_loader::LibSimbolo::Classe(c) = s {
+                if c.fqn == fqn {
+                    return c.fqn.rsplit('.').next().map(|s| s.to_string());
+                }
+            }
+        }
+        // 2) Fallback: nome simples único na biblioteca.
+        let mut achado: Option<String> = None;
+        for s in bib.simbolos.values() {
+            if let crate::library_loader::LibSimbolo::Classe(c) = s {
+                if c.fqn.rsplit('.').next() == Some(nome) {
+                    if achado.is_some() {
+                        return None; // ambíguo
+                    }
+                    achado = c.fqn.rsplit('.').next().map(|s| s.to_string());
+                }
+            }
+        }
+        achado
+    }
+
+    /// Tenta emitir uma chamada estática da stdlib como chamada BCL.
+    /// Retorna o tipo do resultado ou None se o método não tiver
+    /// mapeamento (o chamador segue o fluxo normal).
+    fn tentar_stdlib_bcl(
+        &mut self,
+        nome_classe: &str,
+        metodo: &str,
+        args: &[ast::Expressao],
+        code: &mut String,
+    ) -> Option<ast::Tipo> {
+        let classe = self.stdlib_classe_simples(nome_classe)?;
+        let aridade = args.len();
+        macro_rules! arg {
+            ($i:expr) => {
+                self.generate_expressao(&args[$i], code)
+            };
+        }
+        match (classe.as_str(), metodo) {
+            /* ---- Sistema.Matematica → System.Math (float64) ---- */
+            ("Matematica", m) => {
+                const SR: &str = "[System.Runtime]System.Math";
+                if (m == "Pi" || m == "E") && aridade == 0 {
+                    // PI/E são const literais — ldsfld falha em runtime;
+                    // emitir o valor direto (igual ao compilador C#).
+                    let valor = if m == "Pi" {
+                        "3.14159265358979323846264338327950288"
+                    } else {
+                        "2.71828182845904523536028747135266250"
+                    };
+                    code.push_str(&format!("    ldc.r8 {}\n", valor));
+                    return Some(ast::Tipo::Duplo);
+                }
+                let (instr, n_args): (&str, usize) = match m {
+                    "Abs" => ("Abs", 1),
+                    "Max" => ("Max", 2),
+                    "Min" => ("Min", 2),
+                    "Potencia" => ("Pow", 2),
+                    "RaizQuadrada" => ("Sqrt", 1),
+                    "Arredondar" => ("Round", 1),
+                    "Truncar" => ("Truncate", 1),
+                    "Piso" => ("Floor", 1),
+                    "Teto" => ("Ceiling", 1),
+                    "Seno" => ("Sin", 1),
+                    "Cosseno" => ("Cos", 1),
+                    "Tangente" => ("Tan", 1),
+                    "LogaritmoNatural" => ("Log", 1),
+                    "LogaritmoDez" => ("Log10", 1),
+                    "Expoente" => ("Exp", 1),
+                    _ => return None,
+                };
+                if aridade != n_args {
+                    return None;
+                }
+                for i in 0..n_args {
+                    let t = arg!(i);
+                    // Math.* espera float64; converte inteiros/flutuantes.
+                    if t != ast::Tipo::Duplo {
+                        code.push_str("    conv.r8\n");
+                    }
+                }
+                if n_args == 1 {
+                    code.push_str(&format!(
+                        "    call float64 {}::{}(float64)\n",
+                        SR, instr
+                    ));
+                } else {
+                    code.push_str(&format!(
+                        "    call float64 {}::{}(float64, float64)\n",
+                        SR, instr
+                    ));
+                }
+                Some(ast::Tipo::Duplo)
+            }
+
+            /* ---- Sistema.Texto.Texto → System.String ---- */
+            ("Texto", m) => {
+                const S: &str = "[System.Runtime]System.String";
+                match m {
+                    "ParaMaiusculas" | "ParaMinusculas" | "RemoverEspacos"
+                        if aridade == 1 =>
+                    {
+                        arg!(0);
+                        let met = match m {
+                            "ParaMaiusculas" => "ToUpper",
+                            "ParaMinusculas" => "ToLower",
+                            _ => "Trim",
+                        };
+                        code.push_str(&format!(
+                            "    callvirt instance string {}::{}()\n",
+                            S, met
+                        ));
+                        Some(ast::Tipo::Texto)
+                    }
+                    "VazioOuNulo" if aridade == 1 => {
+                        arg!(0);
+                        code.push_str(&format!(
+                            "    call bool {}::IsNullOrEmpty(string)\n",
+                            S
+                        ));
+                        Some(ast::Tipo::Booleano)
+                    }
+                    "Tamanho" if aridade == 1 => {
+                        arg!(0);
+                        code.push_str(&format!(
+                            "    callvirt instance int32 {}::get_Length()\n",
+                            S
+                        ));
+                        code.push_str("    conv.i8\n");
+                        Some(ast::Tipo::Inteiro)
+                    }
+                    "EstaVazia" if aridade == 1 => {
+                        arg!(0);
+                        code.push_str(&format!(
+                            "    callvirt instance int32 {}::get_Length()\n",
+                            S
+                        ));
+                        code.push_str("    ldc.i4.0\n    ceq\n");
+                        Some(ast::Tipo::Booleano)
+                    }
+                    "IndiceDe" | "UltimoIndiceDe" if aridade == 2 => {
+                        arg!(0);
+                        arg!(1);
+                        let met = if m == "IndiceDe" { "IndexOf" } else { "LastIndexOf" };
+                        code.push_str(&format!(
+                            "    callvirt instance int32 {}::{}(string)\n",
+                            S, met
+                        ));
+                        code.push_str("    conv.i8\n");
+                        Some(ast::Tipo::Inteiro)
+                    }
+                    "Subtexto" if aridade == 3 => {
+                        arg!(0);
+                        arg!(1);
+                        code.push_str("    conv.i4\n");
+                        arg!(2);
+                        code.push_str("    conv.i4\n");
+                        code.push_str(&format!(
+                            "    callvirt instance string {}::Substring(int32, int32)\n",
+                            S
+                        ));
+                        Some(ast::Tipo::Texto)
+                    }
+                    "PadEsquerda" | "PadDireita" if aridade == 3 => {
+                        arg!(0);
+                        arg!(1);
+                        code.push_str("    conv.i4\n");
+                        arg!(2);
+                        code.push_str("    ldc.i4.0\n");
+                        code.push_str(&format!(
+                            "    callvirt instance char {}::get_Chars(int32)\n",
+                            S
+                        ));
+                        let met = if m == "PadEsquerda" { "PadLeft" } else { "PadRight" };
+                        code.push_str(&format!(
+                            "    callvirt instance string {}::{}(int32, char)\n",
+                            S, met
+                        ));
+                        Some(ast::Tipo::Texto)
+                    }
+                    "ComecaCom" | "TerminaCom" | "Contem" if aridade == 2 => {
+                        arg!(0);
+                        arg!(1);
+                        let met = match m {
+                            "ComecaCom" => "StartsWith",
+                            "TerminaCom" => "EndsWith",
+                            _ => "Contains",
+                        };
+                        code.push_str(&format!(
+                            "    callvirt instance bool {}::{}(string)\n",
+                            S, met
+                        ));
+                        Some(ast::Tipo::Booleano)
+                    }
+                    "Substituir" if aridade == 3 => {
+                        arg!(0);
+                        arg!(1);
+                        arg!(2);
+                        code.push_str(&format!(
+                            "    callvirt instance string {}::Replace(string, string)\n",
+                            S
+                        ));
+                        Some(ast::Tipo::Texto)
+                    }
+                    "Comparar" if aridade == 2 => {
+                        arg!(0);
+                        arg!(1);
+                        code.push_str(&format!(
+                            "    call int32 {}::CompareOrdinal(string, string)\n",
+                            S
+                        ));
+                        code.push_str("    conv.i8\n");
+                        Some(ast::Tipo::Inteiro)
+                    }
+                    "IgualIgnoreCase" if aridade == 2 => {
+                        arg!(0);
+                        arg!(1);
+                        code.push_str("    ldc.i4.5\n"); // StringComparison.OrdinalIgnoreCase
+                        code.push_str(&format!(
+                            "    call bool {}::Equals(string, string, valuetype [System.Runtime]System.StringComparison)\n",
+                            S
+                        ));
+                        Some(ast::Tipo::Booleano)
+                    }
+                    _ => None,
+                }
+            }
+
+            /* ---- Sistema.Guid.Guid → System.Guid ---- */
+            ("Guid", m) => {
+                const G: &str = "[System.Runtime]System.Guid";
+                match m {
+                    "Novo" | "Vazio" if aridade == 0 => {
+                        if m == "Novo" {
+                            code.push_str(&format!(
+                                "    call valuetype {} {}::NewGuid()\n",
+                                G, G
+                            ));
+                        } else {
+                            // Guid.Empty é campo estático (não propriedade).
+                            code.push_str(&format!(
+                                "    ldsfld valuetype {} {}::Empty\n",
+                                G, G
+                            ));
+                        }
+                        // Guid é valuetype: box antes de chamar ToString
+                        // virtual (callvirt direto em struct não é válido).
+                        code.push_str(&format!("    box {}\n", G));
+                        code.push_str(
+                            "    callvirt instance string [System.Runtime]System.Object::ToString()\n",
+                        );
+                        Some(ast::Tipo::Texto)
+                    }
+                    _ => None,
+                }
+            }
+
+            /* ---- Sistema.Ambiente.Ambiente → System.Environment ---- */
+            ("Ambiente", m) => {
+                const E: &str = "[System.Runtime]System.Environment";
+                match m {
+                    "NomeComputador" if aridade == 0 => {
+                        code.push_str(&format!(
+                            "    call string {}::get_MachineName()\n",
+                            E
+                        ));
+                        Some(ast::Tipo::Texto)
+                    }
+                    "VariavelAmbiente" if aridade == 1 => {
+                        arg!(0);
+                        code.push_str(&format!(
+                            "    call string {}::GetEnvironmentVariable(string)\n",
+                            E
+                        ));
+                        Some(ast::Tipo::Texto)
+                    }
+                    "DefinirVariavelAmbiente" if aridade == 2 => {
+                        arg!(0);
+                        arg!(1);
+                        code.push_str(&format!(
+                            "    call void {}::SetEnvironmentVariable(string, string)\n",
+                            E
+                        ));
+                        Some(ast::Tipo::Vazio)
+                    }
+                    _ => None,
+                }
+            }
+
+            /* ---- Sistema.Conversao.Conversao → Parse/ToBoolean ---- */
+            ("Conversao", m) => {
+                const S: &str = "[System.Runtime]System.String";
+                const CI: &str = "[System.Runtime]System.Globalization.CultureInfo";
+                // Parse com cultura invariante: "3.5" deve ser 3.5 em
+                // qualquer localidade (o interpretador usa strtod/C locale).
+                // Emite: arg; InvariantCulture; call Parse(string, IFormatProvider)
+                macro_rules! parse_invariante {
+                    ($ret:expr, $dono:expr) => {{
+                        arg!(0);
+                        code.push_str(&format!(
+                            "    call valuetype {} {}::get_InvariantCulture()\n",
+                            CI, CI
+                        ));
+                        code.push_str(&format!(
+                            "    call {} {}::Parse(string, class [System.Runtime]System.IFormatProvider)\n",
+                            $ret, $dono
+                        ));
+                    }};
+                }
+                match m {
+                    "ParaInteiro" if aridade == 1 => {
+                        parse_invariante!("int64", "[System.Runtime]System.Int64");
+                        Some(ast::Tipo::Inteiro)
+                    }
+                    "ParaFlutuante" if aridade == 1 => {
+                        parse_invariante!("float32", "[System.Runtime]System.Single");
+                        Some(ast::Tipo::Flutuante)
+                    }
+                    "ParaDuplo" if aridade == 1 => {
+                        parse_invariante!("float64", "[System.Runtime]System.Double");
+                        Some(ast::Tipo::Duplo)
+                    }
+                    "ParaDecimal" if aridade == 1 => {
+                        arg!(0);
+                        code.push_str(&format!(
+                            "    call valuetype {} {}::get_InvariantCulture()\n",
+                            CI, CI
+                        ));
+                        code.push_str(
+                            "    call valuetype [System.Runtime]System.Decimal [System.Runtime]System.Decimal::Parse(string, class [System.Runtime]System.IFormatProvider)\n",
+                        );
+                        Some(ast::Tipo::Decimal)
+                    }
+                    "ParaBooleano" if aridade == 1 => {
+                        arg!(0);
+                        code.push_str(&format!(
+                            "    callvirt instance string {}::ToLower()\n",
+                            S
+                        ));
+                        // Normaliza literais Por do Sol para true/false.
+                        for (de, para) in [
+                            ("verdadeiro", "true"),
+                            ("falso", "false"),
+                            ("sim", "true"),
+                            ("nao", "false"),
+                        ] {
+                            code.push_str(&format!("    ldstr \"{}\"\n", de));
+                            code.push_str(&format!("    ldstr \"{}\"\n", para));
+                            code.push_str(&format!(
+                                "    callvirt instance string {}::Replace(string, string)\n",
+                                S
+                            ));
+                        }
+                        code.push_str(
+                            "    call bool [System.Runtime]System.Boolean::Parse(string)\n",
+                        );
+                        Some(ast::Tipo::Booleano)
+                    }
+                    _ => None,
+                }
+            }
+
+            _ => None,
+        }
     }
 }
 

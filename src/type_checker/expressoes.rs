@@ -58,8 +58,7 @@ impl<'a> VerificadorTipos<'a> {
                         }
                     }
                 }
-                Expressao::ChamadaMetodo(objeto, metodo, argumentos) if matches!(objeto.as_ref(), Expressao::Identificador(nome) if nome == "Arquivo") =>
-                {
+                Expressao::ChamadaMetodo(objeto, metodo, argumentos) => {
                     for argumento in argumentos {
                         self.inferir_tipo_expressao(
                             argumento,
@@ -68,10 +67,84 @@ impl<'a> VerificadorTipos<'a> {
                             escopo_vars,
                         );
                     }
-                    match metodo.as_str() {
-                        "LerTextoAssíncrono" => Tipo::Texto,
-                        "EscreverTextoAssíncrono" | "ExisteAssíncrono" => Tipo::Booleano,
-                        _ => Tipo::Inferido,
+                    // Resolve a classe do objeto quando for um identificador simples
+                    // (ex.: `Arquivo.LerTextoAssíncrono(...)`, `cliente.ObterAsync(...)`).
+                    if let Expressao::Identificador(nome) = objeto.as_ref() {
+                        let fqn = self.resolver_nome_classe(nome, namespace_atual);
+                        // Método assíncrono em classe resolvida (código-fonte)
+                        if let Some(class_info) = self.resolved_classes.get(&fqn) {
+                            if let Some(m) = class_info.methods.get(metodo.as_str()) {
+                                if m.eh_assincrona {
+                                    return m.tipo_retorno.clone().unwrap_or(Tipo::Vazio);
+                                }
+                            }
+                        }
+                        // Método assíncrono em biblioteca externa (.pbl)
+                        if let Some(bib) = &self.biblioteca_externa {
+                            if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&fqn)
+                            {
+                                if let Some(lib_metodo) = lib_classe.metodos.get(metodo.as_str()) {
+                                    if lib_metodo.eh_assincrona {
+                                        return string_para_tipo(&lib_metodo.tipo_retorno);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Método assíncrono sobre variável cujo tipo é uma classe
+                    // da stdlib (ex.: `aguarde http.ObterAssincrono(...)`).
+                    if let Expressao::Identificador(nome) = objeto.as_ref() {
+                        if let Some(tipo_obj) = escopo_vars.get(nome) {
+                            let nome_classe = match tipo_obj {
+                                Tipo::Classe(n) => Some(n.clone()),
+                                Tipo::Aplicado { nome: n, .. } => Some(n.clone()),
+                                _ => None,
+                            };
+                            if let Some(n) = nome_classe {
+                                let fqn = self.resolver_nome_classe(&n, namespace_atual);
+                                for cand in [fqn, n] {
+                                    if let Some(bib) = &self.biblioteca_externa {
+                                        if let Some(LibSimbolo::Classe(lib_classe)) =
+                                            bib.simbolos.get(&cand)
+                                        {
+                                            if let Some(lib_metodo) =
+                                                lib_classe.metodos.get(metodo.as_str())
+                                            {
+                                                if lib_metodo.eh_assincrona {
+                                                    return string_para_tipo(
+                                                        &lib_metodo.tipo_retorno,
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if let Some(class_info) = self.resolved_classes.get(&cand) {
+                                        if let Some(m) = class_info.methods.get(metodo.as_str()) {
+                                            if m.eh_assincrona {
+                                                return m
+                                                    .tipo_retorno
+                                                    .clone()
+                                                    .unwrap_or(Tipo::Vazio);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Compatibilidade legada: chamadas em `Arquivo` (nomes hardcoded)
+                    if matches!(objeto.as_ref(), Expressao::Identificador(nome) if nome == "Arquivo") {
+                        match metodo.as_str() {
+                            "LerTextoAssíncrono" => Tipo::Texto,
+                            "EscreverTextoAssíncrono" | "ExisteAssíncrono" => Tipo::Booleano,
+                            _ => Tipo::Inferido,
+                        }
+                    } else {
+                        self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            "aguarde requer uma chamada assíncrona.".to_string(),
+                        ));
+                        Tipo::Inferido
                     }
                 }
                 _ => {

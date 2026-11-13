@@ -1,16 +1,14 @@
 //! src/library_loader.rs
 //!
 //! Carrega metadados de tipo de arquivos de biblioteca compilada.
-//! Suporta dois formatos:
-//!   • `.pbc` — bytecode legado (seção única com DEFINE_CLASS / DEFINE_METHOD …)
-//!   • `.pbl` — Biblioteca Por do Sol (formato novo com seções [MANIFESTO] e [BYTECODE])
+//! Suporta o formato `.pbl` — Biblioteca Por do Sol (formato com seções
+//! [MANIFESTO] e [BYTECODE]). O formato legado `.pbc` não é mais aceito.
 //!
 //! O compilador usa apenas o manifesto para verificação de tipos, sem carregar o bytecode
 //! completo na memória — equivalente ao mecanismo de Reference Assemblies do .NET.
 
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::io;
 use std::path::Path;
 
 #[derive(Debug, Clone)]
@@ -23,6 +21,8 @@ pub struct LibMetodo {
     /// Para métodos marcados com [Nativo]: chave de despacho no runtime (ex. "Console::EscreverLinha")
     pub chave_nativa: Option<String>,
     pub eh_estatica: bool,
+    /// Método assíncrono (assíncrona) — deve ser aguardado com `aguarde`.
+    pub eh_assincrona: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -75,14 +75,20 @@ impl Biblioteca {
 // Ponto de entrada público
 // ============================================================================
 
-/// Carrega uma biblioteca a partir de um arquivo `.pbl` ou `.pbc`.
+/// Carrega uma biblioteca a partir de um arquivo `.pbl`.
 /// Retorna os metadados necessários para a verificação de tipos.
 pub fn carregar_biblioteca(caminho: &Path) -> io::Result<Biblioteca> {
     let extensao = caminho.extension().and_then(|s| s.to_str()).unwrap_or("");
-    match extensao {
-        "pbl" => carregar_pbl(caminho),
-        _ => carregar_pbc(caminho),
+    if extensao != "pbl" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "Formato de biblioteca não suportado: .{} (esperado .pbl)",
+                extensao
+            ),
+        ));
     }
+    carregar_pbl(caminho)
 }
 
 // ============================================================================
@@ -214,6 +220,7 @@ fn processar_linha_manifesto(linha: &str, biblioteca: &mut Biblioteca) {
                     aridade: params.len(),
                     chave_nativa: Some(chave.to_string()),
                     eh_estatica: true,
+                    eh_assincrona: partes.contains(&"ASSINCRONO"),
                 };
                 if let Some(LibSimbolo::Classe(cl)) = biblioteca.simbolos.get_mut(*fqn) {
                     cl.metodos.insert(nome.to_string(), metodo);
@@ -234,6 +241,7 @@ fn processar_linha_manifesto(linha: &str, biblioteca: &mut Biblioteca) {
                     aridade: params.len(),
                     chave_nativa: Some(chave.to_string()),
                     eh_estatica: false,
+                    eh_assincrona: partes.contains(&"ASSINCRONO"),
                 };
                 if let Some(LibSimbolo::Classe(cl)) = biblioteca.simbolos.get_mut(*fqn) {
                     cl.metodos.insert(nome.to_string(), metodo);
@@ -255,9 +263,17 @@ fn processar_linha_manifesto(linha: &str, biblioteca: &mut Biblioteca) {
                     aridade: params.len(),
                     chave_nativa: None,
                     eh_estatica,
+                    eh_assincrona: false,
                 };
                 if let Some(LibSimbolo::Classe(cl)) = biblioteca.simbolos.get_mut(*fqn) {
-                    cl.metodos.insert(nome.to_string(), metodo);
+                    // Não sobrescreve um método nativo já registrado.
+                    let deve_inserir = cl
+                        .metodos
+                        .get(*nome)
+                        .map_or(true, |m| m.chave_nativa.is_none());
+                    if deve_inserir {
+                        cl.metodos.insert(nome.to_string(), metodo);
+                    }
                 }
             }
         }
@@ -277,118 +293,4 @@ fn parse_params(partes: &[&str]) -> Vec<(String, String)> {
             }
         })
         .collect()
-}
-
-// ============================================================================
-// Formato .pbc legado (mantém compatibilidade total)
-// ============================================================================
-
-fn carregar_pbc(caminho: &Path) -> io::Result<Biblioteca> {
-    let arquivo = File::open(caminho)?;
-    let leitor = BufReader::new(arquivo);
-    let mut biblioteca = Biblioteca::new();
-    let mut iterador_linhas = leitor.lines();
-
-    while let Some(Ok(linha)) = iterador_linhas.next() {
-        let partes: Vec<&str> = linha.split_whitespace().collect();
-        if partes.is_empty() {
-            continue;
-        }
-
-        match partes[0] {
-            "DEFINE_CLASS" => {
-                if let Some(nome_fqn) = partes.get(1) {
-                    let nome_pai = partes.get(2).and_then(|&p| {
-                        if p == "NULO" {
-                            None
-                        } else {
-                            Some(p.to_string())
-                        }
-                    });
-                    let nome_simples = nome_fqn.split('.').last().unwrap_or(nome_fqn).to_string();
-                    let classe = LibClasse {
-                        fqn: nome_fqn.to_string(),
-                        nome: nome_simples,
-                        nome_pai,
-                        metodos: HashMap::new(),
-                        propriedades: Vec::new(),
-                        campos: Vec::new(),
-                        eh_estatica: false,
-                    };
-                    biblioteca
-                        .simbolos
-                        .insert(nome_fqn.to_string(), LibSimbolo::Classe(classe));
-                }
-            }
-            "DEFINE_STATIC_CLASS" => {
-                if let Some(nome_fqn) = partes.get(1) {
-                    let nome_simples = nome_fqn.split('.').last().unwrap_or(nome_fqn).to_string();
-                    let classe = LibClasse {
-                        fqn: nome_fqn.to_string(),
-                        nome: nome_simples,
-                        nome_pai: None,
-                        metodos: HashMap::new(),
-                        propriedades: Vec::new(),
-                        campos: Vec::new(),
-                        eh_estatica: true,
-                    };
-                    biblioteca
-                        .simbolos
-                        .insert(nome_fqn.to_string(), LibSimbolo::Classe(classe));
-                }
-            }
-            "DEFINE_METHOD" | "DEFINE_STATIC_METHOD" => {
-                let eh_estatica = partes[0] == "DEFINE_STATIC_METHOD";
-                if let (
-                    Some(nome_classe),
-                    Some(nome_metodo),
-                    Some(tipo_retorno),
-                    Some(corpo_len_str),
-                ) = (partes.get(1), partes.get(2), partes.get(3), partes.get(4))
-                {
-                    let parametros_str = &partes[5..];
-                    let parametros = parse_params(parametros_str);
-
-                    if let Some(LibSimbolo::Classe(classe)) =
-                        biblioteca.simbolos.get_mut(*nome_classe)
-                    {
-                        let metodo = LibMetodo {
-                            nome: nome_metodo.to_string(),
-                            nome_classe: nome_classe.to_string(),
-                            tipo_retorno: tipo_retorno.to_string(),
-                            parametros: parametros.clone(),
-                            aridade: parametros.len(),
-                            chave_nativa: None,
-                            eh_estatica,
-                        };
-                        classe.metodos.insert(nome_metodo.to_string(), metodo);
-                    }
-
-                    // Ignora o corpo do método
-                    if let Ok(len) = corpo_len_str.parse::<usize>() {
-                        if len < 1_000_000 {
-                            for _ in 0..len {
-                                iterador_linhas.next();
-                            }
-                        }
-                    }
-                }
-            }
-            "DEFINE_FUNCTION" => {
-                if let (Some(nome_funcao), Some(_corpo_len_str)) = (partes.get(1), partes.get(2)) {
-                    let parametros = &partes[3..];
-                    let funcao = LibFuncao {
-                        nome: nome_funcao.to_string(),
-                        aridade: parametros.len(),
-                    };
-                    biblioteca
-                        .simbolos
-                        .insert(nome_funcao.to_string(), LibSimbolo::Funcao(funcao));
-                }
-            }
-            _ => {}
-        }
-    }
-
-    Ok(biblioteca)
 }

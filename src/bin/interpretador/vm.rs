@@ -155,10 +155,8 @@ impl VM {
                     self.pilha.push(Valor::Duplo(valor));
                 }
                 "LOAD_CONST_STR" => {
-                    // Junta as partes da string, removendo as aspas.
-                    let valor = partes[1..].join(" ");
-                    self.pilha
-                        .push(Valor::Texto(valor.trim_matches('"').to_string()));
+                    let valor = crate::util::parse_load_const_str(&instrucao_str);
+                    self.pilha.push(Valor::Texto(valor));
                 }
                 "LOAD_VAR" => {
                     let nome_var = partes.get(1).ok_or("LOAD_VAR requer um nome de variável")?;
@@ -750,12 +748,36 @@ impl VM {
 
                     match objeto {
                         Valor::Objeto { campos, .. } => {
+                            // Propriedades calculadas da stdlib (ex.: Tamanho de Lista/Dicionario)
+                            if (*nome_propriedade == "Tamanho" || *nome_propriedade == "Contagem")
+                                && campos.borrow().contains_key("__itens__")
+                            {
+                                let len = match campos.borrow().get("__itens__") {
+                                    Some(Valor::Array(v)) => v.len() as i64,
+                                    _ => 0,
+                                };
+                                self.pilha.push(Valor::Inteiro(len));
+                                continue;
+                            }
                             let valor = campos
                                 .borrow()
                                 .get(*nome_propriedade)
                                 .cloned()
                                 .unwrap_or(Valor::Nulo);
                             self.pilha.push(valor);
+                        }
+                        Valor::Array(ref itens) => {
+                            if *nome_propriedade == "Tamanho"
+                                || *nome_propriedade == "Comprimento"
+                                || *nome_propriedade == "Length"
+                            {
+                                self.pilha.push(Valor::Inteiro(itens.len() as i64));
+                            } else {
+                                return Err(format!(
+                                    "GET_PROPERTY '{}' não existe em array",
+                                    nome_propriedade
+                                ));
+                            }
                         }
                         _ => {
                             eprintln!("DEBUG: GET_PROPERTY {} falhou no ip = {}, codigo = {}, objeto era: {:?}", nome_propriedade, self.ip, self.code_id, objeto);
@@ -1099,12 +1121,13 @@ impl VM {
 
                 // === CHAMADAS NATIVAS ASSÍNCRONAS (I/O via tokio) ===
                 // CALL_STATIC_NATIVE_ASYNC <chave> <nargs>
+                // CALL_NATIVE_ASYNC <chave> <nargs>   ('este' já foi empilhado antes dos args)
                 // Executa uma operação assíncrona e empilha um Valor::Task já resolvido.
-                // O runtime tokio já está disponível em self.tasks (Arc<Mutex<...>>).
-                "CALL_STATIC_NATIVE_ASYNC" => {
+                "CALL_STATIC_NATIVE_ASYNC" | "CALL_NATIVE_ASYNC" => {
+                    let eh_instancia = partes[0] == "CALL_NATIVE_ASYNC";
                     let chave = partes
                         .get(1)
-                        .ok_or("CALL_STATIC_NATIVE_ASYNC requer chave")?
+                        .ok_or("CALL_*_NATIVE_ASYNC requer chave")?
                         .to_string();
                     let nargs = partes.get(2).unwrap_or(&"0").parse::<usize>().unwrap_or(0);
                     let args = if nargs > 0 && self.pilha.len() >= nargs {
@@ -1112,42 +1135,12 @@ impl VM {
                     } else {
                         Vec::new()
                     };
-
-                    // Aloca um ID de task
-                    let task_id = {
-                        let mut counter = self.task_counter.lock().unwrap();
-                        let id = *counter;
-                        *counter += 1;
-                        id
+                    let este = if eh_instancia {
+                        Some(self.pilha.pop().ok_or("Pilha vazia para 'este' em CALL_NATIVE_ASYNC")?)
+                    } else {
+                        None
                     };
-
-                    // Executa a operação assíncrona usando tokio de forma inline.
-                    // Como já estamos dentro de um contexto async (fn run é async),
-                    // podemos simplesmente fazer .await directamente.
-                    let resultado_async = despachar_nativo_assincrono(&chave, args).await;
-
-                    // Registra a task como concluída
-                    let (status, result) = match resultado_async {
-                        Ok(val) => (TaskStatus::Completed, Some(Box::new(val.clone()))),
-                        Err(msg) => (TaskStatus::Failed(msg), None),
-                    };
-                    {
-                        let mut tasks_map = self.tasks.lock().unwrap();
-                        tasks_map.insert(
-                            task_id,
-                            Task {
-                                status: status.clone(),
-                                result: result.clone(),
-                            },
-                        );
-                    }
-
-                    // Empilha um Valor::Task para que AWAIT possa resolver
-                    self.pilha.push(Valor::Task {
-                        id: task_id,
-                        status,
-                        result,
-                    });
+                    self.executar_nativo_async(chave, args, este).await?;
                 }
 
                 // === INSTRUÇÃO AWAIT ===
@@ -1368,9 +1361,7 @@ impl VM {
                     // (Reciclando a lógica do `run` principal)
                     match *op {
                         "LOAD_CONST_STR" => {
-                            let valor = partes[1..].join(" ");
-                            // Remove aspas se presentes (compatibilidade com emissões antigas e novas)
-                            let texto = valor.trim_matches('"').to_string();
+                            let texto = crate::util::parse_load_const_str(&instrucao_str);
                             self.pilha.push(Valor::Texto(texto));
                         }
                         "LOAD_CONST_BOOL" => {
@@ -1442,213 +1433,49 @@ impl VM {
         }
         Ok(())
     }
-}
 
-/// Registro centralizado de funções nativas estáticas.
-/// Chave: string do atributo [Nativo("chave")], ex. "Console::EscreverLinha".
-/// Equivalente ao InternalCall do .NET CLR — sem acoplamento de nome entre .pr e Rust.
-pub(crate) fn despachar_nativo_estatico(chave: &str, args: Vec<Valor>) -> Result<Valor, String> {
-    match chave {
-        // ============ Sistema.Console ============
-        "Console::EscreverLinha" => {
-            let msg = args
-                .into_iter()
-                .next()
-                .map(|v| v.to_string())
-                .unwrap_or_default();
-            println!("{}", msg);
-            Ok(Valor::Nulo)
-        }
-        "Console::Escrever" => {
-            let msg = args
-                .into_iter()
-                .next()
-                .map(|v| v.to_string())
-                .unwrap_or_default();
-            use std::io::Write;
-            print!("{}", msg);
-            let _ = std::io::stdout().flush();
-            Ok(Valor::Nulo)
-        }
-        "Console::LerLinha" => {
-            let mut entrada = String::new();
-            std::io::stdin()
-                .read_line(&mut entrada)
-                .map_err(|e| format!("Erro ao ler entrada: {}", e))?;
-            Ok(Valor::Texto(
-                entrada.trim_end_matches(['\r', '\n']).to_string(),
-            ))
-        }
+    /// Executa um nativo assíncrono, registra a task concluída e empilha Valor::Task.
+    async fn executar_nativo_async(
+        &mut self,
+        chave: String,
+        args: Vec<Valor>,
+        este: Option<Valor>,
+    ) -> Result<(), String> {
+        // Aloca um ID de task
+        let task_id = {
+            let mut counter = self.task_counter.lock().unwrap();
+            let id = *counter;
+            *counter += 1;
+            id
+        };
 
-        // ============ Sistema.IO.Arquivo ============
-        "Arquivo::LerTexto" => {
-            let caminho = args
-                .into_iter()
-                .next()
-                .map(|v| v.to_string())
-                .unwrap_or_default();
-            let conteudo =
-                fs::read_to_string(&caminho).map_err(|e| format!("Arquivo::LerTexto: {}", e))?;
-            Ok(Valor::Texto(conteudo))
-        }
-        "Arquivo::EscreverTexto" => {
-            let mut it = args.into_iter();
-            let caminho = it.next().map(|v| v.to_string()).unwrap_or_default();
-            let conteudo = it.next().map(|v| v.to_string()).unwrap_or_default();
-            fs::write(&caminho, &conteudo).map_err(|e| format!("Arquivo::EscreverTexto: {}", e))?;
-            Ok(Valor::Nulo)
-        }
-        "Arquivo::AdicionarTexto" => {
-            use std::io::Write;
-            let mut it = args.into_iter();
-            let caminho = it.next().map(|v| v.to_string()).unwrap_or_default();
-            let conteudo = it.next().map(|v| v.to_string()).unwrap_or_default();
-            let mut f = std::fs::OpenOptions::new()
-                .append(true)
-                .create(true)
-                .open(&caminho)
-                .map_err(|e| format!("Arquivo::AdicionarTexto: {}", e))?;
-            f.write_all(conteudo.as_bytes())
-                .map_err(|e| format!("Arquivo::AdicionarTexto: {}", e))?;
-            Ok(Valor::Nulo)
-        }
-        "Arquivo::Existe" => {
-            let caminho = args
-                .into_iter()
-                .next()
-                .map(|v| v.to_string())
-                .unwrap_or_default();
-            Ok(Valor::Booleano(std::path::Path::new(&caminho).is_file()))
-        }
-        "Arquivo::Excluir" => {
-            let caminho = args
-                .into_iter()
-                .next()
-                .map(|v| v.to_string())
-                .unwrap_or_default();
-            fs::remove_file(&caminho).map_err(|e| format!("Arquivo::Excluir: {}", e))?;
-            Ok(Valor::Nulo)
-        }
-        "Arquivo::Copiar" => {
-            let mut it = args.into_iter();
-            let origem = it.next().map(|v| v.to_string()).unwrap_or_default();
-            let destino = it.next().map(|v| v.to_string()).unwrap_or_default();
-            fs::copy(&origem, &destino).map_err(|e| format!("Arquivo::Copiar: {}", e))?;
-            Ok(Valor::Nulo)
-        }
-        "Arquivo::Mover" => {
-            let mut it = args.into_iter();
-            let origem = it.next().map(|v| v.to_string()).unwrap_or_default();
-            let destino = it.next().map(|v| v.to_string()).unwrap_or_default();
-            fs::rename(&origem, &destino).map_err(|e| format!("Arquivo::Mover: {}", e))?;
-            Ok(Valor::Nulo)
-        }
+        // Como já estamos dentro de um contexto async (fn run é async),
+        // podemos fazer .await directamente.
+        let resultado_async = despachar_nativo_assincrono(&chave, args, este).await;
 
-        // ============ Sistema.IO.Diretorio ============
-        "Diretorio::Existe" => {
-            let caminho = args
-                .into_iter()
-                .next()
-                .map(|v| v.to_string())
-                .unwrap_or_default();
-            Ok(Valor::Booleano(std::path::Path::new(&caminho).is_dir()))
-        }
-        "Diretorio::Criar" => {
-            let caminho = args
-                .into_iter()
-                .next()
-                .map(|v| v.to_string())
-                .unwrap_or_default();
-            fs::create_dir_all(&caminho).map_err(|e| format!("Diretorio::Criar: {}", e))?;
-            Ok(Valor::Nulo)
-        }
-        "Diretorio::Excluir" => {
-            let mut it = args.into_iter();
-            let caminho = it.next().map(|v| v.to_string()).unwrap_or_default();
-            let recursivo = matches!(it.next(), Some(Valor::Booleano(true)));
-            if recursivo {
-                fs::remove_dir_all(&caminho).map_err(|e| format!("Diretorio::Excluir: {}", e))?;
-            } else {
-                fs::remove_dir(&caminho).map_err(|e| format!("Diretorio::Excluir: {}", e))?;
-            }
-            Ok(Valor::Nulo)
-        }
-        "Diretorio::ObterAtual" => {
-            let cur = std::env::current_dir()
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            Ok(Valor::Texto(cur))
-        }
-        "Diretorio::DefinirAtual" => {
-            let caminho = args
-                .into_iter()
-                .next()
-                .map(|v| v.to_string())
-                .unwrap_or_default();
-            std::env::set_current_dir(&caminho)
-                .map_err(|e| format!("Diretorio::DefinirAtual: {}", e))?;
-            Ok(Valor::Nulo)
-        }
-
-        // ============ Sistema.Data.Data ============
-        "Data::Agora" | "Data::Hoje" => {
-            use std::time::{SystemTime, UNIX_EPOCH};
-            let secs = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let days = secs / 86400;
-            let year = 1970 + days / 365;
-            let rem = days % 365;
-            let month = rem / 30 + 1;
-            let day = rem % 30 + 1;
-            let mut campos = HashMap::new();
-            campos.insert("Ano".to_string(), Valor::Inteiro(year as i64));
-            campos.insert("Mes".to_string(), Valor::Inteiro(month as i64));
-            campos.insert("Dia".to_string(), Valor::Inteiro(day as i64));
-            campos.insert("Hora".to_string(), Valor::Inteiro(0));
-            campos.insert("Minuto".to_string(), Valor::Inteiro(0));
-            campos.insert("Segundo".to_string(), Valor::Inteiro(0));
-            Ok(Valor::Objeto {
-                nome_classe: "Sistema.Data.Data".to_string(),
-                campos: Rc::new(RefCell::new(campos)),
-                metodos: HashMap::new(),
-            })
-        }
-
-        // ============ Sistema.Texto.Json ============
-        "Json::Serializar" => {
-            // Serialização básica para fins de demonstração
-            let obj = args.into_iter().next().unwrap_or(Valor::Nulo);
-            Ok(Valor::Texto(format!("{}", obj)))
-        }
-        "Json::ValidarJson" => {
-            let json = args
-                .into_iter()
-                .next()
-                .map(|v| v.to_string())
-                .unwrap_or_default();
-            let valido = json.trim().starts_with('{') || json.trim().starts_with('[');
-            Ok(Valor::Booleano(valido))
-        }
-        "Json::Formatar" => {
-            let json = args
-                .into_iter()
-                .next()
-                .map(|v| v.to_string())
-                .unwrap_or_default();
-            Ok(Valor::Texto(json)) // Retorna como está por ora
-        }
-
-        // ============ Sistema.Rede.ClienteHttp (estáticos não existem — só instância) ============
-        _ => {
-            eprintln!(
-                "[aviso nativo] Função nativa estática '{}' não implementada; retornando nulo",
-                chave
+        // Registra a task como concluída
+        let (status, result) = match resultado_async {
+            Ok(val) => (TaskStatus::Completed, Some(Box::new(val.clone()))),
+            Err(msg) => (TaskStatus::Failed(msg), None),
+        };
+        {
+            let mut tasks_map = self.tasks.lock().unwrap();
+            tasks_map.insert(
+                task_id,
+                Task {
+                    status: status.clone(),
+                    result: result.clone(),
+                },
             );
-            Ok(Valor::Nulo)
         }
+
+        // Empilha um Valor::Task para que AWAIT possa resolver
+        self.pilha.push(Valor::Task {
+            id: task_id,
+            status,
+            result,
+        });
+        Ok(())
     }
 }
 
-// Ponto de entrada do programa interpretador.

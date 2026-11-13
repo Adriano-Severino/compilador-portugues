@@ -1,0 +1,35 @@
+usando Sistema;
+usando Sistema.Threading;
+usando Sistema.Texto;
+
+função Principal() {
+    // ===== Mutex =====
+    var m = novo Mutex();
+    Console.EscreverLinha($"Travado inicial: {m.EstaTravado()}");
+    m.Entrar();
+    Console.EscreverLinha($"Travado apos Entrar: {m.EstaTravado()}");
+    var ok = m.TentarEntrar(0);
+    Console.EscreverLinha($"TentarEntrar travado: {ok}");
+    m.Sair();
+    Console.EscreverLinha($"Travado apos Sair: {m.EstaTravado()}");
+    var ok2 = m.TentarEntrar(0);
+    Console.EscreverLinha($"TentarEntrar livre: {ok2}");
+    m.Sair();
+    m.Fechar();
+
+    // ===== Tarefa / Temporizador =====
+    Console.EscreverLinha("Antes do atraso");
+    aguarde Tarefa.Atraso(50);
+    Console.EscreverLinha("Depois do atraso");
+    aguarde Temporizador.Aguardar(30);
+    Console.EscreverLinha("Depois do temporizador");
+
+    // ===== PoolTarefas =====
+    var max = PoolTarefas.ObterMaximoParalelismo();
+    Console.EscreverLinha($"Maximo paralelismo: {max}");
+    PoolTarefas.DefinirMaximoParalelismo(2);
+    Console.EscreverLinha($"Maximo paralelismo novo: {PoolTarefas.ObterMaximoParalelismo()}");
+    PoolTarefas.DefinirMaximoParalelismo(4);
+
+    Console.EscreverLinha("FIM FASE4");
+}

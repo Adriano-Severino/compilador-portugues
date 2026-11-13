@@ -5,6 +5,7 @@ pub mod comandos;
 pub mod expressoes;
 pub mod async_gen;
 pub mod conversoes;
+pub mod nativos;
 
 use crate::ast;
 use std::collections::{HashMap, HashSet};
@@ -192,6 +193,12 @@ impl<'a> LlvmGenerator<'a> {
             .push_str("declare %task* @task_create_write_file(i8*, i8*)\n");
         self.header
             .push_str("declare %task* @task_create_file_exists(i8*)\n");
+        self.header
+            .push_str("declare %task* @task_create_append_file(i8*, i8*)\n");
+        self.header
+            .push_str("declare %task* @task_create_sleep(i64)\n");
+        self.header
+            .push_str("declare %task* @task_create_http(i32, i8*, i8*, i8*)\n");
         self.header.push_str("declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture writeonly, i8* nocapture readonly, i64, i1 immarg)\n");
         self.header
             .push_str("declare void @llvm.memset.p0i8.i64(i8*, i8, i64, i1)\n");
@@ -214,6 +221,17 @@ impl<'a> LlvmGenerator<'a> {
         // "%255[^\r\n]%*[\r\n]" em C; em IR usamos escapes hex: \0D (CR) e \0A (LF)
         self.header.push_str("@.scanline_fmt = private unnamed_addr constant [16 x i8] c\"%255[^\\0D\\0A]%*[\\0D\\0A]\\00\", align 1\n");
         self.header.push_str("@.oob_msg = private unnamed_addr constant [23 x i8] c\"Indice fora dos limites\", align 1\n");
+        // ABI do runtime nativo da biblioteca padrão (porsol_runtime.c).
+        // %porsol.value espelha PorsolValue; %porsol.arr espelha
+        // PorsolArrayHdr ({i32 len, i32 kind, i8* data}).
+        self.header.push_str("%porsol.value = type { i32, i64, double, i8*, i8* }\n");
+        self.header.push_str("%porsol.arr = type { i32, i32, i8* }\n");
+        self.header
+            .push_str("declare void @porsol_native_call(%porsol.value*, i8*, i32, %porsol.value*)\n");
+        self.header
+            .push_str("declare i8* @porsol_obj_new(i8*)\n");
+        self.header
+            .push_str("declare i32 @porsol_texto_cmp(i8*, i8*)\n");
     }
 
     fn declare_external_functions(&mut self) {
