@@ -615,7 +615,27 @@ ForHeaderCmd: ast::Comando = {
     "var" <nome:IdentificadorSimples> "=" <expr:Expressao> => {
         ast::Comando::DeclaracaoVar(nome, expr)
     },
+    // declaração tipada no init: para (inteiro i = 0; ...)
+    <tipo:TipoDeclaracaoLocal> <nome:IdentificadorSimples> "=" <expr:Expressao> => {
+        ast::Comando::DeclaracaoVariavel(tipo, nome, Some(expr))
+    },
+    // atribuição no init/incremento: i = 0 / i = i + 1
+    <nome:IdentificadorSimples> "=" <expr:Expressao> => {
+        ast::Comando::Atribuicao(nome, expr)
+    },
     <expr:Expressao> => ast::Comando::Expressao(expr),
+};
+
+// Tipo permitido em declaração dentro do cabeçalho do 'para'
+// (restrito para não introduzir conflitos LALRPOP com a regra Tipo completa)
+TipoDeclaracaoLocal: ast::Tipo = {
+    "inteiro" => ast::Tipo::Inteiro,
+    "texto" => ast::Tipo::Texto,
+    "booleano" => ast::Tipo::Booleano,
+    "flutuante" => ast::Tipo::Flutuante,
+    "duplo" => ast::Tipo::Duplo,
+    "decimal" => ast::Tipo::Decimal,
+    <nome:TIdentificador> => ast::Tipo::Classe(nome),
 };
 
 ComandosBasicos: ast::Comando = {

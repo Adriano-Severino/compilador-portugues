@@ -37,4 +37,11 @@ se (contador < 5) {
 }
 ```
 
-Obs.: a construção `para` poderá ser adicionada futuramente; use `enquanto` por ora.
+## Laço: `para`
+```pordosol
+para (inteiro i = 0; i < 5; i = i + 1) {
+    imprima(i);
+}
+```
+
+A inicialização, a condição e o incremento ficam no cabeçalho do `para`. A condição é opcional; sem ela, o laço continua até uma saída explícita do programa.

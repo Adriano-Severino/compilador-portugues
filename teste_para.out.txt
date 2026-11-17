@@ -1,0 +1,11 @@
+=== Laco para ===
+Soma de 0 a 4:
+10
+=== Para com declaracao tipada ===
+0
+1
+2
+=== Fim ===
+=== Para sem init ===
+6
+7

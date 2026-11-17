@@ -90,6 +90,44 @@ impl<'a> BytecodeGenerator<'a> {
                     format!("JUMP_IF_FALSE {}", loop_end_ip);
             }
 
+            // Comando 'para' (for): init; condicao; passo
+            ast::Comando::Para(init, condicao, passo, corpo) => {
+                if let Some(init_cmd) = init {
+                    self.generate_comando(init_cmd);
+                    if matches!(**init_cmd, ast::Comando::Expressao(_)) {
+                        self.bytecode_instructions.push("POP".to_string());
+                    }
+                }
+
+                let loop_start_ip = self.bytecode_instructions.len();
+
+                let mut jump_if_false_ip: Option<usize> = None;
+                if let Some(cond) = condicao {
+                    self.generate_expressao(cond);
+                    jump_if_false_ip = Some(self.bytecode_instructions.len());
+                    self.bytecode_instructions
+                        .push("JUMP_IF_FALSE 0".to_string());
+                }
+
+                self.generate_comando(corpo);
+
+                if let Some(passo_cmd) = passo {
+                    self.generate_comando(passo_cmd);
+                    if matches!(**passo_cmd, ast::Comando::Expressao(_)) {
+                        self.bytecode_instructions.push("POP".to_string());
+                    }
+                }
+
+                self.bytecode_instructions
+                    .push(format!("JUMP {}", loop_start_ip));
+
+                if let Some(jf_ip) = jump_if_false_ip {
+                    let loop_end_ip = self.bytecode_instructions.len();
+                    self.bytecode_instructions[jf_ip] =
+                        format!("JUMP_IF_FALSE {}", loop_end_ip);
+                }
+            }
+
             // Adicionado: Comando 'se'
             ast::Comando::Se(condicao, bloco_if, bloco_else) => {
                 self.generate_expressao(condicao);

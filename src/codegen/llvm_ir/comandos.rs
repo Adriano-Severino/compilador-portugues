@@ -121,6 +121,50 @@ impl<'a> LlvmGenerator<'a> {
 
                 self.body.push_str(&format!("{0}:\n", loop_end_label));
             }
+            ast::Comando::Para(init, cond, passo, corpo) => {
+                if let Some(init_cmd) = init {
+                    self.generate_comando(init_cmd);
+                }
+
+                let for_cond_label = self.get_unique_label("for.cond");
+                let for_body_label = self.get_unique_label("for.body");
+                let for_step_label = self.get_unique_label("for.step");
+                let for_end_label = self.get_unique_label("for.end");
+
+                self.body
+                    .push_str(&format!("  br label %{0}\n", for_cond_label));
+                self.body.push_str(&format!("{0}:\n", for_cond_label));
+
+                match cond {
+                    Some(cond_expr) => {
+                        let (cond_reg, _) = self.generate_expressao(cond_expr);
+                        self.body.push_str(&format!(
+                            "  br i1 {0}, label %{1}, label %{2}\n",
+                            cond_reg, for_body_label, for_end_label
+                        ));
+                    }
+                    None => {
+                        self.body.push_str(&format!(
+                            "  br label %{0}\n",
+                            for_body_label
+                        ));
+                    }
+                }
+
+                self.body.push_str(&format!("{0}:\n", for_body_label));
+                self.generate_comando(corpo);
+                self.body
+                    .push_str(&format!("  br label %{0}\n", for_step_label));
+
+                self.body.push_str(&format!("{0}:\n", for_step_label));
+                if let Some(passo_cmd) = passo {
+                    self.generate_comando(passo_cmd);
+                }
+                self.body
+                    .push_str(&format!("  br label %{0}\n", for_cond_label));
+
+                self.body.push_str(&format!("{0}:\n", for_end_label));
+            }
             ast::Comando::Se(cond, then_block, else_block) => {
                 let (cond_reg, _) = self.generate_expressao(cond);
                 let then_label = self.get_unique_label("then");
