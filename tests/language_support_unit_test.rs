@@ -109,6 +109,113 @@ função vazio Principal() {
 }
 
 #[test]
+fn typecheck_valida_para_com_init_condicao_corpo_e_incremento() {
+    assert_typecheck_ok(
+        r#"
+função vazio Principal() {
+    var total = 0;
+
+    para (inteiro i = 0; i < 5; i = i + 1) {
+        total = total + i;
+    }
+
+    var j = 0;
+    para (j = 0; j < 3; j = j + 1) {
+        total = total + j;
+    }
+
+    para (var k = 0;; k = k + 1) {
+        se (k >= 2) {
+            retorne;
+        }
+    }
+}
+"#,
+    );
+}
+
+#[test]
+fn typecheck_rejeita_condicao_de_para_nao_booleana() {
+    let erros = typecheck_errors(
+        r#"
+função vazio Principal() {
+    para (var i = 0; i; i = i + 1) {
+        imprima(i);
+    }
+}
+"#,
+    );
+
+    assert!(
+        erros.iter().any(|erro| {
+            erro.contains("Condição 'para'") && erro.contains("booleano")
+        }),
+        "erro inesperado: {erros:?}"
+    );
+}
+
+#[test]
+fn typecheck_rejeita_init_de_para_com_tipo_incompativel() {
+    let erros = typecheck_errors(
+        r#"
+função vazio Principal() {
+    para (inteiro i = "texto"; i < 3; i = i + 1) {
+        imprima(i);
+    }
+}
+"#,
+    );
+
+    assert!(
+        erros
+            .iter()
+            .any(|erro| erro.contains("Tipo da expressão") && erro.contains('i')),
+        "erro inesperado: {erros:?}"
+    );
+}
+
+#[test]
+fn typecheck_rejeita_incremento_de_para_com_tipo_incompativel() {
+    let erros = typecheck_errors(
+        r#"
+função vazio Principal() {
+    para (var i = 0; i < 3; i = "texto") {
+        imprima(i);
+    }
+}
+"#,
+    );
+
+    assert!(
+        erros
+            .iter()
+            .any(|erro| erro.contains("Atribuição de tipo inválido") && erro.contains('i')),
+        "erro inesperado: {erros:?}"
+    );
+}
+
+#[test]
+fn typecheck_mantem_variavel_de_para_fora_do_escopo_do_loop() {
+    let erros = typecheck_errors(
+        r#"
+função vazio Principal() {
+    para (var i = 0; i < 3; i = i + 1) {
+        imprima(i);
+    }
+    imprima(i);
+}
+"#,
+    );
+
+    assert!(
+        erros
+            .iter()
+            .any(|erro| erro.contains("Identificador \"i\" não encontrado")),
+        "erro inesperado: {erros:?}"
+    );
+}
+
+#[test]
 fn parser_e_tipos_reconhecem_async_await() {
     let programa = assert_typecheck_ok(
         r#"

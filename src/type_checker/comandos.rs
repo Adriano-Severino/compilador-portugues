@@ -227,6 +227,43 @@ impl<'a> VerificadorTipos<'a> {
                 self.inferir_tipo_expressao(cond, namespace_atual, classe_atual, escopo_vars);
                 self.verificar_comando(corpo, namespace_atual, classe_atual, escopo_vars);
             }
+            Comando::Para(inicializacao, condicao, incremento, corpo) => {
+                let mut para_vars = escopo_vars.clone();
+
+                if let Some(init) = inicializacao {
+                    self.verificar_comando(init, namespace_atual, classe_atual, &mut para_vars);
+                }
+
+                if let Some(cond) = condicao {
+                    let tipo_cond = self.inferir_tipo_expressao(
+                        cond,
+                        namespace_atual,
+                        classe_atual,
+                        &para_vars,
+                    );
+                    if tipo_cond != Tipo::Inferido && tipo_cond != Tipo::Booleano {
+                        self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            format!(
+                                "Condição 'para' deve ser do tipo booleano; recebido {}.",
+                                tipo_cond
+                            ),
+                        ));
+                    }
+                }
+
+                let mut corpo_vars = para_vars.clone();
+                self.verificar_comando(corpo, namespace_atual, classe_atual, &mut corpo_vars);
+
+                if let Some(incremento) = incremento {
+                    self.verificar_comando(
+                        incremento,
+                        namespace_atual,
+                        classe_atual,
+                        &mut para_vars,
+                    );
+                }
+            }
             Comando::Expressao(expr) => {
                 self.inferir_tipo_expressao(expr, namespace_atual, classe_atual, escopo_vars);
             }
