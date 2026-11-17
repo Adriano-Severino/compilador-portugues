@@ -1193,6 +1193,29 @@ impl<'a> CilGenerator<'a> {
                         ));
                         Some(ast::Tipo::Booleano)
                     }
+                    "Remover" if aridade == 3 => {
+                        arg!(0);
+                        arg!(1);
+                        code.push_str("    conv.i4\n");
+                        arg!(2);
+                        code.push_str("    conv.i4\n");
+                        code.push_str(&format!(
+                            "    callvirt instance string {}::Remove(int32, int32)\n",
+                            S
+                        ));
+                        Some(ast::Tipo::Texto)
+                    }
+                    "Inserir" if aridade == 3 => {
+                        arg!(0);
+                        arg!(1);
+                        code.push_str("    conv.i4\n");
+                        arg!(2);
+                        code.push_str(&format!(
+                            "    callvirt instance string {}::Insert(int32, string)\n",
+                            S
+                        ));
+                        Some(ast::Tipo::Texto)
+                    }
                     _ => None,
                 }
             }

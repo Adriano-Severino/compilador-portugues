@@ -927,6 +927,15 @@ static TxtBuf *obj_txtbuf(PorsolObj *o) {
     return o && o->estado_kind == EST_TEXTO ? (TxtBuf *)o->estado : NULL;
 }
 
+/* Substitui o conteúdo do TxtBuf por uma nova string (tomada). */
+static void txtbuf_set(TxtBuf *t, char *novo) {
+    if (!t) { free(novo); return; }
+    free(t->buf);
+    t->buf = novo;
+    t->len = novo ? strlen(novo) : 0;
+    t->cap = t->len + 1;
+}
+
 /* ================================================================== */
 /* Dispatcher                                                           */
 /* ================================================================== */
@@ -1240,11 +1249,205 @@ static void pvec_de_arg(PVec *out, const PorsolValue *v) {
     }
 }
 
+/* ================================================================== */
+/* Utilitários de texto (índices em caracteres UTF-8)                   */
+/* ================================================================== */
+
+/* Remove `comp` caracteres a partir de `inicio` (char-based, UTF-8). */
+static char *texto_remover(const char *valor, int64_t inicio, int64_t comp) {
+    int64_t len = utf8_len(valor);
+    if (inicio < 0) inicio = 0;
+    if (inicio > len) inicio = len;
+    int64_t fim = comp < 0 ? len : inicio + comp;
+    if (fim > len) fim = len;
+    if (fim < inicio) fim = inicio;
+    size_t b_ini = utf8_char_to_byte(valor, inicio);
+    size_t b_fim = utf8_char_to_byte(valor, fim);
+    size_t vl = strlen(valor);
+    char *buf = (char *)malloc(vl - (b_fim - b_ini) + 1);
+    memcpy(buf, valor, b_ini);
+    strcpy(buf + b_ini, valor + b_fim);
+    return buf;
+}
+
+/* Insere `trecho` na posição `inicio` (índice em caracteres UTF-8). */
+static char *texto_inserir(const char *valor, int64_t inicio, const char *trecho) {
+    int64_t len = utf8_len(valor);
+    if (inicio < 0) inicio = 0;
+    if (inicio > len) inicio = len;
+    size_t b_ini = utf8_char_to_byte(valor, inicio);
+    size_t vl = strlen(valor), tl = strlen(trecho);
+    char *buf = (char *)malloc(vl + tl + 1);
+    memcpy(buf, valor, b_ini);
+    memcpy(buf + b_ini, trecho, tl);
+    strcpy(buf + b_ini + tl, valor + b_ini);
+    return buf;
+}
+
+/* Colapsa sequências de espaços em branco em um único espaço e
+ * remove espaços nas extremidades. */
+static char *texto_normalizar_espacos(const char *s) {
+    size_t n = strlen(s);
+    char *buf = (char *)malloc(n + 1);
+    size_t bp = 0;
+    int pendente = 0;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (isspace(c)) {
+            pendente = bp > 0;
+            continue;
+        }
+        if (pendente) { buf[bp++] = ' '; pendente = 0; }
+        buf[bp++] = (char)c;
+    }
+    buf[bp] = '\0';
+    return buf;
+}
+
+/* Divide em "palavras" (sequências separadas por espaços em branco,
+ * sem entradas vazias) e retorna array de textos. */
+static PorsolValue texto_dividir_palavras(const char *s) {
+    PVec v;
+    pvec_init(&v);
+    const char *p = s;
+    while (*p) {
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (!*p) break;
+        const char *ini = p;
+        while (*p && !isspace((unsigned char)*p)) p++;
+        PorsolValue t = v_nulo();
+        t.kind = PORSOL_TEXTO;
+        t.s = porsol_strndup(ini, (size_t)(p - ini));
+        pvec_push(&v, t);
+    }
+    PorsolValue out = pvec_para_array_val(&v);
+    pvec_free(&v);
+    return out;
+}
+
+/* Conta palavras (mesma regra de texto_dividir_palavras). */
+static int64_t texto_contar_palavras(const char *s) {
+    int64_t n = 0;
+    const char *p = s;
+    while (*p) {
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (!*p) break;
+        while (*p && !isspace((unsigned char)*p)) p++;
+        n++;
+    }
+    return n;
+}
+
+/* Retorna array com todas as ocorrências não sobrepostas de `trecho`. */
+static PorsolValue texto_localizar_todas(const char *valor, const char *trecho) {
+    PVec v;
+    pvec_init(&v);
+    size_t tl = strlen(trecho);
+    if (tl) {
+        const char *p = valor;
+        const char *achou;
+        while ((achou = strstr(p, trecho)) != NULL) {
+            PorsolValue t = v_nulo();
+            t.kind = PORSOL_TEXTO;
+            t.s = porsol_strdup(trecho);
+            pvec_push(&v, t);
+            p = achou + tl;
+        }
+    }
+    PorsolValue out = pvec_para_array_val(&v);
+    pvec_free(&v);
+    return out;
+}
+
+/* ================================================================== */
+/* Base64 / hexadecimal                                                 */
+/* ================================================================== */
+
+static const char BASE64_ALFABETO[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static char *base64_codificar(const unsigned char *bytes, size_t n) {
+    size_t out_n = ((n + 2) / 3) * 4;
+    char *out = (char *)malloc(out_n + 1);
+    size_t op = 0;
+    for (size_t i = 0; i < n; i += 3) {
+        unsigned b0 = bytes[i];
+        unsigned b1 = i + 1 < n ? bytes[i + 1] : 0;
+        unsigned b2 = i + 2 < n ? bytes[i + 2] : 0;
+        unsigned v = (b0 << 16) | (b1 << 8) | b2;
+        out[op++] = BASE64_ALFABETO[(v >> 18) & 63];
+        out[op++] = BASE64_ALFABETO[(v >> 12) & 63];
+        out[op++] = i + 1 < n ? BASE64_ALFABETO[(v >> 6) & 63] : '=';
+        out[op++] = i + 2 < n ? BASE64_ALFABETO[v & 63] : '=';
+    }
+    out[op] = '\0';
+    return out;
+}
+
+static int base64_valor(int c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+/* Decodifica Base64 para bytes; retorna NULL se inválido.
+ * *out_n recebe a quantidade de bytes. */
+static unsigned char *base64_decodificar(const char *texto, size_t *out_n) {
+    /* filtra whitespace */
+    size_t n = strlen(texto);
+    unsigned char *limpo = (unsigned char *)malloc(n + 1);
+    size_t ln = 0;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)texto[i];
+        if (!isspace(c)) limpo[ln++] = c;
+    }
+    if (ln % 4 != 0) { free(limpo); return NULL; }
+    unsigned char *out = (unsigned char *)malloc((ln / 4) * 3 + 1);
+    size_t on = 0;
+    for (size_t i = 0; i < ln; i += 4) {
+        int vals[4];
+        int padding = 0;
+        for (int j = 0; j < 4; j++) {
+            int c = limpo[i + j];
+            if (c == '=') {
+                if (j < 2) { free(limpo); free(out); return NULL; }
+                padding++;
+                vals[j] = 0;
+            } else {
+                if (padding) { free(limpo); free(out); return NULL; }
+                vals[j] = base64_valor(c);
+                if (vals[j] < 0) { free(limpo); free(out); return NULL; }
+            }
+        }
+        if (padding > 2) { free(limpo); free(out); return NULL; }
+        unsigned v = ((unsigned)vals[0] << 18) | ((unsigned)vals[1] << 12) |
+                     ((unsigned)vals[2] << 6) | (unsigned)vals[3];
+        out[on++] = (unsigned char)(v >> 16);
+        if (padding < 2) out[on++] = (unsigned char)(v >> 8);
+        if (padding < 1) out[on++] = (unsigned char)v;
+    }
+    free(limpo);
+    *out_n = on;
+    return out;
+}
+
+static int hex_valor(int c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
 /* ---------- JSON (motor mínimo em C) ---------- */
 static PorsolValue json_serializar_valor(const PorsolValue *v);
+static PorsolValue json_serializar_valor_pretty(const PorsolValue *v);
 static PorsolValue json_desserializar(const char *texto, int *ok);
 static char *json_formatar(const char *texto);
 static int json_validar(const char *texto);
+static const char *json_tipo_de(const char *texto);
 
 /* ---------- Regex (engine backtracking mínima) ---------- */
 typedef struct RegexProg RegexProg;
@@ -1434,6 +1637,20 @@ static void despachar_estatico(const char *chave, int argc, const PorsolValue *a
             *out = v_int(c < 0 ? -1 : (c > 0 ? 1 : 0));
         } else if (!strcmp(m, "IgualIgnoreCase")) {
             *out = v_bool(ascii_case_equal(valor, arg_texto(1, argc, args)));
+        } else if (!strcmp(m, "Remover")) {
+            *out = v_text_move(texto_remover(valor, arg_int(1, argc, args),
+                                             arg_int(2, argc, args)));
+        } else if (!strcmp(m, "Inserir")) {
+            *out = v_text_move(texto_inserir(valor, arg_int(1, argc, args),
+                                             arg_texto(2, argc, args)));
+        } else if (!strcmp(m, "NormalizarEspacos")) {
+            *out = v_text_move(texto_normalizar_espacos(valor));
+        } else if (!strcmp(m, "DividirPalavras")) {
+            *out = texto_dividir_palavras(valor);
+        } else if (!strcmp(m, "ContarPalavras")) {
+            *out = v_int(texto_contar_palavras(valor));
+        } else if (!strcmp(m, "LocalizarTodas")) {
+            *out = texto_localizar_todas(valor, arg_texto(1, argc, args));
         } else {
             *out = v_nulo();
         }
@@ -1893,6 +2110,69 @@ static void despachar_estatico(const char *chave, int argc, const PorsolValue *a
             pvec_free(&itens);
         } else if (!strcmp(m, "TamanhoBytes")) {
             *out = v_int((int64_t)strlen(arg_texto(0, argc, args)));
+        } else if (!strcmp(m, "Base64Codificar")) {
+            const unsigned char *s = (const unsigned char *)arg_texto(0, argc, args);
+            *out = v_text_move(base64_codificar(s, strlen((const char *)s)));
+        } else if (!strcmp(m, "Base64Decodificar")) {
+            size_t bn = 0;
+            unsigned char *bytes = base64_decodificar(arg_texto(0, argc, args), &bn);
+            if (!bytes) {
+                *out = v_text("");
+            } else {
+                char *buf = (char *)malloc(bn + 1);
+                memcpy(buf, bytes, bn);
+                buf[bn] = '\0';
+                free(bytes);
+                *out = v_text_move(buf);
+            }
+        } else if (!strcmp(m, "ParaHex")) {
+            PVec itens = itens_de_lista(argc > 0 ? &args[0] : NULL);
+            size_t out_n = itens.n * 2;
+            char *buf = (char *)malloc(out_n + 1);
+            static const char hexd[] = "0123456789abcdef";
+            for (size_t i = 0; i < itens.n; i++) {
+                int64_t b = itens.itens[i].kind == PORSOL_INTEIRO ? itens.itens[i].i
+                            : itens.itens[i].kind == PORSOL_DOUBLE ? (int64_t)itens.itens[i].d
+                            : 0;
+                if (b < 0) b = 0;
+                if (b > 255) b = 255;
+                buf[i * 2] = hexd[(b >> 4) & 0xF];
+                buf[i * 2 + 1] = hexd[b & 0xF];
+            }
+            buf[out_n] = '\0';
+            *out = v_text_move(buf);
+            pvec_free(&itens);
+        } else if (!strcmp(m, "DeHex")) {
+            const char *s = arg_texto(0, argc, args);
+            /* filtra whitespace */
+            size_t n = strlen(s);
+            unsigned char *limpo = (unsigned char *)malloc(n + 1);
+            size_t ln = 0;
+            for (size_t i = 0; i < n; i++) {
+                unsigned char c = (unsigned char)s[i];
+                if (!isspace(c)) limpo[ln++] = c;
+            }
+            PVec v;
+            pvec_init(&v);
+            int valido = (ln % 2 == 0);
+            if (valido) {
+                for (size_t i = 0; i < ln; i += 2) {
+                    int hi = hex_valor(limpo[i]);
+                    int lo = hex_valor(limpo[i + 1]);
+                    if (hi < 0 || lo < 0) { valido = 0; break; }
+                    PorsolValue b = v_nulo();
+                    b.kind = PORSOL_INTEIRO;
+                    b.i = (hi << 4) | lo;
+                    pvec_push(&v, b);
+                }
+            }
+            free(limpo);
+            if (!valido) {
+                pvec_free(&v);
+                pvec_init(&v);
+            }
+            *out = pvec_para_array_val(&v);
+            pvec_free(&v);
         } else {
             *out = v_nulo();
         }
@@ -1931,6 +2211,11 @@ static void despachar_estatico(const char *chave, int argc, const PorsolValue *a
             int ok = 0;
             PorsolValue v = json_desserializar(txt, &ok);
             *out = ok ? v : v_nulo();
+        } else if (!strcmp(m, "SerializarFormatado")) {
+            PorsolValue v = argc > 0 ? args[0] : v_nulo();
+            *out = json_serializar_valor_pretty(&v);
+        } else if (!strcmp(m, "TipoDe")) {
+            *out = v_text(json_tipo_de(txt));
         } else {
             *out = v_nulo();
         }
@@ -2472,6 +2757,58 @@ static void despachar_instancia(const char *chave, PorsolObj *este, int argc,
             *out = v_nulo();
             return;
         }
+        if (!strcmp(m, "AnexarValor")) {
+            if (t) txtbuf_append(t, texto_de(&args[ai]));
+            *out = v_nulo();
+            return;
+        }
+        if (!strcmp(m, "AnexarNovaLinha")) {
+            if (t) txtbuf_append(t, "\n");
+            *out = v_nulo();
+            return;
+        }
+        if (!strcmp(m, "Inserir")) {
+            if (t) {
+                const char *atual = t->buf ? t->buf : "";
+                char *novo = texto_inserir(atual, arg_int(ai, argc, args),
+                                           arg_texto(ai + 1, argc, args));
+                txtbuf_set(t, novo);
+            }
+            *out = v_nulo();
+            return;
+        }
+        if (!strcmp(m, "Remover")) {
+            if (t) {
+                const char *atual = t->buf ? t->buf : "";
+                char *novo = texto_remover(atual, arg_int(ai, argc, args),
+                                           arg_int(ai + 1, argc, args));
+                txtbuf_set(t, novo);
+            }
+            *out = v_nulo();
+            return;
+        }
+        if (!strcmp(m, "IndiceDe")) {
+            const char *atual = (t && t->buf) ? t->buf : "";
+            int64_t byte_idx = utf8_find(atual, arg_texto(ai, argc, args), 0);
+            *out = v_int(byte_idx >= 0
+                             ? utf8_count_chars(atual, 0, (size_t)byte_idx)
+                             : -1);
+            return;
+        }
+        if (!strcmp(m, "Subtexto")) {
+            const char *atual = (t && t->buf) ? t->buf : "";
+            int64_t ini = arg_int(ai, argc, args);
+            int64_t comp = arg_int(ai + 1, argc, args);
+            int64_t len = utf8_len(atual);
+            if (ini < 0) ini = 0;
+            if (ini > len) ini = len;
+            int64_t fim = comp < 0 ? len : ini + comp;
+            if (fim > len) fim = len;
+            size_t b_ini = utf8_char_to_byte(atual, ini);
+            size_t b_fim = utf8_char_to_byte(atual, fim);
+            *out = v_text_move(porsol_strndup(atual + b_ini, b_fim - b_ini));
+            return;
+        }
         if (!strcmp(m, "ParaTexto")) {
             *out = v_text(t && t->buf ? t->buf : "");
             return;
@@ -2742,6 +3079,44 @@ static void despachar_instancia(const char *chave, PorsolObj *este, int argc,
                 }
             }
             *out = v_int(n);
+        } else if (!strcmp(m, "CorrespondeCompleto")) {
+            size_t a = 0, b = 0, tl = strlen(texto);
+            *out = v_bool(ok && regex_match(re, texto, &a, &b) && a == 0 && b == tl);
+        } else if (!strcmp(m, "LocalizarTodas")) {
+            PVec partes;
+            pvec_init(&partes);
+            if (ok) {
+                size_t pos = 0, tl = strlen(texto);
+                while (pos <= tl) {
+                    size_t a = 0, b = 0;
+                    if (!regex_match_from(re, texto, pos, &a, &b)) break;
+                    PorsolValue t = v_nulo();
+                    t.kind = PORSOL_TEXTO;
+                    t.s = porsol_strndup(texto + a, b - a);
+                    pvec_push(&partes, t);
+                    pos = (b > a) ? b : b + 1;
+                    if (a == b && texto[pos]) pos += (size_t)utf8_cp_len(texto + pos);
+                }
+            }
+            *out = pvec_para_array_val(&partes);
+            pvec_free(&partes);
+        } else if (!strcmp(m, "SubstituirPrimeiro")) {
+            const char *sub = argc > ai + 1 ? arg_texto(ai + 1, argc, args) : "";
+            if (!ok) {
+                *out = v_text(texto);
+            } else {
+                size_t a = 0, b = 0;
+                if (!regex_match(re, texto, &a, &b)) {
+                    *out = v_text(texto);
+                } else {
+                    size_t tl = strlen(texto), sl = strlen(sub);
+                    char *buf = (char *)malloc(tl - (b - a) + sl + 1);
+                    memcpy(buf, texto, a);
+                    memcpy(buf + a, sub, sl);
+                    strcpy(buf + a + sl, texto + b);
+                    *out = v_text_move(buf);
+                }
+            }
         } else {
             *out = v_nulo();
         }
@@ -3413,6 +3788,30 @@ static PorsolValue json_serializar_valor(const PorsolValue *v) {
     out.kind = PORSOL_TEXTO;
     out.s = s;
     return out;
+}
+
+static PorsolValue json_serializar_valor_pretty(const PorsolValue *v) {
+    char *s = json_serializar(v, 1);
+    PorsolValue out = v_nulo();
+    out.kind = PORSOL_TEXTO;
+    out.s = s;
+    return out;
+}
+
+/* Retorna o tipo de um documento JSON: "objeto", "array", "texto",
+ * "numero", "booleano", "nulo" ou "invalido". */
+static const char *json_tipo_de(const char *texto) {
+    JValor *j = json_parse(texto);
+    if (!j) return "invalido";
+    switch (j->tipo) {
+        case J_OBJETO: return "objeto";
+        case J_ARRAY:  return "array";
+        case J_TEXTO:  return "texto";
+        case J_NUM:    return "numero";
+        case J_BOOL:   return "booleano";
+        case J_NULO:   return "nulo";
+    }
+    return "invalido";
 }
 
 static PorsolValue json_desserializar(const char *texto, int *ok) {

@@ -87,6 +87,122 @@ fn regex_do_objeto(este: &Valor) -> Option<regex::Regex> {
     None
 }
 
+// ===== Codificação Base64 / hexadecimal (sem dependências externas) =====
+
+const BASE64_ALFABETO: &[u8; 64] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn base64_codificar(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(BASE64_ALFABETO[(n >> 18) as usize & 63] as char);
+        out.push(BASE64_ALFABETO[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            BASE64_ALFABETO[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            BASE64_ALFABETO[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+fn base64_valor(c: u8) -> Option<u8> {
+    match c {
+        b'A'..=b'Z' => Some(c - b'A'),
+        b'a'..=b'z' => Some(c - b'a' + 26),
+        b'0'..=b'9' => Some(c - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    }
+}
+
+/// Decodifica Base64; retorna None se houver caractere inválido.
+fn base64_decodificar(texto: &str) -> Option<Vec<u8>> {
+    let limpo: Vec<u8> = texto.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+    if limpo.is_empty() {
+        return Some(Vec::new());
+    }
+    if limpo.len() % 4 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(limpo.len() / 4 * 3);
+    for chunk in limpo.chunks(4) {
+        let mut vals = [0u8; 4];
+        let mut padding = 0;
+        for (i, &c) in chunk.iter().enumerate() {
+            if c == b'=' {
+                if i < 2 {
+                    return None;
+                }
+                padding += 1;
+                vals[i] = 0;
+            } else {
+                if padding > 0 {
+                    return None;
+                }
+                vals[i] = base64_valor(c)?;
+            }
+        }
+        if padding > 2 {
+            return None;
+        }
+        let n = ((vals[0] as u32) << 18)
+            | ((vals[1] as u32) << 12)
+            | ((vals[2] as u32) << 6)
+            | vals[3] as u32;
+        out.push((n >> 16) as u8);
+        if padding < 2 {
+            out.push((n >> 8) as u8);
+        }
+        if padding < 1 {
+            out.push(n as u8);
+        }
+    }
+    Some(out)
+}
+
+fn hex_valor(c: u8) -> Option<u8> {
+    match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn hex_codificar(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(char::from_digit((b >> 4) as u32, 16).unwrap());
+        out.push(char::from_digit((b & 0xF) as u32, 16).unwrap());
+    }
+    out
+}
+
+/// Decodifica hexadecimal; retorna None se houver caractere inválido ou
+/// quantidade ímpar de dígitos.
+fn hex_decodificar(texto: &str) -> Option<Vec<u8>> {
+    let limpo: Vec<u8> = texto.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+    if limpo.len() % 2 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(limpo.len() / 2);
+    for par in limpo.chunks(2) {
+        out.push((hex_valor(par[0])? << 4) | hex_valor(par[1])?);
+    }
+    Some(out)
+}
+
 /// Comparação total para ordenação de coleções (numéricos de tipos mistos comparáveis).
 fn numero_opcional(v: &Valor) -> Option<f64> {
     match v {
@@ -1372,6 +1488,30 @@ pub(crate) fn despachar_nativo_estatico(chave: &str, args: Vec<Valor>) -> Result
                 Err(e) => Err(format!("Json::Desserializar: JSON inválido: {}", e)),
             }
         }
+        "Json::SerializarFormatado" => {
+            let valor = args.into_iter().next().unwrap_or(Valor::Nulo);
+            match serde_json::to_string_pretty(&valor_para_json(&valor)) {
+                Ok(s) => Ok(Valor::Texto(s)),
+                Err(e) => Err(format!("Json::SerializarFormatado: {}", e)),
+            }
+        }
+        "Json::TipoDe" => {
+            let json = args
+                .into_iter()
+                .next()
+                .map(|v| texto_de(&v))
+                .unwrap_or_default();
+            let tipo = match serde_json::from_str::<serde_json::Value>(&json) {
+                Ok(serde_json::Value::Object(_)) => "objeto",
+                Ok(serde_json::Value::Array(_)) => "array",
+                Ok(serde_json::Value::String(_)) => "texto",
+                Ok(serde_json::Value::Number(_)) => "numero",
+                Ok(serde_json::Value::Bool(_)) => "booleano",
+                Ok(serde_json::Value::Null) => "nulo",
+                Err(_) => "invalido",
+            };
+            Ok(Valor::Texto(tipo.to_string()))
+        }
 
         // ============ Sistema.Texto.Texto ============
         "Texto::Dividir" => {
@@ -1487,6 +1627,35 @@ pub(crate) fn despachar_nativo_estatico(chave: &str, args: Vec<Valor>) -> Result
             let texto = args.first().map(texto_de).unwrap_or_default();
             Ok(Valor::Inteiro(texto.len() as i64))
         }
+        "Codificacao::Base64Codificar" => {
+            let texto = args.first().map(texto_de).unwrap_or_default();
+            Ok(Valor::Texto(base64_codificar(texto.as_bytes())))
+        }
+        "Codificacao::Base64Decodificar" => {
+            let texto = args.first().map(texto_de).unwrap_or_default();
+            let bytes = base64_decodificar(&texto).unwrap_or_default();
+            Ok(Valor::Texto(String::from_utf8_lossy(&bytes).into_owned()))
+        }
+        "Codificacao::ParaHex" => {
+            let bytes: Vec<u8> = args
+                .first()
+                .map(itens_de_lista)
+                .unwrap_or_default()
+                .iter()
+                .map(|v| match numero_de(v) {
+                    n if n < 0.0 => 0u8,
+                    n if n > 255.0 => 255u8,
+                    n => n as u8,
+                })
+                .collect();
+            Ok(Valor::Texto(hex_codificar(&bytes)))
+        }
+        "Codificacao::DeHex" => {
+            let texto = args.first().map(texto_de).unwrap_or_default();
+            let bytes = hex_decodificar(&texto).unwrap_or_default();
+            let itens: Vec<Valor> = bytes.iter().map(|b| Valor::Inteiro(*b as i64)).collect();
+            Ok(Valor::Array(itens))
+        }
 
         // ============ Sistema.Texto.Regex (estáticos) ============
         "Regex::Escape" => {
@@ -1593,6 +1762,67 @@ pub(crate) fn despachar_nativo_estatico(chave: &str, args: Vec<Valor>) -> Result
             let a = args.first().map(texto_de).unwrap_or_default();
             let b = args.get(1).map(texto_de).unwrap_or_default();
             Ok(Valor::Booleano(a.to_lowercase() == b.to_lowercase()))
+        }
+        "Texto::Remover" => {
+            let texto = args.first().map(texto_de).unwrap_or_default();
+            let inicio = args.get(1).map(numero_de).unwrap_or(0.0) as i64;
+            let comprimento = args.get(2).map(numero_de).unwrap_or(-1.0) as i64;
+            let chars: Vec<char> = texto.chars().collect();
+            let len = chars.len() as i64;
+            let ini = inicio.clamp(0, len);
+            let fim = if comprimento < 0 {
+                len
+            } else {
+                (ini + comprimento).min(len)
+            };
+            let mut resultado = String::new();
+            resultado.extend(chars[..ini as usize].iter());
+            resultado.extend(chars[fim as usize..].iter());
+            Ok(Valor::Texto(resultado))
+        }
+        "Texto::Inserir" => {
+            let texto = args.first().map(texto_de).unwrap_or_default();
+            let inicio = args.get(1).map(numero_de).unwrap_or(0.0) as i64;
+            let trecho = args.get(2).map(texto_de).unwrap_or_default();
+            let chars: Vec<char> = texto.chars().collect();
+            let ini = inicio.clamp(0, chars.len() as i64) as usize;
+            let mut resultado: String = chars[..ini].iter().collect();
+            resultado.push_str(&trecho);
+            resultado.extend(chars[ini..].iter());
+            Ok(Valor::Texto(resultado))
+        }
+        "Texto::NormalizarEspacos" => {
+            let texto = args.first().map(texto_de).unwrap_or_default();
+            let normalizado = texto
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            Ok(Valor::Texto(normalizado))
+        }
+        "Texto::DividirPalavras" | "Texto::ContarPalavras" => {
+            let texto = args.first().map(texto_de).unwrap_or_default();
+            let palavras: Vec<&str> = texto.split_whitespace().collect();
+            if chave == "Texto::ContarPalavras" {
+                Ok(Valor::Inteiro(palavras.len() as i64))
+            } else {
+                let partes: Vec<Valor> =
+                    palavras.into_iter().map(|p| Valor::Texto(p.to_string())).collect();
+                Ok(Valor::Array(partes))
+            }
+        }
+        "Texto::LocalizarTodas" => {
+            let texto = args.first().map(texto_de).unwrap_or_default();
+            let trecho = args.get(1).map(texto_de).unwrap_or_default();
+            let mut ocorrencias: Vec<Valor> = Vec::new();
+            if !trecho.is_empty() {
+                let mut inicio = 0usize;
+                while let Some(pos) = texto[inicio..].find(&trecho) {
+                    let abs = inicio + pos;
+                    ocorrencias.push(Valor::Texto(trecho.clone()));
+                    inicio = abs + trecho.len();
+                }
+            }
+            Ok(Valor::Array(ocorrencias))
         }
 
         // ============ Sistema.Ambiente ============
@@ -1949,6 +2179,114 @@ pub(crate) fn despachar_nativo_instancia(
                     .insert("__texto__".to_string(), Valor::Texto(atual));
             }
             Ok(Valor::Nulo)
+        }
+        "ConstrutorTexto::AnexarValor" => {
+            let valor = args.into_iter().next().map(|v| texto_de(&v)).unwrap_or_default();
+            if let Some(campos) = campos_de(&este) {
+                let mut atual = match campos.borrow().get("__texto__") {
+                    Some(Valor::Texto(s)) => s.clone(),
+                    _ => String::new(),
+                };
+                atual.push_str(&valor);
+                campos
+                    .borrow_mut()
+                    .insert("__texto__".to_string(), Valor::Texto(atual));
+            }
+            Ok(Valor::Nulo)
+        }
+        "ConstrutorTexto::AnexarNovaLinha" => {
+            if let Some(campos) = campos_de(&este) {
+                let mut atual = match campos.borrow().get("__texto__") {
+                    Some(Valor::Texto(s)) => s.clone(),
+                    _ => String::new(),
+                };
+                atual.push_str("\n");
+                campos
+                    .borrow_mut()
+                    .insert("__texto__".to_string(), Valor::Texto(atual));
+            }
+            Ok(Valor::Nulo)
+        }
+        "ConstrutorTexto::Inserir" => {
+            let indice = args.first().map(numero_de).unwrap_or(0.0) as i64;
+            let valor = args.get(1).map(|v| texto_de(v)).unwrap_or_default();
+            if let Some(campos) = campos_de(&este) {
+                let atual = match campos.borrow().get("__texto__") {
+                    Some(Valor::Texto(s)) => s.clone(),
+                    _ => String::new(),
+                };
+                let chars: Vec<char> = atual.chars().collect();
+                let ini = indice.clamp(0, chars.len() as i64) as usize;
+                let mut novo: String = chars[..ini].iter().collect();
+                novo.push_str(&valor);
+                novo.extend(chars[ini..].iter());
+                campos
+                    .borrow_mut()
+                    .insert("__texto__".to_string(), Valor::Texto(novo));
+            }
+            Ok(Valor::Nulo)
+        }
+        "ConstrutorTexto::Remover" => {
+            let inicio = args.first().map(numero_de).unwrap_or(0.0) as i64;
+            let comprimento = args.get(1).map(numero_de).unwrap_or(-1.0) as i64;
+            if let Some(campos) = campos_de(&este) {
+                let atual = match campos.borrow().get("__texto__") {
+                    Some(Valor::Texto(s)) => s.clone(),
+                    _ => String::new(),
+                };
+                let chars: Vec<char> = atual.chars().collect();
+                let len = chars.len() as i64;
+                let ini = inicio.clamp(0, len);
+                let fim = if comprimento < 0 {
+                    len
+                } else {
+                    (ini + comprimento).min(len)
+                };
+                let mut novo: String = chars[..ini as usize].iter().collect();
+                novo.extend(chars[fim as usize..].iter());
+                campos
+                    .borrow_mut()
+                    .insert("__texto__".to_string(), Valor::Texto(novo));
+            }
+            Ok(Valor::Nulo)
+        }
+        "ConstrutorTexto::IndiceDe" => {
+            let alvo = args.first().map(|v| texto_de(v)).unwrap_or_default();
+            let indice = if let Some(campos) = campos_de(&este) {
+                match campos.borrow().get("__texto__") {
+                    Some(Valor::Texto(s)) => s
+                        .find(&alvo)
+                        .map(|b| s[..b].chars().count() as i64)
+                        .unwrap_or(-1),
+                    _ => -1,
+                }
+            } else {
+                -1
+            };
+            Ok(Valor::Inteiro(indice))
+        }
+        "ConstrutorTexto::Subtexto" => {
+            let inicio = args.first().map(numero_de).unwrap_or(0.0) as i64;
+            let comprimento = args.get(1).map(numero_de).unwrap_or(-1.0) as i64;
+            let resultado = if let Some(campos) = campos_de(&este) {
+                match campos.borrow().get("__texto__") {
+                    Some(Valor::Texto(s)) => {
+                        let chars: Vec<char> = s.chars().collect();
+                        let len = chars.len() as i64;
+                        let ini = inicio.clamp(0, len);
+                        let fim = if comprimento < 0 {
+                            len
+                        } else {
+                            (ini + comprimento).min(len)
+                        };
+                        chars[ini as usize..fim as usize].iter().collect::<String>()
+                    }
+                    _ => String::new(),
+                }
+            } else {
+                String::new()
+            };
+            Ok(Valor::Texto(resultado))
         }
         "ConstrutorTexto::ParaTexto" => {
             if let Some(campos) = campos_de(&este) {
@@ -2464,6 +2802,37 @@ pub(crate) fn despachar_nativo_instancia(
                 .unwrap_or(0);
             Ok(Valor::Inteiro(n))
         }
+        "Regex::CorrespondeCompleto" => {
+            let texto = args.first().map(texto_de).unwrap_or_default();
+            let ok = regex_do_objeto(&este)
+                .map(|r| {
+                    r.find(&texto)
+                        .map(|m| m.start() == 0 && m.end() == texto.len())
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
+            Ok(Valor::Booleano(ok))
+        }
+        "Regex::LocalizarTodas" => {
+            let texto = args.first().map(texto_de).unwrap_or_default();
+            let partes: Vec<Valor> = match regex_do_objeto(&este) {
+                Some(r) => r
+                    .find_iter(&texto)
+                    .map(|m| Valor::Texto(m.as_str().to_string()))
+                    .collect(),
+                None => Vec::new(),
+            };
+            Ok(Valor::Array(partes))
+        }
+        "Regex::SubstituirPrimeiro" => {
+            let texto = args.first().map(texto_de).unwrap_or_default();
+            let substituto = args.get(1).map(texto_de).unwrap_or_default();
+            let resultado = match regex_do_objeto(&este) {
+                Some(r) => r.replacen(&texto, 1, substituto.as_str()).into_owned(),
+                None => texto,
+            };
+            Ok(Valor::Texto(resultado))
+        }
 
         // ============ Sistema.IO.Leitor — instância ============
         "Leitor::LerLinha" => {
@@ -2829,6 +3198,12 @@ pub(crate) fn nativo_instancia_conhecido(chave: &str) -> bool {
             | "Dicionario::TentarObter"
             | "ConstrutorTexto::Anexar"
             | "ConstrutorTexto::AnexarLinha"
+            | "ConstrutorTexto::AnexarValor"
+            | "ConstrutorTexto::AnexarNovaLinha"
+            | "ConstrutorTexto::Inserir"
+            | "ConstrutorTexto::Remover"
+            | "ConstrutorTexto::IndiceDe"
+            | "ConstrutorTexto::Subtexto"
             | "ConstrutorTexto::ParaTexto"
             | "ConstrutorTexto::Limpar"
             | "ConstrutorTexto::Tamanho"
@@ -2912,6 +3287,9 @@ pub(crate) fn nativo_instancia_conhecido(chave: &str) -> bool {
             | "Regex::Substituir"
             | "Regex::Dividir"
             | "Regex::Contar"
+            | "Regex::CorrespondeCompleto"
+            | "Regex::LocalizarTodas"
+            | "Regex::SubstituirPrimeiro"
             | "Cronometro::Iniciar"
             | "Cronometro::Parar"
             | "Cronometro::Reiniciar"
@@ -2987,6 +3365,8 @@ pub(crate) fn nativo_estatico_conhecido(chave: &str) -> bool {
             | "Json::ValidarJson"
             | "Json::Formatar"
             | "Json::Desserializar"
+            | "Json::SerializarFormatado"
+            | "Json::TipoDe"
             | "Texto::Dividir"
             | "Texto::DividirLinhas"
             | "Texto::Juntar"
@@ -3002,6 +3382,10 @@ pub(crate) fn nativo_estatico_conhecido(chave: &str) -> bool {
             | "Codificacao::ParaBytes"
             | "Codificacao::ParaTexto"
             | "Codificacao::TamanhoBytes"
+            | "Codificacao::Base64Codificar"
+            | "Codificacao::Base64Decodificar"
+            | "Codificacao::ParaHex"
+            | "Codificacao::DeHex"
             | "Regex::Escape"
             | "Regex::EhValido"
             | "Temporizador::Aguardar"
@@ -3021,6 +3405,12 @@ pub(crate) fn nativo_estatico_conhecido(chave: &str) -> bool {
             | "Texto::Repete"
             | "Texto::Comparar"
             | "Texto::IgualIgnoreCase"
+            | "Texto::Remover"
+            | "Texto::Inserir"
+            | "Texto::NormalizarEspacos"
+            | "Texto::DividirPalavras"
+            | "Texto::ContarPalavras"
+            | "Texto::LocalizarTodas"
             | "Ambiente::Argumentos"
             | "Ambiente::VariavelAmbiente"
             | "Ambiente::DefinirVariavelAmbiente"

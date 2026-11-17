@@ -1,0 +1,65 @@
+usando Sistema;
+usando Sistema.Texto;
+
+função Principal()
+{
+    var txt = "Portugues   do\n Sol   Brasil";
+    var norm = Texto.NormalizarEspacos(txt);
+    Console.EscreverLinha($"NormalizarEspacos: [{norm}]");
+    var remov = Texto.Remover("abcdef", 2, 3);
+    Console.EscreverLinha($"Remover: [{remov}]");
+    var ins = Texto.Inserir("ac", 1, "b");
+    Console.EscreverLinha($"Inserir: [{ins}]");
+    var palavras = Texto.DividirPalavras(txt);
+    Console.EscreverLinha($"DividirPalavras tamanho={palavras.tamanho} [0]={palavras[0]}");
+    var nPalavras = Texto.ContarPalavras(txt);
+    Console.EscreverLinha($"ContarPalavras={nPalavras}");
+    var todas = Texto.LocalizarTodas("abcabcabc", "bc");
+    Console.EscreverLinha($"LocalizarTodas tamanho={todas.tamanho}");
+
+    var sb = novo ConstrutorTexto(64);
+    sb.Anexar("ola");
+    sb.AnexarValor(42);
+    sb.AnexarNovaLinha();
+    sb.AnexarLinha("mundo");
+    sb.Inserir(3, "XX");
+    sb.AnexarValor(verdadeiro);
+    var idxMundo = sb.IndiceDe("mundo");
+    Console.EscreverLinha($"SB IndiceDe mundo={idxMundo}");
+    var sub = sb.Subtexto(0, 5);
+    Console.EscreverLinha($"SB Subtexto={sub}");
+    sb.Remover(0, 2);
+    var sbFinal = sb.ParaTexto();
+    Console.EscreverLinha($"SB={sbFinal}");
+
+    var b64 = Codificacao.Base64Codificar("ola");
+    Console.EscreverLinha($"Base64={b64}");
+    var b64dec = Codificacao.Base64Decodificar(b64);
+    Console.EscreverLinha($"Base64Decodificar={b64dec}");
+    var bytes = Codificacao.ParaBytes("oi");
+    var hex = Codificacao.ParaHex(bytes);
+    Console.EscreverLinha($"Hex={hex}");
+    var deHex = Codificacao.DeHex(hex);
+    Console.EscreverLinha($"DeHex tamanho={deHex.tamanho} [0]={deHex[0]}");
+
+    var jsonObj = "{\"a\":1}";
+    var jsonArr = "[1,2]";
+    var jsonNum = "42";
+    var jsonInv = "{quebrado";
+    var tObj = Json.TipoDe(jsonObj);
+    var tArr = Json.TipoDe(jsonArr);
+    var tNum = Json.TipoDe(jsonNum);
+    var tInv = Json.TipoDe(jsonInv);
+    Console.EscreverLinha($"Json TipoDe objeto={tObj} array={tArr} numero={tNum} invalido={tInv}");
+
+    var re = novo Regex("\\d+");
+    var cc1 = re.CorrespondeCompleto("123");
+    var cc2 = re.CorrespondeCompleto("12a");
+    Console.EscreverLinha($"CorrespondeCompleto 123={cc1} 12a={cc2}");
+    var matches = re.LocalizarTodas("a1b22c333");
+    Console.EscreverLinha($"LocalizarTodas tamanho={matches.tamanho} [0]={matches[0]}");
+    var sub1 = re.SubstituirPrimeiro("a1b22", "#");
+    Console.EscreverLinha($"SubstituirPrimeiro={sub1}");
+
+    Console.EscreverLinha("FIM TEXTO");
+}

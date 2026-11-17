@@ -92,7 +92,7 @@ O backend CIL **não executa** as implementações `.pr` da stdlib: `tentar_stdl
 |---|---|
 | `Matematica.*` | `System.Math` (Abs, Max, Min, Pow, Sqrt, Round, Floor, Ceiling, Sin, Cos, Tan, Log, Log10, Exp, PI, E) |
 | `Matematica.Pi`/`E` | `ldc.r8` das constantes |
-| `Texto.*` | `System.String` — ParaMaiusculas→`ToUpper`, ParaMinusculas→`ToLower`, Tamanho→`Length`, Subtexto→`Substring`, IndiceDe/UltimoIndiceDe→`IndexOf`/`LastIndexOf`, ComecaCom/TerminaCom→`StartsWith`/`EndsWith`, Contem→`Contains`, PadEsquerda/Direita→`PadLeft`/`PadRight`, Comparar→`Compare`, IgualIgnoreCase→`Equals(..., OrdinalIgnoreCase)`, Substituir→`Replace`, RemoverEspacos→`Trim` |
+| `Texto.*` | `System.String` — ParaMaiusculas→`ToUpper`, ParaMinusculas→`ToLower`, Tamanho→`Length`, Subtexto→`Substring`, IndiceDe/UltimoIndiceDe→`IndexOf`/`LastIndexOf`, ComecaCom/TerminaCom→`StartsWith`/`EndsWith`, Contem→`Contains`, PadEsquerda/Direita→`PadLeft`/`PadRight`, Comparar→`Compare`, IgualIgnoreCase→`Equals(..., OrdinalIgnoreCase)`, Substituir→`Replace`, RemoverEspacos→`Trim`, Remover→`Remove`, Inserir→`Insert` |
 | `Guid.Novo`/`Vazio`/`EhValido` | `System.Guid` (`NewGuid`, `Empty` via `ldsfld`, `TryParse`) |
 | `Ambiente.NomeComputador` | `System.Environment.MachineName` |
 | `Ambiente.VariavelAmbiente`/`DefinirVariavelAmbiente` | `System.Environment.GetEnvironmentVariable`/`SetEnvironmentVariable` |
@@ -126,5 +126,6 @@ Regras de emissão importantes:
 | `exemplos/teste_stdlib_fase4.pr` | Threading (Tarefa, Temporizador, PoolTarefas) |
 | `exemplos/teste_stdlib_fase5.pr` | Guid, Aleatorio |
 | `exemplos/teste_stdlib_fase6.pr` | Conversao, Horario, Data, Dns, Ambiente, coleções |
+| `exemplos/teste_stdlib_texto.pr` | Métodos estendidos de Sistema.Texto (NormalizarEspacos, Remover, Inserir, DividirPalavras, ContarPalavras, LocalizarTodas, ConstrutorTexto, Base64/Hex, Json.TipoDe, Regex completo/localizar-todas/substituir-primeiro) |
 
 Testes de integração: `tests/llvm_stdlib_test.rs` (LLVM), `tests/cil_run_examples_test.rs` (CIL), `testar_exemplo_com_stdlib.ps1` (bytecode).
