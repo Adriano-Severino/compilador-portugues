@@ -88,6 +88,39 @@ impl<'a> VerificadorTipos<'a> {
                         ));
                     }
 
+                    if is_nativo {
+                        // [Nativo] dá acesso a funções privilegiadas do runtime
+                        // (filesystem, rede etc.): restrito à biblioteca padrão.
+                        if !self.eh_classe_stdlib(&fqn) {
+                            self.erros.push(ErroCompilador::novo(
+                                TipoErro::Semântico,
+                                format!(
+                                    "O atributo [Nativo] só pode ser usado em métodos da biblioteca padrão; '{}' em '{}' não é permitido.",
+                                    metodo.nome, fqn
+                                ),
+                            ));
+                        }
+                        // A chave de despacho é serializada no bytecode/manifesto:
+                        // deve ser um único texto sem espaços ou controles.
+                        let chave_ok = metodo
+                            .attributes
+                            .iter()
+                            .find(|a| a.name == "Nativo")
+                            .and_then(|a| a.arguments.first())
+                            .map_or(false, |e| {
+                                matches!(e, ast::Expressao::Texto(s) if ast::chave_nativa_valida(s))
+                            });
+                        if !chave_ok {
+                            self.erros.push(ErroCompilador::novo(
+                                TipoErro::Semântico,
+                                format!(
+                                    "O atributo [Nativo] do método '{}' exige um único argumento de texto válido como chave de despacho.",
+                                    metodo.nome
+                                ),
+                            ));
+                        }
+                    }
+
                     let mut metodo_vars = escopo_vars.clone();
                     // Validação de override/virtual
                     if let Some(parent_simple) = &classe.classe_pai {
@@ -182,6 +215,35 @@ impl<'a> VerificadorTipos<'a> {
                         TipoErro::Semântico,
                         format!("Função nativa '{}' não pode ter corpo.", funcao.nome),
                     ));
+                }
+
+                if is_nativo {
+                    if !self.stdlib_namespaces.contains(namespace_atual) {
+                        self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            format!(
+                                "O atributo [Nativo] só pode ser usado em funções da biblioteca padrão; '{}' não é permitido.",
+                                funcao.nome
+                            ),
+                        ));
+                    }
+                    let chave_ok = funcao
+                        .attributes
+                        .iter()
+                        .find(|a| a.name == "Nativo")
+                        .and_then(|a| a.arguments.first())
+                        .map_or(false, |e| {
+                            matches!(e, ast::Expressao::Texto(s) if ast::chave_nativa_valida(s))
+                        });
+                    if !chave_ok {
+                        self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            format!(
+                                "O atributo [Nativo] da função '{}' exige um único argumento de texto válido como chave de despacho.",
+                                funcao.nome
+                            ),
+                        ));
+                    }
                 }
 
                 let mut func_vars = escopo_vars.clone();

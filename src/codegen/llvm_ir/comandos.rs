@@ -121,6 +121,13 @@ impl<'a> LlvmGenerator<'a> {
 
                 self.body.push_str(&format!("{0}:\n", loop_end_label));
             }
+            ast::Comando::ParaCada { .. } => {
+                // Normalmente o lowering já reescreveu este comando; este
+                // braço cobre geradores instanciados diretamente.
+                let mut lowered = comando.clone();
+                crate::codegen::normalizar_comando_para_cada_unico(&mut lowered);
+                self.generate_comando(&lowered);
+            }
             ast::Comando::Para(init, cond, passo, corpo) => {
                 if let Some(init_cmd) = init {
                     self.generate_comando(init_cmd);

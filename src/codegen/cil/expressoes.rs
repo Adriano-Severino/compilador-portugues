@@ -56,13 +56,13 @@ impl<'a> CilGenerator<'a> {
             ast::Expressao::Identificador(nome) => {
                 // 1. Variável local
                 if let Some((idx, tipo)) = self.obter_var_local(nome) {
-                    code.push_str(&format!("    ldloc.s {}\n", idx));
+                    self.emit_ldloc(code, idx);
                     return tipo;
                 }
 
                 // 2. Parâmetro do método
                 if let Some((idx, tipo)) = self.obter_parametro(nome) {
-                    code.push_str(&format!("    ldarg.s {}\n", idx));
+                    self.emit_ldarg(code, idx);
                     return tipo;
                 }
 
@@ -838,6 +838,18 @@ impl<'a> CilGenerator<'a> {
             }
             ast::Expressao::NovoObjeto(tipo, _) => self.resolver_tipo(tipo),
             ast::Expressao::NovoArray(tipo, _) => ast::Tipo::Lista(Box::new(self.resolver_tipo(tipo))),
+            ast::Expressao::ListaLiteral(itens) => {
+                // Necessário para arrays aninhados: sem este braço, uma lista
+                // de listas caía em `Objeto` e gerava `object[]` contendo
+                // arrays de valores (ex.: `int64[]`), quebrando `ldelem`.
+                if itens.is_empty() {
+                    ast::Tipo::Lista(Box::new(ast::Tipo::Inteiro))
+                } else {
+                    ast::Tipo::Lista(Box::new(self.inferir_tipo_expressao_simples(
+                        &itens[0],
+                    )))
+                }
+            }
             ast::Expressao::AcessoIndice(alvo, _) => {
                 match self.inferir_tipo_expressao_simples(alvo) {
                     ast::Tipo::Lista(elem) => *elem,

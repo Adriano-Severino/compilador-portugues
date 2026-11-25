@@ -35,6 +35,9 @@ pub struct VerificadorTipos<'a> {
     pub(crate) loaded_lib_declarations: Vec<Declaracao>,
     pub generic_scope: Vec<std::collections::HashSet<String>>,
     pub(crate) stdlib_namespaces: std::collections::HashSet<String>,
+    /// >0 quando o comando verificado está dentro de um bloco `tente`/`capture`
+    /// (usado para validar `falhe;` sem expressão, que só relança exceção capturada).
+    pub(crate) em_contexto_excecao: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]

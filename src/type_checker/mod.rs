@@ -28,6 +28,7 @@ impl<'a> VerificadorTipos<'a> {
             loaded_lib_declarations: Vec::new(),
             generic_scope: Vec::new(),
             stdlib_namespaces: std::collections::HashSet::new(),
+            em_contexto_excecao: 0,
         };
         vt.inicializar_tipos_integrados();
         vt

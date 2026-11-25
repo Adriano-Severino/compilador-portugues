@@ -37,14 +37,15 @@ O estado final desejado é um ecossistema coerente onde um desenvolvedor consegu
 | A.1.1 | Implementar codegen de `para` em LLVM IR | P0 | M | ✅ | Um `.pr` com `para (i = 0; i < n; i = i + 1)` compila com `--target=llvm-ir`, linka com clang e executa com a saída correta; testes em `tests/llvm_*` passam. |
 | A.1.2 | Implementar codegen de `para` em bytecode + interpretador | P0 | M | ✅ | `--target=bytecode` gera `.pbc` executável pelo `interpretador`; o loop itera o número correto de vezes; `build/` artifacts regenerados. |
 | A.1.3 | Validar `para` no type checker e ownership | P0 | P | ✅ | Variáveis de init/cond/incr têm tipos verificados; erros de tipo produzem mensagem clara com linha/coluna. |
-| A.1.4 | Teste de paridade `para` nos 3 backends | P0 | P | ⬜ | Mesmo programa `.pr` produz saída idêntica em `bytecode`, `llvm-ir` e `cil-bytecode`. |
+| A.1.4 | Teste de paridade `para` nos 3 backends | P0 | P | ✅ | Mesmo programa `.pr` produz saída idêntica em `bytecode`, `llvm-ir` e `cil-bytecode`. |
 
 ### A.2 `para cada` (foreach)
 
 | # | Tarefa | Pri | Esf | Status | Critério de aceitação |
 |---|---|---|---|---|---|
-| A.2.1 | Lexer/parser/AST para `para cada (item em colecao)` | P1 | M | ⬜ | Nova sintaxe documentada em `docs/`; gramática LALRPOP sem novos conflitos. |
-| A.2.2 | Codegen `para cada` nos 3 backends | P1 | M | ⬜ | Itera `Lista<T>`, arrays e `Texto` (chars) com a mesma saída nos 3 backends. |
+| A.2.1 | Lexer/parser/AST para `para cada (item em colecao)` | P1 | M | ✅ | Nova sintaxe documentada em `docs/controle-fluxo.md`; gramática LALRPOP sem novos conflitos; keywords `cada`/`em` reservadas. |
+| A.2.2 | Codegen `para cada` nos 3 backends | P1 | M | ✅ | Lowering para `para` indexado em `src/codegen/mod.rs`; itera `Lista<T>` e arrays com a mesma saída nos 3 backends (`tests/para_parity_test.rs`). Iteração sobre `Texto` fica em A.2.3 (não há tipo `caractere` na linguagem). |
+| A.2.3 | `para cada` sobre `Texto` (chars) | P2 | M | ⬜ | Definir tipo do elemento (`caractere` ou `texto` de 1 char) e suportar indexação de string na VM/LLVM/CIL. |
 
 ### A.3 Exceções (`tente` / `capture` / `finalmente`)
 
@@ -52,9 +53,9 @@ O estado final desejado é um ecossistema coerente onde um desenvolvedor consegu
 
 | # | Tarefa | Pri | Esf | Status | Critério de aceitação |
 |---|---|---|---|---|---|
-| A.3.1 | Desenhar e documentar a sintaxe de exceções em PT | P0 | P | ⬜ | Proposta aprovada em `docs/` (ex.: `tente { } capture (Erro e) { } finalmente { }`, `falhe "mensagem"`). |
-| A.3.2 | Lexer + parser + AST de exceções | P0 | M | ⬜ | Programa com `tente/capture/finalmente` parseia e aparece na AST. |
-| A.3.3 | Type checker de exceções | P0 | M | ⬜ | Tipos de exceção verificados; `capture` sem tipo casa com exceção base; erros de tipo reportados. |
+| A.3.1 | Desenhar e documentar a sintaxe de exceções em PT | P0 | P | ✅ | Proposta aprovada em `docs/excecoes.md` (`tente`/`capture`/`finalmente`/`falhe`, hierarquia `Sistema.Erros`, semântica C#). |
+| A.3.2 | Lexer + parser + AST de exceções | P0 | M | ✅ | Tokens `tente`/`capture`/`finalmente`/`falhe`/`quando` + `Comando::Tente`/`Falhe`/`CaptureExcecao`; testes em `tests/language_support_unit_test.rs` verificam parse e AST. |
+| A.3.3 | Type checker de exceções | P0 | M | ✅ | Tipos de exceção verificados; `capture` sem tipo casa com exceção base; erros de tipo reportados. |
 | A.3.4 | Runtime de exceções (throw/catch) | P0 | G | ⬜ | Exceção lançada é capturada corretamente; `finally` executa em todos os caminhos (inclusive retorno). |
 | A.3.5 | Codegen exceções — bytecode + interpretador | P0 | G | ⬜ | `.pbc` executa try/catch/finally; debug mode mostra a pilha de exceção. |
 | A.3.6 | Codegen exceções — LLVM IR (invoke/landingpad) | P0 | G | ⬜ | LLVM IR usa `invoke`/`landingpad`/`resume`; binário nativo executa try/catch corretamente. |

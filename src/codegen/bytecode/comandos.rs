@@ -12,8 +12,13 @@ impl<'a> BytecodeGenerator<'a> {
                 self.bytecode_instructions
                     .push(format!("STORE_VAR {}", nome));
             }
-            ast::Comando::DeclaracaoVariavel(_, nome, Some(expr)) => {
-                self.generate_expressao(expr);
+            ast::Comando::DeclaracaoVariavel(_, nome, expr) => {
+                match expr {
+                    Some(e) => self.generate_expressao(e),
+                    None => self
+                        .bytecode_instructions
+                        .push("LOAD_CONST_NULL".to_string()),
+                }
                 self.bytecode_instructions
                     .push(format!("STORE_VAR {}", nome));
             }
@@ -185,7 +190,8 @@ impl<'a> BytecodeGenerator<'a> {
                     .push(format!("STORE_VAR {}", var_nome));
             }
 
-            ast::Comando::AtribuirPropriedade(objeto_expr, prop_nome, expr) => {
+            ast::Comando::AtribuirPropriedade(objeto_expr, prop_nome, expr)
+            | ast::Comando::AtribuirCampo(objeto_expr, prop_nome, expr) => {
                 self.generate_expressao(objeto_expr); // 1. Empilha o objeto
                 self.generate_expressao(expr); // 2. Empilha o valor
                 self.bytecode_instructions
@@ -193,11 +199,23 @@ impl<'a> BytecodeGenerator<'a> {
                 self.bytecode_instructions.push("POP".to_string()); // 4. Remove o objeto da pilha
             }
             ast::Comando::AtribuirIndice(alvo, idx, expr) => {
-                // pilha: alvo, índice, valor
-                self.generate_expressao(alvo);
-                self.generate_expressao(idx);
-                self.generate_expressao(expr);
-                self.bytecode_instructions.push("SET_INDEX".to_string());
+                if let ast::Expressao::Identificador(nome) = &**alvo {
+                    // Arrays são valores imutáveis na VM: é preciso recarregar a
+                    // variável com o array modificado retornado por SET_INDEX.
+                    self.bytecode_instructions
+                        .push(format!("LOAD_VAR {}", nome));
+                    self.generate_expressao(idx);
+                    self.generate_expressao(expr);
+                    self.bytecode_instructions.push("SET_INDEX".to_string());
+                    self.bytecode_instructions
+                        .push(format!("STORE_VAR {}", nome));
+                } else {
+                    // pilha: alvo, índice, valor
+                    self.generate_expressao(alvo);
+                    self.generate_expressao(idx);
+                    self.generate_expressao(expr);
+                    self.bytecode_instructions.push("SET_INDEX".to_string());
+                }
             }
 
             ast::Comando::ChamarMetodo(objeto_expr, metodo, argumentos) => {
@@ -269,7 +287,11 @@ impl<'a> BytecodeGenerator<'a> {
                     if let Some(bib) = &self.type_checker.biblioteca_externa {
                         if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&class_fqn) {
                             if let Some(lib_metodo) = lib_classe.metodos.get(metodo) {
-                                if let Some(chave_nativa) = &lib_metodo.chave_nativa {
+                                if let Some(chave_nativa) = lib_metodo
+                                    .chave_nativa
+                                    .as_deref()
+                                    .filter(|c| ast::chave_nativa_valida(c))
+                                {
                                     // É uma chamada nativa da biblioteca externa
                                     // O modificador estático é do método, não da classe
                                     let eh_estatica = lib_metodo.eh_estatica;
@@ -310,9 +332,18 @@ impl<'a> BytecodeGenerator<'a> {
                             if let Some(nativo_attr) =
                                 metodo_info.attributes.iter().find(|a| a.name == "Nativo")
                             {
-                                if let Some(ast::Expressao::Texto(chave_nativa)) =
-                                    nativo_attr.arguments.get(0)
-                                {
+                                let chave_nativa = nativo_attr
+                                    .arguments
+                                    .get(0)
+                                    .and_then(|e| match e {
+                                        ast::Expressao::Texto(s)
+                                            if ast::chave_nativa_valida(s) =>
+                                        {
+                                            Some(s.as_str())
+                                        }
+                                        _ => None,
+                                    });
+                                if let Some(chave_nativa) = chave_nativa {
                                     // É uma chamada nativa
                                     let sufixo_async = if metodo_info.eh_assincrona { "_ASYNC" } else { "" };
                                     if is_static_call || metodo_info.eh_estatica {
@@ -387,6 +418,26 @@ impl<'a> BytecodeGenerator<'a> {
 
             ast::Comando::Expressao(e) => {
                 self.generate_expressao(e);
+            }
+
+            ast::Comando::AcessarCampo(obj, campo) => {
+                self.bytecode_instructions
+                    .push(format!("LOAD_VAR {}", obj));
+                self.bytecode_instructions
+                    .push(format!("GET_PROPERTY {}", campo));
+                self.bytecode_instructions.push("POP".to_string());
+            }
+
+            ast::Comando::ParaCada { .. } => {
+                // Normalmente o lowering já reescreveu este comando; este
+                // braço cobre geradores instanciados diretamente.
+                let mut lowered = comando.clone();
+                crate::codegen::normalizar_comando_para_cada_unico(&mut lowered);
+                self.generate_comando(&lowered);
+            }
+
+            ast::Comando::Tente { .. } | ast::Comando::Falhe(_) => {
+                panic!("Exceções (tente/capture/finalmente/falhe) ainda não são suportadas pelo backend bytecode")
             }
 
             // Para outros comandos não implementados, remova a linha de comentário e implemente se necessário

@@ -750,6 +750,7 @@ Para tópicos detalhados e exemplos de uso, consulte os guias em `docs/`:
 - `docs/build-e-testes.md` — Como compilar e rodar apenas os testes de exemplos por alvo
 - `docs/controle-fluxo.md` — `se`/`senão`, `enquanto` e exemplos
 - `docs/debug.md` — Guia de depuração no interpretador (breakpoints, step, inspeção)
+- `docs/excecoes.md` — Proposta de exceções: `tente`/`capture`/`finalmente`/`falhe` (design, ainda não implementado)
 - `docs/biblioteca-padrao.md` — Como a `sistema-padrao` é compilada, carregada e executada em cada backend (bytecode, LLVM, CIL), com tabela de paridade e limitações
 - `README-enum.md` — Suporte a enumerações (declaração, uso e regras de tipo)
 

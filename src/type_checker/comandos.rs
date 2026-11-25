@@ -264,6 +264,35 @@ impl<'a> VerificadorTipos<'a> {
                     );
                 }
             }
+            Comando::ParaCada {
+                nome,
+                colecao,
+                corpo,
+            } => {
+                let tipo_col = self.inferir_tipo_expressao(
+                    colecao,
+                    namespace_atual,
+                    classe_atual,
+                    escopo_vars,
+                );
+                let tipo_elem = match tipo_col {
+                    Tipo::Lista(elem) => *elem,
+                    Tipo::Inferido => Tipo::Inferido,
+                    outro => {
+                        self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            format!(
+                                "'para cada' requer uma coleção indexável (lista/array); recebido {}.",
+                                outro
+                            ),
+                        ));
+                        Tipo::Inferido
+                    }
+                };
+                let mut corpo_vars = escopo_vars.clone();
+                corpo_vars.insert(nome.clone(), tipo_elem);
+                self.verificar_comando(corpo, namespace_atual, classe_atual, &mut corpo_vars);
+            }
             Comando::Expressao(expr) => {
                 self.inferir_tipo_expressao(expr, namespace_atual, classe_atual, escopo_vars);
             }
@@ -433,6 +462,163 @@ impl<'a> VerificadorTipos<'a> {
                     classe_atual,
                     escopo_vars,
                 );
+            }
+            Comando::Tente {
+                bloco,
+                captures,
+                bloco_finalmente,
+            } => {
+                if captures.is_empty() && bloco_finalmente.is_none() {
+                    self.erros.push(ErroCompilador::novo(
+                        TipoErro::Semântico,
+                        "Bloco 'tente' deve ter ao menos um 'capture' ou 'finalmente'.".to_string(),
+                    ));
+                }
+
+                let mut tente_vars = escopo_vars.clone();
+                self.em_contexto_excecao += 1;
+                for cmd in bloco {
+                    self.verificar_comando(cmd, namespace_atual, classe_atual, &mut tente_vars);
+                }
+
+                // FQNs dos tipos de capture já vistos, para validar a ordem
+                // (do mais específico para o mais geral).
+                let mut tipos_capturados: Vec<String> = Vec::new();
+                let mut curinga_visto = false;
+                for captura in captures {
+                    if captura.tipo.is_none() {
+                        if curinga_visto {
+                            self.erros.push(ErroCompilador::novo(
+                                TipoErro::Semântico,
+                                "'capture' sem tipo é inalcançável: já existe um 'capture' anterior que captura qualquer exceção.".to_string(),
+                            ));
+                        }
+                        curinga_visto = true;
+                    } else if curinga_visto {
+                        self.erros.push(ErroCompilador::novo(
+                            TipoErro::Semântico,
+                            "'capture' com tipo é inalcançável: um 'capture' anterior sem tipo já captura qualquer exceção.".to_string(),
+                        ));
+                    }
+                    let mut captura_vars = escopo_vars.clone();
+                    if let Some(tipo) = &captura.tipo {
+                        let (tipo_resolvido, mut errs) =
+                            self.normalize_tipo_ro(tipo, namespace_atual);
+                        self.erros.append(&mut errs);
+                        match &tipo_resolvido {
+                            Tipo::Classe(fqn) | Tipo::Aplicado { nome: fqn, .. } => {
+                                if !self.classe_e_erro_ou_derivado(fqn) {
+                                    self.erros.push(ErroCompilador::novo(
+                                        TipoErro::Semântico,
+                                        format!(
+                                            "Tipo de 'capture' '{}' não é 'Erro' nem um tipo derivado.",
+                                            fqn
+                                        ),
+                                    ));
+                                } else {
+                                    // Um capture posterior é inalcançável se um
+                                    // capture anterior já cobre o seu tipo.
+                                    if tipos_capturados
+                                        .iter()
+                                        .any(|prev| self.classe_e_subtipo_de(fqn, prev))
+                                    {
+                                        self.erros.push(ErroCompilador::novo(
+                                            TipoErro::Semântico,
+                                            format!(
+                                                "'capture ({})' é inalcançável: um 'capture' anterior já captura esse tipo ou um tipo mais geral. Ordene do mais específico para o mais geral.",
+                                                fqn
+                                            ),
+                                        ));
+                                    }
+                                    tipos_capturados.push(fqn.clone());
+                                }
+                            }
+                            _ => {
+                                self.erros.push(ErroCompilador::novo(
+                                    TipoErro::Semântico,
+                                    "Tipo de 'capture' deve ser 'Erro' ou um tipo derivado.".to_string(),
+                                ));
+                            }
+                        }
+                        if let Some(nome) = &captura.nome {
+                            captura_vars.insert(nome.clone(), tipo_resolvido);
+                        }
+                    }
+                    if let Some(filtro) = &captura.filtro {
+                        let tipo_filtro = self.inferir_tipo_expressao(
+                            filtro,
+                            namespace_atual,
+                            classe_atual,
+                            &mut captura_vars,
+                        );
+                        if tipo_filtro != Tipo::Inferido && tipo_filtro != Tipo::Booleano {
+                            self.erros.push(ErroCompilador::novo(
+                                TipoErro::Semântico,
+                                format!(
+                                    "Filtro 'quando' de 'capture' deve ser booleano; recebido {}.",
+                                    tipo_filtro
+                                ),
+                            ));
+                        }
+                    }
+                    for cmd in &captura.corpo {
+                        self.verificar_comando(
+                            cmd,
+                            namespace_atual,
+                            classe_atual,
+                            &mut captura_vars,
+                        );
+                    }
+                }
+
+                if let Some(finalmente) = bloco_finalmente {
+                    let mut finally_vars = escopo_vars.clone();
+                    for cmd in finalmente {
+                        self.verificar_comando(
+                            cmd,
+                            namespace_atual,
+                            classe_atual,
+                            &mut finally_vars,
+                        );
+                    }
+                }
+                self.em_contexto_excecao -= 1;
+            }
+            Comando::Falhe(expr) => {
+                match expr {
+                    None => {
+                        if self.em_contexto_excecao == 0 {
+                            self.erros.push(ErroCompilador::novo(
+                                TipoErro::Semântico,
+                                "'falhe;' sem expressão só é válido para relançar uma exceção capturada dentro de 'tente'/'capture'.".to_string(),
+                            ));
+                        }
+                    }
+                    Some(e) => {
+                        let tipo_expr = self.inferir_tipo_expressao(
+                            e,
+                            namespace_atual,
+                            classe_atual,
+                            escopo_vars,
+                        );
+                        let tipo_valido = match &tipo_expr {
+                            Tipo::Texto | Tipo::Inferido => true,
+                            Tipo::Classe(fqn) | Tipo::Aplicado { nome: fqn, .. } => {
+                                self.classe_e_erro_ou_derivado(fqn)
+                            }
+                            _ => false,
+                        };
+                        if !tipo_valido {
+                            self.erros.push(ErroCompilador::novo(
+                                TipoErro::Semântico,
+                                format!(
+                                    "'falhe' requer um texto ou uma exceção ('Erro' ou tipo derivado); recebido {}.",
+                                    tipo_expr
+                                ),
+                            ));
+                        }
+                    }
+                }
             }
             _ => {}
         }

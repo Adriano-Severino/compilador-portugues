@@ -45,3 +45,31 @@ para (inteiro i = 0; i < 5; i = i + 1) {
 ```
 
 A inicialização, a condição e o incremento ficam no cabeçalho do `para`. A condição é opcional; sem ela, o laço continua até uma saída explícita do programa.
+
+## Laço: `para cada`
+
+Itera sobre cada elemento de uma coleção (`lista<T>`, array ou `texto`) sem precisar de índice manual:
+
+```pordosol
+var numeros = [10, 20, 30, 40];
+var soma = 0;
+
+para cada (n em numeros) {
+    soma = soma + n;
+}
+
+imprima(soma); // 100
+```
+
+A variável `n` recebe o tipo do elemento da coleção e tem escopo limitado ao corpo do laço. `para cada` também pode ser aninhado:
+
+```pordosol
+var grades = [[1, 2], [3, 4]];
+para cada (linha em grades) {
+    para cada (valor em linha) {
+        imprima(valor);
+    }
+}
+```
+
+Exemplo completo executável: `exemplos/para_cada.pr`.

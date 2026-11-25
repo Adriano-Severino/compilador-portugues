@@ -422,4 +422,69 @@ impl<'a> VerificadorTipos<'a> {
         None
     }
 
+    /// Retorna o FQN da classe pai de `cls`, consultando classes resolvidas,
+    /// declarações do programa e a biblioteca externa (.pbl).
+    fn proximo_ancestral_classe(&self, cls: &str) -> Option<String> {
+        if let Some(ci) = self.resolved_classes.get(cls) {
+            return ci.parent_name.clone();
+        }
+        if let Some(decl) = self.classes.get(cls) {
+            return decl.classe_pai.as_ref().and_then(|p| {
+                let base = match p {
+                    Tipo::Classe(n) => n.as_str(),
+                    Tipo::Aplicado { nome, .. } => nome.as_str(),
+                    _ => return None,
+                };
+                Some(self.resolver_nome_classe(
+                    base,
+                    &self.get_namespace_from_full_name(cls),
+                ))
+            });
+        }
+        if let Some(bib) = &self.biblioteca_externa {
+            if let Some(LibSimbolo::Classe(c)) = bib.simbolos.get(cls) {
+                return c.nome_pai.clone();
+            }
+        }
+        None
+    }
+
+    /// Verifica se `fqn` é a classe `Erro` (Sistema.Erros.Erro) ou uma
+    /// classe derivada dela, percorrendo toda a cadeia de herança.
+    pub(crate) fn classe_e_erro_ou_derivado(&self, fqn: &str) -> bool {
+        let mut atual = Some(fqn.to_string());
+        let mut visitados = HashSet::new();
+        while let Some(cls) = atual {
+            if !visitados.insert(cls.clone()) {
+                return false;
+            }
+            if cls.rsplit('.').next().unwrap_or(cls.as_str()) == "Erro" {
+                return true;
+            }
+            atual = self.proximo_ancestral_classe(&cls);
+        }
+        false
+    }
+
+    /// Verifica se `sub` é igual a `base` ou deriva dela (mesma semântica
+    /// de `is_subclass_of`, mas também considera a biblioteca externa .pbl).
+    pub(crate) fn classe_e_subtipo_de(&self, sub: &str, base: &str) -> bool {
+        if sub == base {
+            return true;
+        }
+        let mut visitados = HashSet::new();
+        visitados.insert(sub.to_string());
+        let mut atual = self.proximo_ancestral_classe(sub);
+        while let Some(cls) = atual {
+            if cls == base {
+                return true;
+            }
+            if !visitados.insert(cls.clone()) {
+                return false;
+            }
+            atual = self.proximo_ancestral_classe(&cls);
+        }
+        false
+    }
+
 }

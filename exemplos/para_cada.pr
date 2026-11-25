@@ -1,0 +1,28 @@
+imprima("=== Para cada em lista literal ===");
+
+var nums = [10, 20, 30, 40];
+var soma = 0;
+para cada (n em nums) {
+    soma = soma + n;
+}
+imprima("Soma:");
+imprima(soma);
+
+imprima("=== Para cada em array ===");
+var arr = novo inteiro[3];
+arr[0] = 7;
+arr[1] = 8;
+arr[2] = 9;
+para cada (x em arr) {
+    imprima(x);
+}
+
+imprima("=== Para cada aninhado ===");
+var grades = [[1, 2], [3, 4]];
+para cada (linha em grades) {
+    para cada (valor em linha) {
+        imprima(valor);
+    }
+}
+
+imprima("=== Fim ===");

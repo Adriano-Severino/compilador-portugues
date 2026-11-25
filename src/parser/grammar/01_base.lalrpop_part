@@ -578,6 +578,13 @@ ComandoCasado: ast::Comando = {
             Box::new(corpo)
         )
     },
+    "para" "cada" "(" <nome:IdentificadorSimples> "em" <colecao:Expressao> ")" <corpo:ComandoCasado> => {
+        ast::Comando::ParaCada {
+            nome,
+            colecao: Box::new(colecao),
+            corpo: Box::new(corpo),
+        }
+    },
     <outro:ComandoOutro> => outro,
 };
 
@@ -601,6 +608,13 @@ ComandoDescasado: ast::Comando = {
             incr.map(Box::new),
             Box::new(corpo)
         )
+    },
+    "para" "cada" "(" <nome:IdentificadorSimples> "em" <colecao:Expressao> ")" <corpo:ComandoDescasado> => {
+        ast::Comando::ParaCada {
+            nome,
+            colecao: Box::new(colecao),
+            corpo: Box::new(corpo),
+        }
     },
 };
 
@@ -703,9 +717,52 @@ ComandosBasicos: ast::Comando = {
     "retorne" <expr:Expressao?> ";" =>
         ast::Comando::Retorne(expr),
 
+    // Exceções: tente/capture/finalmente e falhe
+    "tente" <bloco:BlocoComando> <captures:CaptureExcecao*> <bloco_final:BlocoFinalmente?> => {
+        ast::Comando::Tente {
+            bloco,
+            captures,
+            bloco_finalmente: bloco_final,
+        }
+    },
+
+    "falhe" <expr:Expressao?> ";" =>
+        ast::Comando::Falhe(expr),
+
     // qualquer expressão standalone como comando
     <expr:Expressao> ";" => ast::Comando::Expressao(expr),
 
+};
+
+// === EXCEÇÕES ===
+// capture (Tipo nome) [quando (condicao)] { corpo }
+// capture (Tipo)            [quando (condicao)] { corpo }
+// capture ()                [quando (condicao)] { corpo }  -- captura qualquer exceção
+CaptureExcecao: ast::CaptureExcecao = {
+    "capture" "(" <tipo:Tipo> <nome:TIdentificador?> ")" <filtro:FiltroQuando?> <corpo:BlocoComando> => {
+        ast::CaptureExcecao {
+            tipo: Some(tipo),
+            nome,
+            filtro,
+            corpo,
+        }
+    },
+    "capture" "(" ")" <filtro:FiltroQuando?> <corpo:BlocoComando> => {
+        ast::CaptureExcecao {
+            tipo: None,
+            nome: None,
+            filtro,
+            corpo,
+        }
+    },
+};
+
+BlocoFinalmente: Vec<ast::Comando> = {
+    "finalmente" <bloco:BlocoComando> => bloco,
+};
+
+FiltroQuando: ast::Expressao = {
+    "quando" "(" <cond:Expressao> ")" => cond,
 };
 
 // === TIPOS E IDENTIFICADORES ===

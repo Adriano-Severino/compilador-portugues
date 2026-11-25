@@ -431,6 +431,43 @@ impl<'a> CilGenerator<'a> {
         self.obter_tipo_propriedade_e_dono(class_fqn, prop_name).map(|(t, _)| t)
     }
 
+    /// Emite `stloc` escolhendo a forma curta (`.s`, operando de 1 byte)
+    /// ou a forma longa quando o índice excede 255.
+    pub(crate) fn emit_stloc(&self, code: &mut String, idx: usize) {
+        if idx <= 255 {
+            code.push_str(&format!("    stloc.s {}\n", idx));
+        } else {
+            code.push_str(&format!("    stloc {}\n", idx));
+        }
+    }
+
+    /// Emite `ldloc` escolhendo a forma curta (`.s`) ou a forma longa.
+    pub(crate) fn emit_ldloc(&self, code: &mut String, idx: usize) {
+        if idx <= 255 {
+            code.push_str(&format!("    ldloc.s {}\n", idx));
+        } else {
+            code.push_str(&format!("    ldloc {}\n", idx));
+        }
+    }
+
+    /// Emite `starg` escolhendo a forma curta (`.s`) ou a forma longa.
+    pub(crate) fn emit_starg(&self, code: &mut String, idx: usize) {
+        if idx <= 255 {
+            code.push_str(&format!("    starg.s {}\n", idx));
+        } else {
+            code.push_str(&format!("    starg {}\n", idx));
+        }
+    }
+
+    /// Emite `ldarg` escolhendo a forma curta (`.s`) ou a forma longa.
+    pub(crate) fn emit_ldarg(&self, code: &mut String, idx: usize) {
+        if idx <= 255 {
+            code.push_str(&format!("    ldarg.s {}\n", idx));
+        } else {
+            code.push_str(&format!("    ldarg {}\n", idx));
+        }
+    }
+
     pub(crate) fn obter_retorno_metodo(&self, class_fqn: &str, method_name: &str) -> ast::Tipo {
         if let Some(resolved) = self.type_checker.resolved_classes.get(class_fqn) {
             if let Some(metodo) = resolved.methods.get(method_name) {

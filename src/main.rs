@@ -799,6 +799,16 @@ fn compilar_para_llvm_ir<'a>(
     nome_base: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Gerando LLVM IR...");
+    if codegen::programa_usa_excecoes(programa) {
+        return Err(Box::new(error::ErroCompilador::novo(
+            error::TipoErro::Semântico,
+            "O programa usa exceções (tente/capture/finalmente/falhe), que ainda não são suportadas pelo backend LLVM."
+                .to_string(),
+        )));
+    }
+    let mut programa_lowered = programa.clone();
+    codegen::normalizar_para_cada(&mut programa_lowered);
+    let programa = &programa_lowered;
     let mut gerador = codegen::llvm_ir::LlvmGenerator::new(
         programa,
         type_checker,

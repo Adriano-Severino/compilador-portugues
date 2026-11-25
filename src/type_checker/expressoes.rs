@@ -423,6 +423,15 @@ impl<'a> VerificadorTipos<'a> {
 
                 if let Tipo::Classe(nome_classe) = &t_norm {
                     if let Some(classe_decl) = self.classes.get(nome_classe) {
+                        if classe_decl.eh_abstrata {
+                            self.erros.push(ErroCompilador::novo(
+                                TipoErro::Semântico,
+                                format!(
+                                    "Não é possível instanciar a classe abstrata '{}'.",
+                                    nome_classe
+                                ),
+                            ));
+                        }
                         // Se não houver construtores definidos e a chamada é sem argumentos,
                         // é uma chamada ao construtor padrão implícito, que é público.
                         if classe_decl.construtores.is_empty() && args.is_empty() {

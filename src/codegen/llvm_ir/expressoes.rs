@@ -419,28 +419,98 @@ impl<'a> LlvmGenerator<'a> {
 
                 (obj_ptr_reg, tipo_resultado)
             }
-            ast::Expressao::NovoArray(tipo, _tamanho) => {
-                // Para biblioteca padrão, criamos um array vazio como placeholder
-                // Em uma implementação completa, precisaria alocar dinamicamente
-                let array_reg = self.get_unique_temp_name();
-                self.body
-                    .push_str(&format!("  {} = call i8* @malloc(i64 16)\n", array_reg));
-                // Inicializa array vazio: tamanho = 0, ponteiro = null
-                let gep_len = self.get_unique_temp_name();
+            ast::Expressao::NovoArray(tipo, tamanho) => {
+                let elem_ty_arg = self.map_type_to_llvm_arg(tipo);
+                let (size_reg, _size_tipo) = self.generate_expressao(tamanho);
+
+                // Protege contra tamanho negativo: trata como 0.
+                let is_neg = self.get_unique_temp_name();
                 self.body.push_str(&format!(
-                    "  {} = getelementptr inbounds [2 x i32], [2 x i32]* {}, i32 0, i32 0\n",
-                    gep_len, array_reg
+                    "  {0} = icmp slt i32 {1}, 0\n",
+                    is_neg, size_reg
                 ));
-                self.body
-                    .push_str(&format!("  store i32 0, i32* {}\n", gep_len));
-                let gep_data = self.get_unique_temp_name();
+                let len_safe = self.get_unique_temp_name();
                 self.body.push_str(&format!(
-                    "  {} = getelementptr inbounds [2 x i32], [2 x i32]* {}, i32 0, i32 1\n",
-                    gep_data, array_reg
+                    "  {0} = select i1 {1}, i32 0, i32 {2}\n",
+                    len_safe, is_neg, size_reg
                 ));
-                self.body
-                    .push_str(&format!("  store i8* null, i8** {}\n", gep_data));
-                (array_reg, ast::Tipo::Lista((*tipo).clone()))
+                let size64 = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = sext i32 {1} to i64\n",
+                    size64, len_safe
+                ));
+
+                // sizeof(T)
+                let gep = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = getelementptr inbounds {1}, {1}* null, i32 1\n",
+                    gep, elem_ty_arg
+                ));
+                let sizeof_t = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = ptrtoint {1} {2} to i64\n",
+                    sizeof_t,
+                    format!("{0}*", elem_ty_arg),
+                    gep
+                ));
+                let total_size = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = mul i64 {1}, {2}\n",
+                    total_size, size64, sizeof_t
+                ));
+                let data_i8 = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = call i8* @malloc(i64 {1})\n",
+                    data_i8, total_size
+                ));
+                // Elementos inicializados com zero (equivalente a default(T)).
+                self.body.push_str(&format!(
+                    "  call void @llvm.memset.p0i8.i64(i8* align 1 {0}, i8 0, i64 {1}, i1 false)\n",
+                    data_i8, total_size
+                ));
+
+                // Header %array = { i32 len, i8* data }
+                let array_size_gep = self.get_unique_temp_name();
+                self.body.push_str("  ");
+                self.body.push_str(&format!(
+                    "{0} = getelementptr inbounds %array, %array* null, i32 1\n",
+                    array_size_gep
+                ));
+                let array_size = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = ptrtoint %array* {1} to i64\n",
+                    array_size, array_size_gep
+                ));
+                let array_mem = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = call i8* @malloc(i64 {1})\n",
+                    array_mem, array_size
+                ));
+                let array_ptr = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = bitcast i8* {1} to %array*\n",
+                    array_ptr, array_mem
+                ));
+                let len_ptr = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = getelementptr inbounds %array, %array* {1}, i32 0, i32 0\n",
+                    len_ptr, array_ptr
+                ));
+                self.body.push_str(&format!(
+                    "  store i32 {0}, i32* {1}\n",
+                    len_safe, len_ptr
+                ));
+                let data_ptr_ptr = self.get_unique_temp_name();
+                self.body.push_str(&format!(
+                    "  {0} = getelementptr inbounds %array, %array* {1}, i32 0, i32 1\n",
+                    data_ptr_ptr, array_ptr
+                ));
+                self.body.push_str(&format!(
+                    "  store i8* {0}, i8** {1}\n",
+                    data_i8, data_ptr_ptr
+                ));
+
+                (array_ptr, ast::Tipo::Lista((*tipo).clone()))
             }
             ast::Expressao::ListaLiteral(items) => {
                 // Infere tipo de elemento a partir do primeiro item (assumindo homogêneo)

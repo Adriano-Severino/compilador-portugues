@@ -337,6 +337,68 @@ impl InferenciaTipos {
                 }
             }
 
+            Comando::Tente {
+                bloco,
+                captures,
+                bloco_finalmente,
+            } => {
+                // Cada região tem escopo próprio: variáveis declaradas dentro
+                // de tente/capture/finalmente não vazam para fora.
+                self.com_escopo_isolado(|this| {
+                    for cmd in bloco {
+                        this.inferir_tipo_comando(cmd)?;
+                    }
+                    Ok(())
+                })?;
+                for captura in captures {
+                    self.com_escopo_isolado(|this| {
+                        // Registra o binding da exceção antes do filtro/corpo
+                        // para que `e` em `capture (Erro e)` resolva o tipo
+                        // declarado, e não o de uma variável externa homônima.
+                        if let (Some(tipo), Some(nome)) = (&captura.tipo, &captura.nome) {
+                            this.registrar_variavel(nome.clone(), tipo.clone());
+                        }
+                        if let Some(filtro) = &captura.filtro {
+                            this.inferir_tipo(filtro)?;
+                        }
+                        for cmd in &captura.corpo {
+                            this.inferir_tipo_comando(cmd)?;
+                        }
+                        Ok(())
+                    })?;
+                }
+                if let Some(finalmente) = bloco_finalmente {
+                    self.com_escopo_isolado(|this| {
+                        for cmd in finalmente {
+                            this.inferir_tipo_comando(cmd)?;
+                        }
+                        Ok(())
+                    })?;
+                }
+            }
+
+            Comando::Falhe(expr) => {
+                if let Some(e) = expr {
+                    self.inferir_tipo(e)?;
+                }
+            }
+
+            Comando::ParaCada {
+                nome,
+                colecao,
+                corpo,
+            } => {
+                let tipo_col = self.inferir_tipo(colecao)?;
+                let tipo_elem = match tipo_col {
+                    Tipo::Lista(elem) => *elem,
+                    _ => Tipo::Inferido,
+                };
+                self.com_escopo_isolado(|this| {
+                    this.registrar_variavel(nome.clone(), tipo_elem);
+                    this.inferir_tipo_comando(corpo)
+                })?;
+            }
+
             _ => {
                 // Outros comandos não precisam de inferência especial
             }
@@ -346,6 +408,18 @@ impl InferenciaTipos {
     }
 
     //   Verificar compatibilidade de tipos
+    // Executa `analise` com um snapshot do mapa de tipos inferidos e
+    // restaura o estado ao final, isolando o escopo de blocos `tente`.
+    fn com_escopo_isolado(
+        &mut self,
+        analise: impl FnOnce(&mut Self) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let snapshot = self.tipos_inferidos.clone();
+        let resultado = analise(self);
+        self.tipos_inferidos = snapshot;
+        resultado
+    }
+
     // ✅ VERIFICAR: Se necessário, adicionar case para Decimal
     fn tipos_compativeis(&self, tipo1: &Tipo, tipo2: &Tipo) -> bool {
         match (tipo1, tipo2) {

@@ -144,6 +144,17 @@ impl ContextoExecucao {
 
     // RUNTIME: Criar instância com argumentos reais dinâmicos
     pub fn criar_instancia(&mut self, nome_classe: &str, argumentos: Vec<ValorRuntime>) -> Result<ValorRuntime, String> {
+        self.criar_instancia_com_profundidade(nome_classe, argumentos, 0)
+    }
+
+    fn criar_instancia_com_profundidade(&mut self, nome_classe: &str, argumentos: Vec<ValorRuntime>, profundidade: usize) -> Result<ValorRuntime, String> {
+        const PROFUNDIDADE_MAXIMA: usize = 128;
+        if profundidade >= PROFUNDIDADE_MAXIMA {
+            return Err(format!(
+                "Profundidade máxima de instanciação excedida ao criar '{}' (possível herança cíclica)",
+                nome_classe
+            ));
+        }
         let classe = self.classes_compiladas.get(nome_classe)
             .ok_or_else(|| format!("Classe '{}' não encontrada", nome_classe))?
             .clone();
@@ -173,7 +184,7 @@ impl ContextoExecucao {
                 self.sair_escopo();
 
                 // Criar recursivamente a instância da classe pai e obter suas propriedades inicializadas
-                match self.criar_instancia(classe_pai_nome, args_pai_avaliados)? {
+                match self.criar_instancia_com_profundidade(classe_pai_nome, args_pai_avaliados, profundidade + 1)? {
                     ValorRuntime::Objeto { propriedades: props_pai, .. } => {
                         propriedades_runtime.extend(props_pai);
                     }
@@ -200,7 +211,7 @@ impl ContextoExecucao {
 
         // 4. Coletar todos os métodos da hierarquia
         let mut metodos_completos = HashMap::new();
-        self.coletar_metodos_hierarquia(nome_classe, &mut metodos_completos)?;
+        self.coletar_metodos_hierarquia(nome_classe, &mut metodos_completos, 0)?;
 
         let mut objeto = ValorRuntime::Objeto {
             classe: nome_classe.to_string(),
@@ -229,11 +240,18 @@ impl ContextoExecucao {
     }
 
     // NOVO: Coleta e inicializa propriedades de toda a hierarquia com valores padrão
-    fn coletar_e_inicializar_propriedades_hierarquia(&self, nome_classe: &str, propriedades: &mut HashMap<String, ValorRuntime>) -> Result<(), String> {
+    fn coletar_e_inicializar_propriedades_hierarquia(&self, nome_classe: &str, propriedades: &mut HashMap<String, ValorRuntime>, profundidade: usize) -> Result<(), String> {
+        const PROFUNDIDADE_MAXIMA: usize = 128;
+        if profundidade >= PROFUNDIDADE_MAXIMA {
+            return Err(format!(
+                "Profundidade máxima excedida ao coletar propriedades de '{}' (possível herança cíclica)",
+                nome_classe
+            ));
+        }
         if let Some(classe) = self.classes_compiladas.get(nome_classe) {
             // Primeiro, coletar propriedades da classe pai (recursivamente)
             if let Some(classe_pai) = &classe.classe_pai {
-                self.coletar_e_inicializar_propriedades_hierarquia(classe_pai, propriedades)?;
+                self.coletar_e_inicializar_propriedades_hierarquia(classe_pai, propriedades, profundidade + 1)?;
             }
 
             // Em seguida, adicionar/sobrescrever propriedades da classe atual
@@ -341,7 +359,10 @@ impl ContextoExecucao {
         match op {
             OperadorAritmetico::Soma => {
                 match (&esq, &dir) {
-                    (ValorRuntime::Inteiro(a), ValorRuntime::Inteiro(b)) => Ok(ValorRuntime::Inteiro(a + b)),
+                    (ValorRuntime::Inteiro(a), ValorRuntime::Inteiro(b)) => a
+                        .checked_add(*b)
+                        .map(ValorRuntime::Inteiro)
+                        .ok_or_else(|| "Overflow na operação de adição de inteiros".to_string()),
                     _ => {
                         let str_esq = self.valor_para_string(&esq);
                         let str_dir = self.valor_para_string(&dir);
@@ -351,39 +372,53 @@ impl ContextoExecucao {
             }
             OperadorAritmetico::Subtracao => {
                 match (&esq, &dir) {
-                    (ValorRuntime::Inteiro(a), ValorRuntime::Inteiro(b)) => Ok(ValorRuntime::Inteiro(a - b)),
+                    (ValorRuntime::Inteiro(a), ValorRuntime::Inteiro(b)) => a
+                        .checked_sub(*b)
+                        .map(ValorRuntime::Inteiro)
+                        .ok_or_else(|| "Overflow na operação de subtração de inteiros".to_string()),
                     _ => Err("Subtração só é válida entre inteiros".to_string())
                 }
             }
             OperadorAritmetico::Multiplicacao => {
                 match (&esq, &dir) {
-                    (ValorRuntime::Inteiro(a), ValorRuntime::Inteiro(b)) => Ok(ValorRuntime::Inteiro(a * b)),
+                    (ValorRuntime::Inteiro(a), ValorRuntime::Inteiro(b)) => a
+                        .checked_mul(*b)
+                        .map(ValorRuntime::Inteiro)
+                        .ok_or_else(|| "Overflow na operação de multiplicação de inteiros".to_string()),
                     _ => Err("Multiplicação só é válida entre inteiros".to_string())
                 }
             }
             OperadorAritmetico::Divisao => {
                 match (&esq, &dir) {
-                    (ValorRuntime::Inteiro(a), ValorRuntime::Inteiro(b)) if *b != 0 => Ok(ValorRuntime::Inteiro(a / b)),
+                    (ValorRuntime::Inteiro(a), ValorRuntime::Inteiro(b)) => a
+                        .checked_div(*b)
+                        .map(ValorRuntime::Inteiro)
+                        .ok_or_else(|| "Divisão inválida, por zero ou overflow de inteiros".to_string()),
                     _ => Err("Divisão inválida ou por zero".to_string())
                 }
             }
             OperadorAritmetico::Modulo => {
                 match (&esq, &dir) {
-                    (ValorRuntime::Inteiro(a), ValorRuntime::Inteiro(b)) if *b != 0 => Ok(ValorRuntime::Inteiro(a % b)),
+                    (ValorRuntime::Inteiro(a), ValorRuntime::Inteiro(b)) => a
+                        .checked_rem(*b)
+                        .map(ValorRuntime::Inteiro)
+                        .ok_or_else(|| "Módulo inválido, por zero ou overflow de inteiros".to_string()),
                     _ => Err("Módulo inválido ou por zero".to_string())
                 }
             }
         }
     }
 
-    fn chamar_metodo(&mut self, mut objeto: ValorRuntime, nome_metodo: &str, argumentos: Vec<ValorRuntime>) -> Result<ValorRuntime, String> {
+    fn chamar_metodo(&mut self, objeto: ValorRuntime, nome_metodo: &str, argumentos: Vec<ValorRuntime>) -> Result<ValorRuntime, String> {
         if let ValorRuntime::Objeto { ref metodos, .. } = objeto {
             if let Some(metodo_info) = metodos.get(nome_metodo).cloned() {
                 // Entrar em novo escopo para o método
+                let contexto_anterior = self
+                    .contexto_metodo_atual
+                    .replace(nome_metodo.to_string());
                 self.entrar_escopo();
-                self.contexto_metodo_atual = Some(nome_metodo.to_string());
                 self.definir_variavel("este", objeto.clone());
-                
+
                 // Definir parâmetros
                 for (i, param) in metodo_info.parametros.iter().enumerate() {
                     if let Some(arg) = argumentos.get(i) {
@@ -403,14 +438,15 @@ impl ContextoExecucao {
                 }
 
                 // Atualizar objeto se foi modificado
-                if let Some(objeto_modificado) = self.obter_variavel("este") {
-                   objeto = objeto_modificado.clone();
-                   return Ok(objeto);
-                }
+                let retorno = if let Some(objeto_modificado) = self.obter_variavel("este") {
+                    objeto_modificado
+                } else {
+                    resultado
+                };
 
-                self.contexto_metodo_atual = None;
                 self.sair_escopo();
-                Ok(resultado)
+                self.contexto_metodo_atual = contexto_anterior;
+                Ok(retorno)
             } else {
                 Err(format!("Método '{}' não encontrado", nome_metodo))
             }
@@ -419,11 +455,18 @@ impl ContextoExecucao {
         }
     }
 
-    fn coletar_metodos_hierarquia(&self, nome_classe: &str, metodos: &mut HashMap<String, MetodoInfo>) -> Result<(), String> {
+    fn coletar_metodos_hierarquia(&self, nome_classe: &str, metodos: &mut HashMap<String, MetodoInfo>, profundidade: usize) -> Result<(), String> {
+        const PROFUNDIDADE_MAXIMA: usize = 128;
+        if profundidade >= PROFUNDIDADE_MAXIMA {
+            return Err(format!(
+                "Profundidade máxima excedida ao coletar métodos de '{}' (possível herança cíclica)",
+                nome_classe
+            ));
+        }
         if let Some(classe) = self.classes_compiladas.get(nome_classe) {
             // Coletar métodos da classe pai primeiro
             if let Some(classe_pai) = &classe.classe_pai {
-                self.coletar_metodos_hierarquia(classe_pai, metodos)?;
+                self.coletar_metodos_hierarquia(classe_pai, metodos, profundidade + 1)?;
             }
 
             // Adicionar/sobrescrever métodos da classe atual
@@ -435,11 +478,18 @@ impl ContextoExecucao {
     }
 
     // **NOVO**: Coleta propriedades de toda a hierarquia
-    fn coletar_propriedades_hierarquia(&self, nome_classe: &str, propriedades: &mut HashMap<String, TipoPropriedade>) -> Result<(), String> {
+    fn coletar_propriedades_hierarquia(&self, nome_classe: &str, propriedades: &mut HashMap<String, TipoPropriedade>, profundidade: usize) -> Result<(), String> {
+        const PROFUNDIDADE_MAXIMA: usize = 128;
+        if profundidade >= PROFUNDIDADE_MAXIMA {
+            return Err(format!(
+                "Profundidade máxima excedida ao coletar propriedades de '{}' (possível herança cíclica)",
+                nome_classe
+            ));
+        }
         if let Some(classe) = self.classes_compiladas.get(nome_classe) {
             // Coletar propriedades da classe pai primeiro (base)
             if let Some(classe_pai) = &classe.classe_pai {
-                self.coletar_propriedades_hierarquia(classe_pai, propriedades)?;
+                self.coletar_propriedades_hierarquia(classe_pai, propriedades, profundidade + 1)?;
             }
 
             // Adicionar/sobrescrever propriedades da classe atual
@@ -501,6 +551,10 @@ impl ContextoExecucao {
                 }
                 self.sair_escopo();
                 Ok(resultado)
+            }
+
+            Comando::Tente { .. } | Comando::Falhe(_) => {
+                Err("Exceções (tente/capture/finalmente/falhe) ainda não são suportadas pelo interpretador".to_string())
             }
 
             _ => Ok(None)

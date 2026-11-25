@@ -55,6 +55,9 @@ impl<'a> BytecodeGenerator<'a> {
                 self.bytecode_instructions
                     .push(format!("LOAD_CONST_DOUBLE {}", lit));
             }
+            ast::Expressao::Nulo => self
+                .bytecode_instructions
+                .push("LOAD_CONST_NULL".to_string()),
             ast::Expressao::Decimal(lit) => {
                 let s = lit.trim_end_matches('m');
                 self.bytecode_instructions
@@ -201,8 +204,11 @@ impl<'a> BytecodeGenerator<'a> {
             }
             ast::Expressao::NovoArray(tipo, tamanho) => {
                 self.generate_expressao(tamanho);
+                // O operando de tipo vai sem espaços para não quebrar o
+                // formato de uma instrução por linha do .pbc.
+                let tipo_str = format!("{:?}", tipo).split_whitespace().collect::<String>();
                 self.bytecode_instructions
-                    .push(format!("NEW_ARRAY_OF_TYPE {:?}", tipo));
+                    .push(format!("NEW_ARRAY_OF_TYPE {}", tipo_str));
             }
 
             // Modificado: Operadores Aritméticos - Distinguir concatenação de soma numérica
@@ -398,7 +404,11 @@ impl<'a> BytecodeGenerator<'a> {
                     if let Some(bib) = &self.type_checker.biblioteca_externa {
                         if let Some(LibSimbolo::Classe(lib_classe)) = bib.simbolos.get(&class_fqn) {
                             if let Some(lib_metodo) = lib_classe.metodos.get(nome_metodo) {
-                                if let Some(chave_nativa) = &lib_metodo.chave_nativa {
+                                if let Some(chave_nativa) = lib_metodo
+                                    .chave_nativa
+                                    .as_deref()
+                                    .filter(|c| ast::chave_nativa_valida(c))
+                                {
                                     // É uma chamada nativa da biblioteca externa
                                     // O modificador estático é do método, não da classe
                                     let eh_estatica = lib_metodo.eh_estatica;
@@ -438,9 +448,18 @@ impl<'a> BytecodeGenerator<'a> {
                             if let Some(nativo_attr) =
                                 metodo_info.attributes.iter().find(|a| a.name == "Nativo")
                             {
-                                if let Some(ast::Expressao::Texto(chave_nativa)) =
-                                    nativo_attr.arguments.get(0)
-                                {
+                                let chave_nativa = nativo_attr
+                                    .arguments
+                                    .get(0)
+                                    .and_then(|e| match e {
+                                        ast::Expressao::Texto(s)
+                                            if ast::chave_nativa_valida(s) =>
+                                        {
+                                            Some(s.as_str())
+                                        }
+                                        _ => None,
+                                    });
+                                if let Some(chave_nativa) = chave_nativa {
                                     // É uma chamada nativa
                                     let sufixo_async = if metodo_info.eh_assincrona { "_ASYNC" } else { "" };
                                     if is_static_call || metodo_info.eh_estatica {

@@ -316,6 +316,253 @@ pub fn compilar_llvm_ir_com_runtime(
 
 pub struct GeradorCodigo;
 
+/* ------------------------------------------------------------------ */
+/* Preflight: exceções ainda não suportadas por nenhum backend         */
+/* ------------------------------------------------------------------ */
+
+fn comando_usa_excecao(comando: &ast::Comando) -> bool {
+    match comando {
+        ast::Comando::Tente { .. } | ast::Comando::Falhe(_) => true,
+        ast::Comando::Se(_, a, b) => {
+            comando_usa_excecao(a) || b.as_deref().map_or(false, comando_usa_excecao)
+        }
+        ast::Comando::Enquanto(_, corpo) => comando_usa_excecao(corpo),
+        ast::Comando::Para(inicializacao, _, incremento, corpo) => {
+            inicializacao
+                .as_deref()
+                .map_or(false, comando_usa_excecao)
+                || incremento
+                    .as_deref()
+                    .map_or(false, comando_usa_excecao)
+                || comando_usa_excecao(corpo)
+        }
+        ast::Comando::ParaCada { corpo, .. } => comando_usa_excecao(corpo),
+        ast::Comando::Bloco(comandos) => comandos.iter().any(comando_usa_excecao),
+        _ => false,
+    }
+}
+
+fn classe_usa_excecao(classe: &ast::DeclaracaoClasse) -> bool {
+    classe
+        .metodos
+        .iter()
+        .any(|m| m.corpo.iter().any(comando_usa_excecao))
+        || classe
+            .construtores
+            .iter()
+            .any(|c| c.corpo.iter().any(comando_usa_excecao))
+        || classe.propriedades.iter().any(|p| {
+            [p.obter.as_ref(), p.definir.as_ref()]
+                .iter()
+                .flatten()
+                .any(|a| {
+                    a.corpo
+                        .as_deref()
+                        .map_or(false, |corpo| corpo.iter().any(comando_usa_excecao))
+                })
+        })
+        || classe.nested_classes.iter().any(classe_usa_excecao)
+}
+
+fn declaracao_usa_excecao(declaracao: &ast::Declaracao) -> bool {
+    match declaracao {
+        ast::Declaracao::Comando(c) => comando_usa_excecao(c),
+        ast::Declaracao::DeclaracaoFuncao(f) => f.corpo.iter().any(comando_usa_excecao),
+        ast::Declaracao::DeclaracaoClasse(c) => classe_usa_excecao(c),
+        ast::Declaracao::DeclaracaoModulo(m) => m.conteudo.iter().any(declaracao_usa_excecao),
+        ast::Declaracao::DeclaracaoNamespace(ns) => {
+            ns.declaracoes.iter().any(declaracao_usa_excecao)
+        }
+        _ => false,
+    }
+}
+
+/// Retorna `true` se o programa contém `tente`/`capture`/`finalmente`/`falhe`.
+/// Nenhum backend implementa exceções ainda; os geradores rejeitam esses
+/// programas com erro de compilação em vez de falhar com `panic!`.
+pub fn programa_usa_excecoes(programa: &ast::Programa) -> bool {
+    programa.declaracoes.iter().any(declaracao_usa_excecao)
+        || programa
+            .namespaces
+            .iter()
+            .flat_map(|ns| ns.declaracoes.iter())
+            .any(declaracao_usa_excecao)
+}
+
+fn garantir_sem_excecoes(programa: &ast::Programa, backend: &str) -> Result<(), String> {
+    if programa_usa_excecoes(programa) {
+        return Err(format!(
+            "O programa usa exceções (tente/capture/finalmente/falhe), que ainda não são suportadas pelo backend {}.",
+            backend
+        ));
+    }
+    Ok(())
+}
+
+/* ==========================================================================
+ * LOWERING DE `para cada`
+ *
+ * `para cada (x em colecao) corpo` é reescrito como um `para` indexado:
+ *
+ *   {
+ *       var __por_do_sol_col_N = colecao;
+ *       var __por_do_sol_i_N   = 0;
+ *       para (; __por_do_sol_i_N < __por_do_sol_col_N.tamanho;
+ *             __por_do_sol_i_N = __por_do_sol_i_N + 1) {
+ *           var x = __por_do_sol_col_N[__por_do_sol_i_N];
+ *           corpo
+ *       }
+ *   }
+ *
+ * Isso garante paridade entre bytecode, LLVM IR e CIL sem duplicar a
+ * lógica de iteração em cada backend. Os nomes ocultos recebem um
+ * sufixo único por ocorrência, inclusive para `para cada` aninhados.
+ * ========================================================================== */
+pub fn normalizar_para_cada(programa: &mut ast::Programa) {
+    let mut contador = 0usize;
+    normalizar_declaracoes_para_cada(&mut programa.declaracoes, &mut contador);
+    for ns in &mut programa.namespaces {
+        normalizar_declaracoes_para_cada(&mut ns.declaracoes, &mut contador);
+    }
+}
+
+/// Lowering defensivo de um único comando, usado pelos backends quando o
+/// gerador é instanciado diretamente sem passar por `normalizar_para_cada`.
+/// Como `para cada` aninhados são normalizados recursivamente e irmãos não
+/// têm escopos sobrepostos, reiniciar o contador por comando é seguro.
+pub(crate) fn normalizar_comando_para_cada_unico(comando: &mut ast::Comando) {
+    let mut contador = 0usize;
+    normalizar_comando_para_cada(comando, &mut contador);
+}
+
+fn normalizar_declaracoes_para_cada(decls: &mut [ast::Declaracao], contador: &mut usize) {
+    for decl in decls {
+        match decl {
+            ast::Declaracao::Comando(cmd) => normalizar_comando_para_cada(cmd, contador),
+            ast::Declaracao::DeclaracaoFuncao(f) => {
+                normalizar_comandos_para_cada(&mut f.corpo, contador)
+            }
+            ast::Declaracao::DeclaracaoClasse(c) => normalizar_classe_para_cada(c, contador),
+            ast::Declaracao::DeclaracaoModulo(m) => {
+                normalizar_declaracoes_para_cada(&mut m.conteudo, contador)
+            }
+            ast::Declaracao::DeclaracaoNamespace(ns) => {
+                normalizar_declaracoes_para_cada(&mut ns.declaracoes, contador)
+            }
+            _ => {}
+        }
+    }
+}
+
+fn normalizar_classe_para_cada(c: &mut ast::DeclaracaoClasse, contador: &mut usize) {
+    for metodo in &mut c.metodos {
+        normalizar_comandos_para_cada(&mut metodo.corpo, contador);
+    }
+    for construtor in &mut c.construtores {
+        normalizar_comandos_para_cada(&mut construtor.corpo, contador);
+    }
+    for prop in &mut c.propriedades {
+        for acessor in [&mut prop.obter, &mut prop.definir].into_iter().flatten() {
+            if let Some(corpo) = &mut acessor.corpo {
+                normalizar_comandos_para_cada(corpo, contador);
+            }
+        }
+    }
+    for nested in &mut c.nested_classes {
+        normalizar_classe_para_cada(nested, contador);
+    }
+}
+
+fn normalizar_comandos_para_cada(comandos: &mut [ast::Comando], contador: &mut usize) {
+    for cmd in comandos {
+        normalizar_comando_para_cada(cmd, contador);
+    }
+}
+
+fn normalizar_comando_para_cada(cmd: &mut ast::Comando, contador: &mut usize) {
+    use ast::{Comando, Expressao, OperadorAritmetico, OperadorComparacao};
+    match cmd {
+        Comando::ParaCada {
+            nome,
+            colecao,
+            corpo,
+        } => {
+            // Normaliza o corpo antes para tratar `para cada` aninhados.
+            normalizar_comando_para_cada(corpo, contador);
+            let id = *contador;
+            *contador += 1;
+            let col = format!("__por_do_sol_col_{}", id);
+            let idx = format!("__por_do_sol_i_{}", id);
+            let col_expr = col.clone();
+            let idx_expr = idx.clone();
+            *cmd = Comando::Bloco(vec![
+                Comando::DeclaracaoVar(col, (**colecao).clone()),
+                Comando::DeclaracaoVar(idx.clone(), Expressao::Inteiro(0)),
+                Comando::Para(
+                    None,
+                    Some(Expressao::Comparacao(
+                        OperadorComparacao::Menor,
+                        Box::new(Expressao::Identificador(idx.clone())),
+                        Box::new(Expressao::AcessoMembro(
+                            Box::new(Expressao::Identificador(col_expr.clone())),
+                            "tamanho".to_string(),
+                        )),
+                    )),
+                    Some(Box::new(Comando::Atribuicao(
+                        idx,
+                        Expressao::Aritmetica(
+                            OperadorAritmetico::Soma,
+                            Box::new(Expressao::Identificador(idx_expr.clone())),
+                            Box::new(Expressao::Inteiro(1)),
+                        ),
+                    ))),
+                    Box::new(Comando::Bloco(vec![
+                        Comando::DeclaracaoVar(
+                            nome.clone(),
+                            Expressao::AcessoIndice(
+                                Box::new(Expressao::Identificador(col_expr)),
+                                Box::new(Expressao::Identificador(idx_expr)),
+                            ),
+                        ),
+                        (**corpo).clone(),
+                    ])),
+                ),
+            ]);
+        }
+        Comando::Bloco(comandos) => normalizar_comandos_para_cada(comandos, contador),
+        Comando::Se(_, entao, senao) => {
+            normalizar_comando_para_cada(entao, contador);
+            if let Some(s) = senao {
+                normalizar_comando_para_cada(s, contador);
+            }
+        }
+        Comando::Enquanto(_, corpo) => normalizar_comando_para_cada(corpo, contador),
+        Comando::Para(init, _cond, incr, corpo) => {
+            if let Some(i) = init {
+                normalizar_comando_para_cada(i, contador);
+            }
+            if let Some(p) = incr {
+                normalizar_comando_para_cada(p, contador);
+            }
+            normalizar_comando_para_cada(corpo, contador);
+        }
+        Comando::Tente {
+            bloco,
+            captures,
+            bloco_finalmente,
+        } => {
+            normalizar_comandos_para_cada(bloco, contador);
+            for captura in captures {
+                normalizar_comandos_para_cada(&mut captura.corpo, contador);
+            }
+            if let Some(finalmente) = bloco_finalmente {
+                normalizar_comandos_para_cada(finalmente, contador);
+            }
+        }
+        _ => {}
+    }
+}
+
 impl GeradorCodigo {
     pub fn new() -> Result<Self, String> {
         Ok(Self)
@@ -327,6 +574,10 @@ impl GeradorCodigo {
         type_checker: &'a mut crate::type_checker::VerificadorTipos<'a>,
         nome_base: &str,
     ) -> Result<(), String> {
+        garantir_sem_excecoes(programa, "LLVM")?;
+        let mut programa_lowered = programa.clone();
+        normalizar_para_cada(&mut programa_lowered);
+        let programa = &programa_lowered;
         let mut generator =
             llvm_ir::LlvmGenerator::new(programa, type_checker, &type_checker.resolved_classes);
         let code = generator.generate();
@@ -342,6 +593,10 @@ impl GeradorCodigo {
         type_checker: &'a crate::type_checker::VerificadorTipos<'a>,
         nome_base: &str,
     ) -> Result<String, String> {
+        garantir_sem_excecoes(programa, "CIL")?;
+        let mut programa_lowered = programa.clone();
+        normalizar_para_cada(&mut programa_lowered);
+        let programa = &programa_lowered;
         let mut generator = cil::CilGenerator::new(programa, type_checker, nome_base.to_string());
         let code = generator.generate();
         let il_path = format!("{}.il", nome_base);
@@ -361,6 +616,10 @@ impl GeradorCodigo {
     }
 
     pub fn gerar_console(&self, programa: &ast::Programa, nome_base: &str) -> Result<(), String> {
+        garantir_sem_excecoes(programa, "console")?;
+        let mut programa_lowered = programa.clone();
+        normalizar_para_cada(&mut programa_lowered);
+        let programa = &programa_lowered;
         let generator = console::ConsoleGenerator::new(programa);
         let main_body = generator.generate();
 
@@ -386,6 +645,10 @@ impl GeradorCodigo {
         type_checker: &'a crate::type_checker::VerificadorTipos,
         nome_base: &str,
     ) -> Result<(), String> {
+        garantir_sem_excecoes(programa, "bytecode")?;
+        let mut programa_lowered = programa.clone();
+        normalizar_para_cada(&mut programa_lowered);
+        let programa = &programa_lowered;
         let mut generator = bytecode::BytecodeGenerator::new(programa, type_checker);
         let bytecode = generator.generate();
         fs::write(format!("{}.pbc", nome_base), bytecode.join("\n")).map_err(|e| e.to_string())
@@ -397,6 +660,10 @@ impl GeradorCodigo {
         type_checker: &'a crate::type_checker::VerificadorTipos,
         output_path: &Path,
     ) -> Result<(), String> {
+        garantir_sem_excecoes(programa, "bytecode")?;
+        let mut programa_lowered = programa.clone();
+        normalizar_para_cada(&mut programa_lowered);
+        let programa = &programa_lowered;
         let mut generator = bytecode::BytecodeGenerator::new(programa, type_checker);
         let bytecode = generator.generate();
         fs::write(output_path, bytecode.join("\n")).map_err(|e| e.to_string())
@@ -407,6 +674,10 @@ impl GeradorCodigo {
         programa: &'a ast::Programa,
         type_checker: &'a mut crate::type_checker::VerificadorTipos,
     ) -> Result<String, String> {
+        garantir_sem_excecoes(programa, "bytecode")?;
+        let mut programa_lowered = programa.clone();
+        normalizar_para_cada(&mut programa_lowered);
+        let programa = &programa_lowered;
         let mut generator = bytecode::BytecodeGenerator::new(programa, type_checker);
         let bytecode = generator.generate_for_library();
         Ok(bytecode.join("\n"))
@@ -426,6 +697,10 @@ impl GeradorCodigo {
         nome_biblioteca: &str,
         versao: &str,
     ) -> Result<String, String> {
+        garantir_sem_excecoes(programa, "biblioteca (.pbl)")?;
+        let mut programa_lowered = programa.clone();
+        normalizar_para_cada(&mut programa_lowered);
+        let programa = &programa_lowered;
         use std::fmt::Write as FmtWrite;
         let mut manifesto = String::new();
         let mut bytecode_secao = String::new();
@@ -476,7 +751,11 @@ impl GeradorCodigo {
                             .and_then(|a| a.arguments.first())
                             .and_then(|e| {
                                 if let ast::Expressao::Texto(s) = e {
-                                    Some(s.clone())
+                                    if ast::chave_nativa_valida(s) {
+                                        Some(s.clone())
+                                    } else {
+                                        None
+                                    }
                                 } else {
                                     None
                                 }
@@ -564,6 +843,9 @@ pub fn gerar_llvm_ir_puro<'a>(
     programa: &'a ast::Programa,
     type_checker: &'a mut crate::type_checker::VerificadorTipos<'a>,
 ) -> String {
+    let mut programa_lowered = programa.clone();
+    normalizar_para_cada(&mut programa_lowered);
+    let programa = &programa_lowered;
     let mut generator =
         llvm_ir::LlvmGenerator::new(programa, type_checker, &type_checker.resolved_classes);
     generator.generate()
@@ -576,6 +858,9 @@ pub fn gerar_cil_puro<'a>(
     type_checker: &'a crate::type_checker::VerificadorTipos<'a>,
     assembly_name: &str,
 ) -> String {
+    let mut programa_lowered = programa.clone();
+    normalizar_para_cada(&mut programa_lowered);
+    let programa = &programa_lowered;
     let mut generator = cil::CilGenerator::new(programa, type_checker, assembly_name.to_string());
     generator.generate()
 }
@@ -586,6 +871,10 @@ pub fn gerar_llvm_ir_para_biblioteca<'a>(
     type_checker: &'a mut crate::type_checker::VerificadorTipos<'a>,
     nome_base: &str,
 ) -> Result<(), String> {
+    garantir_sem_excecoes(programa, "LLVM")?;
+    let mut programa_lowered = programa.clone();
+    normalizar_para_cada(&mut programa_lowered);
+    let programa = &programa_lowered;
     let mut generator =
         llvm_ir::LlvmGenerator::new(programa, type_checker, &type_checker.resolved_classes);
     let code = generator.generate_for_library();

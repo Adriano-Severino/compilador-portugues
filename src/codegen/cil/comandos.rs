@@ -11,28 +11,28 @@ impl<'a> CilGenerator<'a> {
             ast::Comando::DeclaracaoVar(nome, expr) => {
                 let tipo = self.generate_expressao(expr, code);
                 let idx = self.registrar_var_local(nome, tipo);
-                code.push_str(&format!("    stloc.s {}\n", idx));
+                self.emit_stloc(code, idx);
             }
             ast::Comando::DeclaracaoVariavel(tipo, nome, init) => {
                 let tipo_resolvido = self.resolver_tipo(tipo);
                 let idx = self.registrar_var_local(nome, tipo_resolvido);
                 if let Some(expr) = init {
                     let _ = self.generate_expressao(expr, code);
-                    code.push_str(&format!("    stloc.s {}\n", idx));
+                    self.emit_stloc(code, idx);
                 }
             }
             ast::Comando::Atribuicao(nome, expr) => {
                 // 1. Variável local
                 if let Some((idx, _)) = self.obter_var_local(nome) {
                     let _ = self.generate_expressao(expr, code);
-                    code.push_str(&format!("    stloc.s {}\n", idx));
+                    self.emit_stloc(code, idx);
                     return;
                 }
 
                 // 2. Parâmetro
                 if let Some((idx, _)) = self.obter_parametro(nome) {
                     let _ = self.generate_expressao(expr, code);
-                    code.push_str(&format!("    starg.s {}\n", idx));
+                    self.emit_starg(code, idx);
                     return;
                 }
 
@@ -68,7 +68,7 @@ impl<'a> CilGenerator<'a> {
                 // Fallback: registra como variável local caso não exista
                 let tipo = self.generate_expressao(expr, code);
                 let idx = self.registrar_var_local(nome, tipo);
-                code.push_str(&format!("    stloc.s {}\n", idx));
+                self.emit_stloc(code, idx);
             }
             ast::Comando::AtribuirPropriedade(alvo, prop, expr) => {
                 let tipo_alvo = self.generate_expressao(alvo, code);
@@ -211,6 +211,13 @@ impl<'a> CilGenerator<'a> {
                 code.push_str(&format!("    br {}\n", lbl_start));
                 code.push_str(&format!("{}:\n", lbl_end));
             }
+            ast::Comando::ParaCada { .. } => {
+                // Normalmente o lowering já reescreveu este comando; este
+                // braço cobre geradores instanciados diretamente.
+                let mut lowered = comando.clone();
+                crate::codegen::normalizar_comando_para_cada_unico(&mut lowered);
+                self.generate_comando(&lowered, code);
+            }
             ast::Comando::Para(init, cond, passo, corpo) => {
                 if let Some(i) = init {
                     self.generate_comando(i, code);
@@ -253,7 +260,7 @@ impl<'a> CilGenerator<'a> {
                 let expr_novo = ast::Expressao::NovoObjeto(ast::Tipo::Classe(classe.clone()), args.clone());
                 let tipo = self.generate_expressao(&expr_novo, code);
                 let idx = self.registrar_var_local(var_nome, tipo);
-                code.push_str(&format!("    stloc.s {}\n", idx));
+                self.emit_stloc(code, idx);
             }
             ast::Comando::ChamarMetodo(alvo, metodo, args) => {
                 let expr_chama = ast::Expressao::ChamadaMetodo(alvo.clone(), metodo.clone(), args.clone());
@@ -263,6 +270,9 @@ impl<'a> CilGenerator<'a> {
                 }
             }
             ast::Comando::AcessarCampo(_, _) => {}
+            ast::Comando::Tente { .. } | ast::Comando::Falhe(_) => {
+                panic!("Exceções (tente/capture/finalmente/falhe) ainda não são suportadas pelo backend CIL")
+            }
         }
     }
 }

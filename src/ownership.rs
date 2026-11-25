@@ -234,6 +234,29 @@ impl AnalisadorOwnership {
                 self.sair_escopo();
             }
 
+            Comando::ParaCada {
+                nome,
+                colecao,
+                corpo,
+            } => {
+                self.analisar_expressao(colecao);
+                self.entrar_escopo();
+                // A variável de iteração é recriada a cada volta do loop;
+                // tratamos como dono dentro do escopo do corpo.
+                self.variaveis.insert(
+                    nome.clone(),
+                    InfoOwnership {
+                        status: StatusOwnership::Dono,
+                        escopo_criacao: self.escopo_atual,
+                        ultimo_uso: None,
+                        pode_ser_movido: true,
+                        eh_parametro_este: false,
+                    },
+                );
+                self.analisar_comando(corpo);
+                self.sair_escopo();
+            }
+
             Comando::Bloco(comandos) => {
                 self.entrar_escopo();
                 for cmd in comandos {
@@ -302,6 +325,66 @@ impl AnalisadorOwnership {
 
             Comando::Imprima(expr) => {
                 self.analisar_expressao(expr);
+            }
+
+            Comando::Tente {
+                bloco,
+                captures,
+                bloco_finalmente,
+            } => {
+                // Cada região (bloco, captures, finally) tem escopo próprio.
+                self.entrar_escopo();
+                for cmd in bloco {
+                    self.analisar_comando(cmd);
+                }
+                self.sair_escopo();
+
+                for captura in captures {
+                    self.entrar_escopo();
+                    // Registra o binding da exceção (ex.: `capture (Erro e)`)
+                    // como variável emprestada; se sombrear uma variável
+                    // externa, o estado original é restaurado ao sair.
+                    let mut anterior: Option<(String, InfoOwnership)> = None;
+                    if let (Some(_tipo), Some(nome)) = (&captura.tipo, &captura.nome) {
+                        if let Some(info) = self.variaveis.get(nome) {
+                            anterior = Some((nome.clone(), info.clone()));
+                        }
+                        self.variaveis.insert(
+                            nome.clone(),
+                            InfoOwnership {
+                                status: StatusOwnership::Emprestado,
+                                escopo_criacao: self.escopo_atual,
+                                ultimo_uso: None,
+                                pode_ser_movido: false,
+                                eh_parametro_este: false,
+                            },
+                        );
+                    }
+                    if let Some(filtro) = &captura.filtro {
+                        self.analisar_expressao(filtro);
+                    }
+                    for cmd in &captura.corpo {
+                        self.analisar_comando(cmd);
+                    }
+                    self.sair_escopo();
+                    if let Some((nome, info)) = anterior {
+                        self.variaveis.insert(nome, info);
+                    }
+                }
+
+                if let Some(finalmente) = bloco_finalmente {
+                    self.entrar_escopo();
+                    for cmd in finalmente {
+                        self.analisar_comando(cmd);
+                    }
+                    self.sair_escopo();
+                }
+            }
+
+            Comando::Falhe(expr) => {
+                if let Some(expr) = expr {
+                    self.analisar_movimento_em_expressao(expr);
+                }
             }
         }
     }

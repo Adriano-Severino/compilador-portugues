@@ -19,6 +19,10 @@ pub enum Token {
     TEnquanto,
     #[token("para")]
     TPara,
+    #[token("cada")]
+    TCada,
+    #[token("em")]
+    TEm,
     #[token("função")]
     TFuncao,
     // Async/await usa termos em português;
@@ -37,6 +41,17 @@ pub enum Token {
     TEspaco,
     #[token("usando")]
     TUsando,
+    /* exceções */
+    #[token("tente")]
+    TTente,
+    #[token("capture")]
+    TCapture,
+    #[token("finalmente")]
+    TFinalmente,
+    #[token("falhe")]
+    TFalhe,
+    #[token("quando")]
+    TQuando,
 
     /* tipos */
     #[token("inteiro")]

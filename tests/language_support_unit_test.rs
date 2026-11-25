@@ -766,3 +766,321 @@ função vazio Principal() {
         erros
     );
 }
+
+#[test]
+fn lexer_reconhece_keywords_de_excecao() {
+    let tokens = tokens("tente capture finalmente falhe quando");
+
+    assert!(tokens.contains(&Token::TTente));
+    assert!(tokens.contains(&Token::TCapture));
+    assert!(tokens.contains(&Token::TFinalmente));
+    assert!(tokens.contains(&Token::TFalhe));
+    assert!(tokens.contains(&Token::TQuando));
+}
+
+#[test]
+fn parser_modela_tente_capture_finalmente_e_falhe() {
+    let programa = parse(
+        r#"
+função vazio Principal() {
+    tente {
+        imprima("dentro");
+        falhe "ops";
+    } capture (ErroIo e) quando (e.Codigo == 2) {
+        imprima(e.Mensagem);
+    } capture () {
+        imprima("qualquer");
+    } finalmente {
+        imprima("fim");
+    }
+}
+"#,
+    );
+
+    let Declaracao::DeclaracaoFuncao(funcao) = &programa.declaracoes[0] else {
+        panic!("esperava funcao top-level");
+    };
+
+    let Comando::Tente {
+        bloco,
+        captures,
+        bloco_finalmente,
+    } = &funcao.corpo[0]
+    else {
+        panic!("esperava Comando::Tente, obtido: {:?}", funcao.corpo[0]);
+    };
+
+    assert_eq!(bloco.len(), 2);
+    assert!(matches!(bloco[1], Comando::Falhe(Some(_))));
+    assert_eq!(captures.len(), 2);
+    assert_eq!(captures[0].nome.as_deref(), Some("e"));
+    assert!(captures[0].filtro.is_some());
+    assert!(captures[1].tipo.is_none());
+    assert!(bloco_finalmente.is_some());
+}
+
+#[test]
+fn typecheck_exige_capture_ou_finalmente_no_tente() {
+    let erros = typecheck_errors(
+        r#"
+função vazio Principal() {
+    tente {
+        imprima("nada");
+    }
+}
+"#,
+    );
+    assert!(
+        erros.iter().any(|e| e.contains("tente")),
+        "Esperava erro sobre 'tente' sem capture/finalmente, erros: {:?}",
+        erros
+    );
+}
+
+#[test]
+fn typecheck_tente_com_capture_e_finalmente_ok() {
+    assert_typecheck_ok(
+        r#"
+função vazio Principal() {
+    tente {
+        imprima("dentro");
+    } capture () {
+        imprima("erro");
+    } finalmente {
+        imprima("fim");
+    }
+}
+"#,
+    );
+}
+
+// ============================================================
+// Testes de segurança (auditoria): exceções, [Nativo], codegen
+// ============================================================
+
+#[test]
+fn falhe_com_tipo_invalido_e_rejeitado() {
+    let erros = typecheck_errors(
+        r#"
+função vazio Principal() {
+    tente {
+        falhe 42;
+    } capture () {
+        imprima("erro");
+    }
+}
+"#,
+    );
+    assert!(
+        erros.iter().any(|e| e.contains("falhe")),
+        "Esperava erro sobre 'falhe' com tipo inválido, erros: {:?}",
+        erros
+    );
+}
+
+#[test]
+fn falhe_sem_expressao_fora_de_tente_e_rejeitado() {
+    let erros = typecheck_errors(
+        r#"
+função vazio Principal() {
+    falhe;
+}
+"#,
+    );
+    assert!(
+        erros.iter().any(|e| e.contains("falhe")),
+        "Esperava erro sobre 'falhe;' fora de contexto, erros: {:?}",
+        erros
+    );
+}
+
+#[test]
+fn capture_com_tipo_nao_excecao_e_rejeitado() {
+    let erros = typecheck_errors(
+        r#"
+função vazio Principal() {
+    tente {
+        imprima("dentro");
+    } capture (inteiro e) {
+        imprima("erro");
+    }
+}
+"#,
+    );
+    assert!(
+        erros.iter().any(|e| e.contains("capture")),
+        "Esperava erro sobre tipo de 'capture' inválido, erros: {:?}",
+        erros
+    );
+}
+
+#[test]
+fn capture_inalcancavel_apos_tipo_mais_geral_e_rejeitado() {
+    let erros = typecheck_errors(
+        r#"
+classe Erro {
+}
+
+classe ErroIo : Erro {
+}
+
+função vazio Principal() {
+    tente {
+        imprima("dentro");
+    } capture (Erro e) {
+        imprima("generico");
+    } capture (ErroIo e2) {
+        imprima("especifico");
+    }
+}
+"#,
+    );
+    assert!(
+        erros.iter().any(|e| e.contains("inalcançável")),
+        "Esperava erro de capture inalcançável, erros: {:?}",
+        erros
+    );
+}
+
+#[test]
+fn capture_nao_erro_ou_derivado_e_rejeitado() {
+    let erros = typecheck_errors(
+        r#"
+classe Erro {
+}
+
+classe Pessoa {
+}
+
+função vazio Principal() {
+    tente {
+        imprima("dentro");
+    } capture (Pessoa p) {
+        imprima("erro");
+    }
+}
+"#,
+    );
+    assert!(
+        erros.iter().any(|e| e.contains("Erro") || e.contains("capture")),
+        "Esperava erro sobre tipo de 'capture' não relacionado, erros: {:?}",
+        erros
+    );
+}
+
+#[test]
+fn nativo_proibido_em_classe_fora_da_stdlib() {
+    let erros = typecheck_errors(
+        r#"
+classe Foo {
+    [Nativo("Console::EscreverLinha")]
+    publico estática externo texto Bar();
+}
+"#,
+    );
+    assert!(
+        erros.iter().any(|e| e.contains("Nativo")),
+        "Esperava erro proibindo [Nativo] fora da stdlib, erros: {:?}",
+        erros
+    );
+}
+
+#[test]
+fn nativo_com_chave_invalida_e_rejeitado() {
+    let erros = typecheck_errors(
+        "classe Foo {\n    [Nativo(\"Console::Escrever Linha\")]\n    publico estática externo texto Bar();\n}\n",
+    );
+    assert!(
+        erros.iter().any(|e| e.contains("Nativo")),
+        "Esperava erro sobre chave nativa inválida, erros: {:?}",
+        erros
+    );
+}
+
+#[test]
+fn codegen_rejeita_excecoes_com_erro_em_vez_de_panic() {
+    let programa = assert_typecheck_ok(
+        r#"
+função vazio Principal() {
+    tente {
+        imprima("dentro");
+    } finalmente {
+        imprima("fim");
+    }
+}
+"#,
+    );
+
+    let mut verificador = VerificadorTipos::new();
+    verificador.verificar_programa(&programa).unwrap();
+
+    assert!(compilador_portugues::codegen::programa_usa_excecoes(&programa));
+
+    let mut gerador = compilador_portugues::GeradorCodigo::new().unwrap();
+    let resultado = gerador.gerar_bytecode(&programa, &verificador, "teste_excecao");
+    assert!(
+        resultado.is_err(),
+        "Esperava erro de compilação para backend sem suporte a exceções"
+    );
+}
+
+#[test]
+fn lexer_reconhece_cada_e_em() {
+    let tokens = tokens("para cada (item em colecao)");
+    assert!(tokens.contains(&Token::TPara));
+    assert!(tokens.contains(&Token::TCada));
+    assert!(tokens.contains(&Token::TEm));
+}
+
+#[test]
+fn parser_modela_para_cada() {
+    let programa = parse(
+        "var nums = [1, 2, 3];\npara cada (n em nums) { imprima(n); }\n",
+    );
+    let para_cada = programa.declaracoes.iter().find_map(|d| {
+        if let Declaracao::Comando(Comando::ParaCada { nome, .. }) = d {
+            Some(nome.clone())
+        } else {
+            None
+        }
+    });
+    assert_eq!(para_cada.as_deref(), Some("n"));
+}
+
+#[test]
+fn typecheck_aceita_para_cada_em_lista_e_array() {
+    assert_typecheck_ok(
+        r#"
+função vazio Principal() {
+    var nums = [10, 20, 30];
+    var soma = 0;
+    para cada (n em nums) {
+        soma = soma + n;
+    }
+    var arr = novo inteiro[3];
+    para cada (x em arr) {
+        imprima(x);
+    }
+}
+"#,
+    );
+}
+
+#[test]
+fn typecheck_rejeita_para_cada_em_nao_colecao() {
+    let erros = typecheck_errors(
+        r#"
+função vazio Principal() {
+    var n = 5;
+    para cada (x em n) {
+        imprima(x);
+    }
+}
+"#,
+    );
+    assert!(
+        erros.iter().any(|e| e.contains("para cada")),
+        "Esperava erro sobre 'para cada' em não coleção, erros: {:?}",
+        erros
+    );
+}

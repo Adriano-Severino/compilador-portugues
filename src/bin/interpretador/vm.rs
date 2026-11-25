@@ -244,6 +244,32 @@ impl VM {
                     let elems = self.pilha.split_off(self.pilha.len() - n);
                     self.pilha.push(Valor::Array(elems));
                 }
+                "NEW_ARRAY_OF_TYPE" => {
+                    // Aloca array de tamanho N com elementos Nulo.
+                    // O operando de tipo é ignorado: o runtime é dinamicamente tipado.
+                    let tamanho = self
+                        .pilha
+                        .pop()
+                        .ok_or("Pilha vazia para NEW_ARRAY_OF_TYPE")?;
+                    let n = match tamanho {
+                        Valor::Inteiro(i) if i >= 0 => i as usize,
+                        Valor::Inteiro(i) => {
+                            return Err(format!("Tamanho de array negativo: {}", i))
+                        }
+                        _ => return Err("NEW_ARRAY_OF_TYPE requer tamanho inteiro".into()),
+                    };
+                    // Limite defensivo contra .pbc malformado solicitando
+                    // alocação gigante (DoS por memória).
+                    const MAX_ARRAY_SIZE: usize = 1 << 28; // 268M elementos
+                    if n > MAX_ARRAY_SIZE {
+                        return Err(format!(
+                            "Tamanho de array excede o limite máximo: {} > {}",
+                            n, MAX_ARRAY_SIZE
+                        ));
+                    }
+                    self.pilha
+                        .push(Valor::Array(vec![Valor::Nulo; n]));
+                }
                 "GET_INDEX" => {
                     let idx = self.pilha.pop().ok_or("Pilha vazia para GET_INDEX idx")?;
                     let arr = self.pilha.pop().ok_or("Pilha vazia para GET_INDEX arr")?;
@@ -315,7 +341,10 @@ impl VM {
                     let esq = self.pilha.pop().ok_or("Pilha vazia para ADD")?;
                     match (esq, dir) {
                         (Valor::Inteiro(a), Valor::Inteiro(b)) => {
-                            self.pilha.push(Valor::Inteiro(a + b))
+                            let v = a
+                                .checked_add(b)
+                                .ok_or("Overflow em ADD de inteiros")?;
+                            self.pilha.push(Valor::Inteiro(v))
                         }
                         (Valor::Decimal(a), Valor::Decimal(b)) => {
                             self.pilha.push(Valor::Decimal(a + b))
@@ -365,7 +394,10 @@ impl VM {
                     let esq = self.pilha.pop().ok_or("Pilha vazia para SUB")?;
                     match (esq, dir) {
                         (Valor::Inteiro(a), Valor::Inteiro(b)) => {
-                            self.pilha.push(Valor::Inteiro(a - b))
+                            let v = a
+                                .checked_sub(b)
+                                .ok_or("Overflow em SUB de inteiros")?;
+                            self.pilha.push(Valor::Inteiro(v))
                         }
                         (Valor::Decimal(a), Valor::Decimal(b)) => {
                             self.pilha.push(Valor::Decimal(a - b))
@@ -400,7 +432,10 @@ impl VM {
                     let esq = self.pilha.pop().ok_or("Pilha vazia para MUL")?;
                     match (esq, dir) {
                         (Valor::Inteiro(a), Valor::Inteiro(b)) => {
-                            self.pilha.push(Valor::Inteiro(a * b))
+                            let v = a
+                                .checked_mul(b)
+                                .ok_or("Overflow em MUL de inteiros")?;
+                            self.pilha.push(Valor::Inteiro(v))
                         }
                         (Valor::Decimal(a), Valor::Decimal(b)) => {
                             self.pilha.push(Valor::Decimal(a * b))
@@ -438,7 +473,10 @@ impl VM {
                             if b == 0 {
                                 return Err("Divisão por zero".to_string());
                             }
-                            self.pilha.push(Valor::Inteiro(a / b));
+                            let v = a
+                                .checked_div(b)
+                                .ok_or("Overflow em DIV de inteiros")?;
+                            self.pilha.push(Valor::Inteiro(v));
                         }
                         (Valor::Decimal(a), Valor::Decimal(b)) => {
                             if b.is_zero() {
@@ -505,7 +543,10 @@ impl VM {
                             if b == 0 {
                                 return Err("Módulo por zero".to_string());
                             }
-                            self.pilha.push(Valor::Inteiro(a % b));
+                            let v = a
+                                .checked_rem(b)
+                                .ok_or("Overflow em MOD de inteiros")?;
+                            self.pilha.push(Valor::Inteiro(v));
                         }
                         _ => return Err("Tipos incompatíveis para MOD".to_string()),
                     }
@@ -514,7 +555,12 @@ impl VM {
                     //Negação numérica
                     let val = self.pilha.pop().ok_or("Pilha vazia para NEGATE_INT")?;
                     match val {
-                        Valor::Inteiro(n) => self.pilha.push(Valor::Inteiro(-n)),
+                        Valor::Inteiro(n) => {
+                            let v = n
+                                .checked_neg()
+                                .ok_or("Overflow em NEGATE_INT")?;
+                            self.pilha.push(Valor::Inteiro(v))
+                        }
                         Valor::Decimal(d) => self.pilha.push(Valor::Decimal(-d)),
                         Valor::Flutuante(x) => self.pilha.push(Valor::Flutuante(-x)),
                         Valor::Duplo(x) => self.pilha.push(Valor::Duplo(-x)),
@@ -698,6 +744,13 @@ impl VM {
                         .ok_or("JUMP requer um endereço de destino")?
                         .parse()
                         .map_err(|e| format!("Endereço inválido para JUMP: {}", e))?;
+                    if target_ip > self.bytecode.len() {
+                        return Err(format!(
+                            "Salto fora dos limites: {} >= {}",
+                            target_ip,
+                            self.bytecode.len()
+                        ));
+                    }
                     self.ip = target_ip;
                 }
                 "JUMP_IF_FALSE" => {
@@ -707,6 +760,13 @@ impl VM {
                         .ok_or("JUMP_IF_FALSE requer um endereço de destino")?
                         .parse()
                         .map_err(|e| format!("Endereço inválido para JUMP_IF_FALSE: {}", e))?;
+                    if target_ip > self.bytecode.len() {
+                        return Err(format!(
+                            "Salto fora dos limites: {} >= {}",
+                            target_ip,
+                            self.bytecode.len()
+                        ));
+                    }
                     let condicao = self.pilha.pop().ok_or("Pilha vazia para JUMP_IF_FALSE")?;
                     match condicao {
                         Valor::Booleano(b) => {
@@ -1092,12 +1152,17 @@ impl VM {
                         .get(1)
                         .ok_or("CALL_STATIC_NATIVE requer chave")?
                         .to_string();
-                    let nargs = partes.get(2).unwrap_or(&"0").parse::<usize>().unwrap_or(0);
-                    let args = if nargs > 0 && self.pilha.len() >= nargs {
-                        self.pilha.split_off(self.pilha.len() - nargs)
-                    } else {
-                        Vec::new()
-                    };
+                    let nargs: usize = partes
+                        .get(2)
+                        .ok_or("CALL_STATIC_NATIVE requer nargs")?
+                        .parse()
+                        .map_err(|_| "nargs inválido em CALL_STATIC_NATIVE".to_string())?;
+                    if self.pilha.len() < nargs {
+                        return Err(
+                            "Pilha insuficiente para argumentos de CALL_STATIC_NATIVE".to_string(),
+                        );
+                    }
+                    let args = self.pilha.split_off(self.pilha.len() - nargs);
                     let resultado = despachar_nativo_estatico(&chave, args)?;
                     self.pilha.push(resultado);
                 }
@@ -1105,12 +1170,15 @@ impl VM {
                 // CALL_NATIVE <chave> <nargs>   (método de instância — 'este' já foi empilhado)
                 "CALL_NATIVE" => {
                     let chave = partes.get(1).ok_or("CALL_NATIVE requer chave")?.to_string();
-                    let nargs = partes.get(2).unwrap_or(&"0").parse::<usize>().unwrap_or(0);
-                    let args = if nargs > 0 && self.pilha.len() >= nargs {
-                        self.pilha.split_off(self.pilha.len() - nargs)
-                    } else {
-                        Vec::new()
-                    };
+                    let nargs: usize = partes
+                        .get(2)
+                        .ok_or("CALL_NATIVE requer nargs")?
+                        .parse()
+                        .map_err(|_| "nargs inválido em CALL_NATIVE".to_string())?;
+                    if self.pilha.len() < nargs {
+                        return Err("Pilha insuficiente para argumentos de CALL_NATIVE".to_string());
+                    }
+                    let args = self.pilha.split_off(self.pilha.len() - nargs);
                     let este_val = self
                         .pilha
                         .pop()
@@ -1129,12 +1197,17 @@ impl VM {
                         .get(1)
                         .ok_or("CALL_*_NATIVE_ASYNC requer chave")?
                         .to_string();
-                    let nargs = partes.get(2).unwrap_or(&"0").parse::<usize>().unwrap_or(0);
-                    let args = if nargs > 0 && self.pilha.len() >= nargs {
-                        self.pilha.split_off(self.pilha.len() - nargs)
-                    } else {
-                        Vec::new()
-                    };
+                    let nargs: usize = partes
+                        .get(2)
+                        .ok_or("CALL_*_NATIVE_ASYNC requer nargs")?
+                        .parse()
+                        .map_err(|_| "nargs inválido em CALL_*_NATIVE_ASYNC".to_string())?;
+                    if self.pilha.len() < nargs {
+                        return Err(
+                            "Pilha insuficiente para argumentos de CALL_*_NATIVE_ASYNC".to_string(),
+                        );
+                    }
+                    let args = self.pilha.split_off(self.pilha.len() - nargs);
                     let este = if eh_instancia {
                         Some(self.pilha.pop().ok_or("Pilha vazia para 'este' em CALL_NATIVE_ASYNC")?)
                     } else {
@@ -1295,7 +1368,7 @@ impl VM {
                     }
                 };
                 let tamanho: usize = tamanho_str.parse().unwrap_or(0);
-                i += tamanho + 1;
+                i = i.saturating_add(tamanho).saturating_add(1);
             } else {
                 codigo_global.push(instrucao.clone());
                 i += 1;
@@ -1353,7 +1426,7 @@ impl VM {
                         partes.get(4).unwrap_or(&"0")
                     };
                     let tamanho: usize = tamanho_str.parse().unwrap_or(0);
-                    self.ip += tamanho;
+                    self.ip = self.ip.saturating_add(tamanho);
                 }
                 "LOAD_CONST_STR" | "LOAD_CONST_INT" | "LOAD_CONST_BOOL" | "LOAD_CONST_NULL"
                 | "LOAD_CONST_FLOAT" | "LOAD_CONST_DOUBLE" => {

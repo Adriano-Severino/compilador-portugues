@@ -335,12 +335,31 @@ pub enum Comando {
         Option<Box<Comando>>,
         Box<Comando>,
     ),
+    ParaCada {
+        nome: String,
+        colecao: Box<Expressao>,
+        corpo: Box<Comando>,
+    },
     Bloco(Vec<Comando>),
     Retorne(Option<Expressao>),
     Expressao(Expressao),
     CriarObjeto(String, String, Vec<Expressao>),
     ChamarMetodo(Box<Expressao>, String, Vec<Expressao>),
     AcessarCampo(String, String),
+    Tente {
+        bloco: Vec<Comando>,
+        captures: Vec<CaptureExcecao>,
+        bloco_finalmente: Option<Vec<Comando>>,
+    },
+    Falhe(Option<Expressao>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CaptureExcecao {
+    pub tipo: Option<Tipo>,
+    pub nome: Option<String>,
+    pub filtro: Option<Expressao>,
+    pub corpo: Vec<Comando>,
 }
 
 /* ========================================================================== */
@@ -414,4 +433,16 @@ pub enum OperadorComparacao {
 pub enum OperadorLogico {
     E,
     Ou,
+}
+
+/// Valida a chave de despacho de métodos nativos (`[Nativo("...")]`).
+/// A chave é serializada como operando de instruções de bytecode e como
+/// campo de linhas de manifesto `.pbl`; espaços ou caracteres de controle
+/// permitiriam injetar instruções/linhas arbitrárias no arquivo gerado.
+pub fn chave_nativa_valida(chave: &str) -> bool {
+    !chave.is_empty()
+        && chave.len() <= 256
+        && !chave
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control())
 }
